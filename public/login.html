@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Staff Login | Diner's Cafe</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#d4a373">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .auth-wrapper {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: radial-gradient(circle at top right, #2c1a10 0%, #0d0805 100%);
+    }
+    .auth-card {
+      width: 100%;
+      max-width: 440px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 36px 32px;
+      box-shadow: var(--shadow-lg);
+    }
+    .auth-header {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+    .auth-logo {
+      width: 54px;
+      height: 54px;
+      background: linear-gradient(135deg, var(--brand-primary), var(--brand-accent));
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.8rem;
+      margin: 0 auto 16px auto;
+    }
+    .quick-roles {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+    .role-btn {
+      padding: 10px 8px;
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+      font-weight: 700;
+      cursor: pointer;
+      text-align: center;
+      transition: all var(--transition-fast);
+    }
+    .role-btn:hover {
+      border-color: var(--brand-primary);
+      color: var(--brand-crema);
+      background: #2a1e15;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="auth-wrapper">
+    <div class="auth-card">
+      <div class="auth-header">
+        <div class="auth-logo">☕</div>
+        <h2>Staff Portal Login</h2>
+        <p style="color: var(--text-muted); font-size: 0.88rem; margin-top: 4px;">Diner's Cafe Management System</p>
+      </div>
+
+      <div style="margin-bottom: 12px;">
+        <label class="form-label" style="font-size: 0.78rem; text-transform: uppercase;">Quick 1-Click Demo Login:</label>
+        <div class="quick-roles">
+          <button type="button" class="role-btn" onclick="fillCredentials('admin@dinerscafe.ph', 'password123')">
+            👑 Admin
+          </button>
+          <button type="button" class="role-btn" onclick="fillCredentials('staff@dinerscafe.ph', 'password123')">
+            ☕ Barista
+          </button>
+          <button type="button" class="role-btn" onclick="fillCredentials('rider1@dinerscafe.ph', 'password123')">
+            🛵 Rider
+          </button>
+        </div>
+      </div>
+
+      <form id="login-form">
+        <div class="form-group">
+          <label class="form-label" for="email">Staff Email Address</label>
+          <input type="email" id="email" class="form-control" placeholder="name@dinerscafe.ph" required value="admin@dinerscafe.ph">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="password">Password</label>
+          <input type="password" id="password" class="form-control" placeholder="••••••••" required value="password123">
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block" style="margin-top: 10px;" id="login-btn">
+          Sign In to Portal
+        </button>
+      </form>
+
+      <div style="margin-top: 24px; text-align: center; font-size: 0.85rem; color: var(--text-muted);">
+        Looking for the customer chatbot? <a href="simulator.html">Test Messenger Bot &rarr;</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    function fillCredentials(email, pass) {
+      document.getElementById('email').value = email;
+      document.getElementById('password').value = pass;
+    }
+
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      const btn = document.getElementById('login-btn');
+
+      btn.disabled = true;
+      btn.innerText = 'Signing In...';
+
+      try {
+        const res = await API.post('/auth/login', { email, password });
+        if (res && res.success) {
+          API.setToken(res.token);
+          API.setUser(res.user);
+          API.toast(`Welcome back, ${res.user.name}!`, 'success');
+
+          setTimeout(() => {
+            if (res.user.role === 'rider') {
+              window.location.href = '/rider.html';
+            } else {
+              window.location.href = '/dashboard.html';
+            }
+          }, 600);
+        }
+      } catch (err) {
+        btn.disabled = false;
+        btn.innerText = 'Sign In to Portal';
+      }
+    });
+  </script>
+</body>
+</html>

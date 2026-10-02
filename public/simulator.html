@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Messenger Chatbot Simulator | Diner's Cafe</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#d4a373">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/simulator.css">
+</head>
+<body>
+
+  <div class="simulator-layout">
+    <!-- Mobile Device Frame -->
+    <div class="phone-frame">
+      <div class="phone-notch"></div>
+
+      <!-- Messenger Chat Header -->
+      <div class="messenger-header">
+        <div class="messenger-avatar-wrap">
+          <div class="messenger-avatar">☕</div>
+          <div class="online-dot"></div>
+        </div>
+        <div class="messenger-info" style="flex: 1;">
+          <h3>Diner's Cafe <span class="verified-icon">☑️</span></h3>
+          <span id="sim-bot-status" style="color: var(--brand-crema); font-size: 0.72rem;">🟢 Active now &bull; AI Barista Bot</span>
+        </div>
+        <a href="dashboard.html" title="Open Admin Dashboard" style="font-size: 1.2rem; text-decoration: none;">
+          🛡️
+        </a>
+      </div>
+
+      <!-- Chat Messages Scroll Container -->
+      <div class="messenger-body" id="chat-messages">
+        <!-- Injected via JS -->
+      </div>
+
+      <!-- Quick Replies Horizontal Container -->
+      <div class="quick-replies-wrap" id="quick-replies-container" style="display: none;">
+        <!-- Injected via JS -->
+      </div>
+
+      <!-- Input Bar -->
+      <form class="messenger-input-bar" id="chat-form" onsubmit="handleChatSubmit(event)">
+        <input type="text" id="chat-input-text" class="chat-input" placeholder="Type a message or order..." autocomplete="off">
+        <button type="submit" class="send-btn" title="Send Message">➤</button>
+      </form>
+    </div>
+
+    <!-- Simulator Control & Testing Harness Side Panel -->
+    <aside class="simulator-panel">
+      <div style="display: flex; align-items: center; justify-content: space-between;">
+        <h2 style="font-size: 1.25rem;">Chatbot Test Harness</h2>
+        <span class="badge badge-gcash">Simulator Mode</span>
+      </div>
+      <p style="font-size: 0.85rem; color: var(--text-muted);">
+        Test conversational order flows, NLP intents, GCash amount validations, and post-delivery feedback prompts in real-time.
+      </p>
+
+      <div>
+        <label class="form-label" style="font-size: 0.8rem; text-transform: uppercase;">Quick Test Actions:</label>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <button class="btn btn-secondary btn-sm" onclick="sendSimulatedPayload('GET_STARTED')">
+            👋 Start Conversation (Hi/Start)
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="sendSimulatedPayload('CATEGORY_coffee')">
+            ☕ Browse Coffee Category
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="sendSimulatedPayload('CATEGORY_meals')">
+            🍳 Browse Meals Category
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="sendSimulatedPayload('VIEW_CART')">
+            🛒 View Active Cart & Checkout
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="sendSimulatedPayload('TRACK_LATEST_ORDER')">
+            🛵 Track Active Order Status
+          </button>
+        </div>
+      </div>
+
+      <div style="padding-top: 12px; border-top: 1px solid var(--border-subtle);">
+        <label class="form-label" style="font-size: 0.8rem; text-transform: uppercase;">GCash Validation Test Shortcuts:</label>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-success btn-sm" style="flex: 1;" onclick="quickPayGCash(true)">
+            ✅ Pay Exact Total
+          </button>
+          <button class="btn btn-danger btn-sm" style="flex: 1;" onclick="quickPayGCash(false)">
+            ⚠️ Underpay ₱100 (Mismatch)
+          </button>
+        </div>
+      </div>
+
+      <div style="padding-top: 12px; border-top: 1px solid var(--border-subtle);">
+        <label class="form-label" style="font-size: 0.8rem; text-transform: uppercase;">FR11 Post-Delivery Rating Trigger:</label>
+        <button class="btn btn-primary btn-sm btn-block" onclick="triggerDeliveryCompletedPrompt()">
+          🌟 Trigger Post-Delivery 5-Star Prompt
+        </button>
+      </div>
+
+      <div style="display: flex; gap: 10px; margin-top: auto;">
+        <button class="btn btn-outline btn-sm btn-block" onclick="resetChat()">
+          🔄 Reset Chat Session
+        </button>
+        <a href="dashboard.html" class="btn btn-primary btn-sm btn-block">
+          🛡️ Dashboard
+        </a>
+      </div>
+    </aside>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/simulator.js"></script>
+</body>
+</html>

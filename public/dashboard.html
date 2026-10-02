@@ -1,0 +1,1032 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Operations Dashboard | Diner's Cafe</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#d4a373">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/dashboard.css">
+</head>
+<body>
+
+  <div class="app-container">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand-header">
+        <div class="brand-icon">☕</div>
+        <div class="brand-text">
+          <h2>Diner's Cafe</h2>
+          <span>Operations Command</span>
+        </div>
+      </div>
+
+      <ul class="nav-menu">
+        <li class="nav-item active" data-tab="overview">
+          <button><span style="font-size: 1.2rem;">📊</span> <span>Overview</span></button>
+        </li>
+        <li class="nav-item" data-tab="orders">
+          <button>
+            <span style="font-size: 1.2rem;">📋</span> <span>Order Operations</span>
+            <span class="nav-badge" id="nav-pending-count">0</span>
+          </button>
+        </li>
+        <li class="nav-item" data-tab="menu">
+          <button><span style="font-size: 1.2rem;">☕</span> <span>Menu Catalog</span></button>
+        </li>
+        <li class="nav-item" data-tab="inventory">
+          <button><span style="font-size: 1.2rem;">📦</span> <span>Inventory & Stock</span></button>
+        </li>
+        <li class="nav-item" data-tab="delivery">
+          <button><span style="font-size: 1.2rem;">🛵</span> <span>Smart Delivery</span></button>
+        </li>
+        <li class="nav-item" data-tab="feedback">
+          <button><span style="font-size: 1.2rem;">⭐</span> <span>Feedback & Ratings</span></button>
+        </li>
+        <li class="nav-item" data-tab="reports">
+          <button><span style="font-size: 1.2rem;">📈</span> <span>Reports & Analytics</span></button>
+        </li>
+        <li class="nav-item" data-tab="chatbot">
+          <button><span style="font-size: 1.2rem;">💬</span> <span>AI Chatbot Logs</span></button>
+        </li>
+        <li class="nav-item" data-tab="settings">
+          <button><span style="font-size: 1.2rem;">⚙️</span> <span>Settings & Accounts</span></button>
+        </li>
+      </ul>
+
+      <div class="sidebar-footer">
+        <div class="user-info">
+          <div class="user-avatar" id="user-avatar-initials">AD</div>
+          <div>
+            <div style="font-size: 0.88rem; font-weight: 700;" id="user-display-name">Admin User</div>
+            <div style="font-size: 0.72rem; color: var(--brand-primary); text-transform: uppercase;" id="user-display-role">Administrator</div>
+          </div>
+        </div>
+        <button onclick="API.logout()" title="Logout" style="background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;">
+          🚪
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content Wrapper -->
+    <div class="main-wrapper">
+      <!-- Topbar -->
+      <header class="topbar">
+        <div class="topbar-title">
+          <h1 style="font-size: 1.35rem;" id="page-title">Operational Overview</h1>
+          <div class="live-indicator">
+            <span class="live-dot"></span>
+            <span>Live Stream Active</span>
+          </div>
+        </div>
+
+        <div class="topbar-actions">
+          <button id="btn-chatbot-toggle" class="btn btn-success btn-sm" onclick="handleChatbotToggleClick()" style="font-weight: 700;">
+            🟢 AI Chatbot: Active (ON)
+          </button>
+          <a href="simulator.html" target="_blank" class="btn btn-secondary btn-sm">
+            💬 Open Messenger Bot Simulator
+          </a>
+          <button class="btn btn-primary btn-sm" onclick="openNewOrderModal()">
+            ➕ Manual POS Order
+          </button>
+        </div>
+      </header>
+
+      <!-- Main Body Tabs Container -->
+      <main class="content-body">
+
+        <!-- Global Owner Notification Banner for Pending Barista Void Requests -->
+        <div id="owner-void-alert-container" style="display: none; margin-bottom: 20px;"></div>
+
+        <!-- ================================================================= -->
+        <!-- TAB 1: OVERVIEW -->
+        <!-- ================================================================= -->
+        <section id="tab-overview" class="tab-pane active">
+          <!-- AI Chatbot Master Control Banner -->
+          <div class="card" style="margin-bottom: 24px; background: linear-gradient(135deg, rgba(30, 20, 15, 0.95), rgba(45, 30, 20, 0.95)); border: 2px solid var(--brand-primary); padding: 20px 24px; border-radius: var(--radius-lg); box-shadow: 0 6px 20px rgba(0,0,0,0.3);">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
+              <div style="display: flex; align-items: center; gap: 16px;">
+                <div style="font-size: 2.2rem; background: rgba(212, 163, 115, 0.15); padding: 12px; border-radius: 12px;">🤖</div>
+                <div>
+                  <div style="display: flex; align-items: center; gap: 10px;">
+                    <h3 style="font-size: 1.2rem; margin: 0; color: #fff;">AI Chatbot Ordering Assistant</h3>
+                    <span id="overview-chatbot-badge" class="badge badge-success" style="font-size: 0.82rem; padding: 4px 12px; font-weight: 700;">🟢 ACTIVE (ON)</span>
+                  </div>
+                  <p style="margin: 6px 0 0 0; font-size: 0.88rem; color: var(--text-secondary);" id="overview-chatbot-desc">
+                    Auto-replying to customer messages, menus, GCash verification &amp; order taking on Facebook Messenger.
+                  </p>
+                </div>
+              </div>
+              <div>
+                <button id="btn-overview-chatbot-toggle" class="btn btn-danger" onclick="handleChatbotToggleClick()" style="font-weight: 700; padding: 10px 22px; font-size: 0.95rem; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 14px rgba(239, 68, 68, 0.4);">
+                  ⏸️ Turn Off AI Chatbot
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- KPI Summary Cards -->
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-icon" style="color: var(--brand-gold);">💰</div>
+              <div class="kpi-info">
+                <h3>Today's Gross Sales</h3>
+                <div class="kpi-value" id="kpi-sales-today">₱0.00</div>
+              </div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-icon" style="color: var(--status-warning);">⏳</div>
+              <div class="kpi-info">
+                <h3>Pending Orders</h3>
+                <div class="kpi-value" id="kpi-pending-orders">0</div>
+              </div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-icon" style="color: var(--brand-accent);">🛵</div>
+              <div class="kpi-info">
+                <h3>Active Deliveries</h3>
+                <div class="kpi-value" id="kpi-active-deliveries">0</div>
+              </div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-icon" style="color: var(--status-danger);">⚠️</div>
+              <div class="kpi-info">
+                <h3>Payment Mismatches</h3>
+                <div class="kpi-value" id="kpi-payment-mismatches">0</div>
+              </div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-icon" style="color: var(--brand-primary);">⭐</div>
+              <div class="kpi-info">
+                <h3>Customer Rating</h3>
+                <div class="kpi-value" id="kpi-avg-rating">5.0 / 5.0</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quick Action Panels -->
+          <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 24px;">
+            <div class="card">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+                <h3 style="font-size: 1.15rem;">Recent Incoming Orders</h3>
+                <button class="btn btn-secondary btn-sm" onclick="switchTab('orders')">View All &rarr;</button>
+              </div>
+              <div class="table-container" style="margin-top: 0;">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Order #</th>
+                      <th>Customer</th>
+                      <th>Type</th>
+                      <th>Total</th>
+                      <th>Payment</th>
+                      <th>Status</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="overview-orders-tbody">
+                    <!-- Populated via JS -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="card">
+              <h3 style="font-size: 1.15rem; margin-bottom: 16px;">System Operations Status</h3>
+              <div style="display: flex; flex-direction: column; gap: 14px;">
+                <div style="padding: 12px; background: var(--bg-surface-elevated); border-radius: var(--radius-sm); border-left: 3px solid var(--status-success);">
+                  <div style="font-size: 0.85rem; font-weight: 700;">Facebook Webhook Engine</div>
+                  <div style="font-size: 0.78rem; color: var(--text-muted);">Active & Ready (/webhook)</div>
+                </div>
+                <div style="padding: 12px; background: var(--bg-surface-elevated); border-radius: var(--radius-sm); border-left: 3px solid var(--brand-primary);">
+                  <div style="font-size: 0.85rem; font-weight: 700;">Delivery Fare Engine (FR6)</div>
+                  <div style="font-size: 0.78rem; color: var(--text-muted);">0-3 km radius &bull; Motorcycle / Bicycle</div>
+                </div>
+                <div style="padding: 12px; background: var(--bg-surface-elevated); border-radius: var(--radius-sm); border-left: 3px solid var(--brand-gold);">
+                  <div style="font-size: 0.85rem; font-weight: 700;">GCash Amount Validator</div>
+                  <div style="font-size: 0.78rem; color: var(--text-muted);">Real-time difference flagging enabled</div>
+                </div>
+                <div style="padding: 12px; background: var(--bg-surface-elevated); border-radius: var(--radius-sm); border-left: 3px solid var(--status-info);">
+                  <div style="font-size: 0.85rem; font-weight: 700;">Post-Delivery Feedback (FR11)</div>
+                  <div style="font-size: 0.78rem; color: var(--text-muted);">Automated Messenger rating prompt</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================================================================= -->
+        <!-- TAB 2: ORDERS & KANBAN -->
+        <!-- ================================================================= -->
+        <section id="tab-orders" class="tab-pane">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px;">
+            <div style="display: flex; gap: 10px;">
+              <button class="btn btn-primary btn-sm" id="view-kanban-btn" onclick="toggleOrderView('kanban')">Kanban View</button>
+              <button class="btn btn-secondary btn-sm" id="view-table-btn" onclick="toggleOrderView('table')">Table View</button>
+            </div>
+            <div style="display: flex; gap: 10px;">
+              <select class="form-control" style="width: auto; padding: 6px 12px; font-size: 0.85rem;" id="order-filter-type" onchange="loadOrders()">
+                <option value="">All Order Types</option>
+                <option value="delivery">Delivery</option>
+                <option value="pickup">Store Pickup</option>
+              </select>
+              <button class="btn btn-secondary btn-sm" onclick="loadOrders()">🔄 Refresh</button>
+            </div>
+          </div>
+
+          <!-- Kanban Board -->
+          <div id="order-kanban-view" class="kanban-board">
+            <!-- Column 1: Pending -->
+            <div class="kanban-column">
+              <div class="kanban-header" style="border-top: 3px solid var(--status-warning);">
+                <span>⏳ Pending Approval</span>
+                <span class="badge badge-pending" id="kanban-count-pending">0</span>
+              </div>
+              <div class="kanban-cards" id="kanban-pending"></div>
+            </div>
+
+            <!-- Column 2: Preparing -->
+            <div class="kanban-column">
+              <div class="kanban-header" style="border-top: 3px solid var(--status-info);">
+                <span>🍳 In Kitchen Preparation</span>
+                <span class="badge badge-preparing" id="kanban-count-preparing">0</span>
+              </div>
+              <div class="kanban-cards" id="kanban-preparing"></div>
+            </div>
+
+            <!-- Column 3: Dispatched -->
+            <div class="kanban-column">
+              <div class="kanban-header" style="border-top: 3px solid var(--brand-accent);">
+                <span>🛵 Dispatched / On Delivery</span>
+                <span class="badge badge-dispatched" id="kanban-count-dispatched">0</span>
+              </div>
+              <div class="kanban-cards" id="kanban-dispatched"></div>
+            </div>
+
+            <!-- Column 4: Delivered -->
+            <div class="kanban-column">
+              <div class="kanban-header" style="border-top: 3px solid var(--status-success);">
+                <span>✅ Delivered / Completed</span>
+                <span class="badge badge-delivered" id="kanban-count-delivered">0</span>
+              </div>
+              <div class="kanban-cards" id="kanban-delivered"></div>
+            </div>
+
+            <!-- Column 5: Cancelled / Voided -->
+            <div class="kanban-column">
+              <div class="kanban-header" style="border-top: 3px solid var(--status-danger);">
+                <span>❌ Cancelled / Voided</span>
+                <span class="badge badge-danger" id="kanban-count-cancelled">0</span>
+              </div>
+              <div class="kanban-cards" id="kanban-cancelled"></div>
+            </div>
+          </div>
+
+          <!-- Table View (Hidden by default) -->
+          <div id="order-table-view" class="table-container" style="display: none;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Order #</th>
+                  <th>Date & Time</th>
+                  <th>Customer</th>
+                  <th>Type</th>
+                  <th>Items</th>
+                  <th>Total</th>
+                  <th>Payment</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="orders-table-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- ================================================================= -->
+        <!-- TAB 3: MENU MANAGEMENT -->
+        <!-- ================================================================= -->
+        <section id="tab-menu" class="tab-pane">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px;">
+            <div style="display: flex; gap: 8px; overflow-x: auto;" id="menu-category-pills">
+              <button class="btn btn-primary btn-sm" onclick="filterMenuCategory('all')">All Items</button>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="openAddMenuItemModal()">➕ Add Menu Item</button>
+          </div>
+
+          <div class="menu-grid" id="menu-grid-container">
+            <!-- Rendered via JS -->
+          </div>
+        </section>
+
+        <!-- ================================================================= -->
+        <!-- TAB 4: INVENTORY & STOCK -->
+        <!-- ================================================================= -->
+        <section id="tab-inventory" class="tab-pane">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
+            <div>
+              <h2>Inventory Control & Low-Stock Alerts</h2>
+              <p style="color: var(--text-muted); font-size: 0.88rem;">Automated stock deduction upon confirmed customer orders</p>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="loadInventory()">🔄 Refresh Stock</button>
+          </div>
+
+          <div class="table-container">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Item Name</th>
+                  <th>Category</th>
+                  <th>Current Stock</th>
+                  <th>Alert Threshold</th>
+                  <th>Status</th>
+                  <th>Last Restocked</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="inventory-tbody"></tbody>
+            </table>
+          </div>
+
+          <!-- Inventory Audit Logs -->
+          <div class="card" style="margin-top: 30px;">
+            <h3 style="font-size: 1.1rem; margin-bottom: 16px;">Stock Audit Logs (Restocks & Order Deductions)</h3>
+            <div class="table-container" style="margin-top: 0; max-height: 320px; overflow-y: auto;">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Menu Item</th>
+                    <th>Change</th>
+                    <th>Reason</th>
+                    <th>Reference</th>
+                    <th>Logged By</th>
+                  </tr>
+                </thead>
+                <tbody id="inventory-logs-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================================================================= -->
+        <!-- TAB 5: SMART DELIVERY & FARE ENGINE -->
+        <!-- ================================================================= -->
+        <section id="tab-delivery" class="tab-pane">
+          <div class="delivery-dispatcher-grid">
+            <!-- Left: Interactive Fare Engine (FR6) -->
+            <div class="fare-calc-box">
+              <h2 style="font-size: 1.3rem; margin-bottom: 6px;">Smart Delivery Fare Calculator (FR6)</h2>
+              <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 20px;">Internal cafe radius: Strictly 0.0 to 3.0 km</p>
+
+              <form id="fare-calc-form" onsubmit="event.preventDefault(); testFareCalculation();">
+                <div class="form-group">
+                  <label class="form-label">Delivery Distance (0.0 to 3.0 km)</label>
+                  <input type="number" id="fare-dist-input" class="form-control" step="0.1" min="0" max="3.0" value="1.5" required>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;" class="form-group">
+                  <div>
+                    <label class="form-label">Vehicle Type</label>
+                    <select id="fare-vehicle-input" class="form-control">
+                      <option value="motorcycle">Motorcycle (Motorized)</option>
+                      <option value="bicycle">Bicycle (Non-Motorized)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="form-label">Weather Condition</label>
+                    <select id="fare-weather-input" class="form-control">
+                      <option value="sunny">0% - Sunny / Normal</option>
+                      <option value="light_rain">15% - Light Rain / Drizzle</option>
+                      <option value="heavy_rain">35% - Heavy Rain / Storm</option>
+                      <option value="extreme_heat">15% - Extreme Heat (11AM-3PM)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-block">
+                  ⚡ Compute Exact Fare Breakdown
+                </button>
+              </form>
+
+              <!-- Live Fare Breakdown Output Card -->
+              <div id="fare-calc-output" style="margin-top: 24px; padding: 18px; background: var(--bg-surface); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+                <h4 style="font-size: 0.95rem; margin-bottom: 12px; color: var(--brand-crema);">Computation Formula Breakdown:</h4>
+                <div class="fare-breakdown-row"><span>Base Fare (First 1.0 km):</span> <strong id="out-base-fare">₱49.00</strong></div>
+                <div class="fare-breakdown-row"><span>Distance Charge (per 0.5 km):</span> <strong id="out-dist-charge">₱12.00</strong></div>
+                <div class="fare-breakdown-row"><span>Fuel Cost (Motorcycle only):</span> <strong id="out-fuel-cost">₱2.83</strong></div>
+                <div class="fare-breakdown-row"><span>Maintenance Allowance:</span> <strong id="out-maint-cost">₱7.50</strong></div>
+                <div class="fare-breakdown-row"><span>Subtotal:</span> <strong id="out-subtotal">₱71.33</strong></div>
+                <div class="fare-breakdown-row"><span>Weather Surcharge Rate:</span> <strong id="out-surcharge">0% (+₱0.00)</strong></div>
+                <div class="fare-total-row"><span>FINAL FARE (Rounded ₱5):</span> <span id="out-final-fare" style="color: var(--brand-gold);">₱70.00</span></div>
+              </div>
+            </div>
+
+            <!-- Right: Active Deliveries & Rider Assignments -->
+            <div class="card">
+              <h2 style="font-size: 1.3rem; margin-bottom: 16px;">Active Deliveries & Riders</h2>
+              <div class="table-container" style="margin-top: 0; max-height: 480px; overflow-y: auto;">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Order #</th>
+                      <th>Customer</th>
+                      <th>Rider</th>
+                      <th>Dist (km)</th>
+                      <th>Fare</th>
+                      <th>Status</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="deliveries-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================================================================= -->
+        <!-- TAB 6: FEEDBACK & RATINGS (FR11) -->
+        <!-- ================================================================= -->
+        <section id="tab-feedback" class="tab-pane">
+          <div class="feedback-summary-card">
+            <div class="rating-big-score">
+              <h2 id="feedback-avg-display">5.0</h2>
+              <div style="color: var(--brand-gold); font-size: 1.3rem; margin: 4px 0;">⭐⭐⭐⭐⭐</div>
+              <div style="font-size: 0.85rem; color: var(--text-muted);"><span id="feedback-total-count">1</span> Customer Reviews</div>
+              <div style="margin-top: 8px; font-weight: 700; color: var(--status-success);" id="feedback-nps-display">100% Satisfaction Rate</div>
+            </div>
+
+            <div>
+              <div class="star-rating-bar">
+                <span>5 ⭐</span>
+                <div class="progress-track"><div class="progress-fill" id="bar-star-5" style="width: 100%;"></div></div>
+                <span id="count-star-5">1</span>
+              </div>
+              <div class="star-rating-bar">
+                <span>4 ⭐</span>
+                <div class="progress-track"><div class="progress-fill" id="bar-star-4" style="width: 0%;"></div></div>
+                <span id="count-star-4">0</span>
+              </div>
+              <div class="star-rating-bar">
+                <span>3 ⭐</span>
+                <div class="progress-track"><div class="progress-fill" id="bar-star-3" style="width: 0%;"></div></div>
+                <span id="count-star-3">0</span>
+              </div>
+              <div class="star-rating-bar">
+                <span>2 ⭐</span>
+                <div class="progress-track"><div class="progress-fill" id="bar-star-2" style="width: 0%;"></div></div>
+                <span id="count-star-2">0</span>
+              </div>
+              <div class="star-rating-bar">
+                <span>1 ⭐</span>
+                <div class="progress-track"><div class="progress-fill" id="bar-star-1" style="width: 0%;"></div></div>
+                <span id="count-star-1">0</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Customer Review Cards Stream -->
+          <h3 style="font-size: 1.15rem; margin-bottom: 16px;">Customer Reviews & Sentiment</h3>
+          <div id="feedback-cards-container" style="display: flex; flex-direction: column; gap: 14px;">
+            <!-- Rendered via JS -->
+          </div>
+        </section>
+
+        <!-- ================================================================= -->
+        <!-- TAB 7: REPORTS & ANALYTICS (FR10) -->
+        <!-- ================================================================= -->
+        <section id="tab-reports" class="tab-pane">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 14px;">
+            <div>
+              <h2>Sales & Operations Reports (FR10)</h2>
+              <p style="color: var(--text-muted); font-size: 0.88rem;">Detailed transaction summaries and delivery analytics</p>
+            </div>
+            <div style="display: flex; gap: 10px;">
+              <a href="/api/reports/export-csv" class="btn btn-secondary btn-sm" download>
+                📥 Export Orders CSV
+              </a>
+              <button class="btn btn-primary btn-sm" onclick="window.print()">
+                🖨️ Print Report
+              </button>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+            <!-- Payment Method Revenue -->
+            <div class="card">
+              <h3 style="font-size: 1.1rem; margin-bottom: 16px;">Revenue by Payment Method</h3>
+              <div class="table-container" style="margin-top: 0;">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Method</th>
+                      <th>Transactions</th>
+                      <th>Total Revenue</th>
+                      <th>Mismatches</th>
+                    </tr>
+                  </thead>
+                  <tbody id="report-payments-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Top Selling Items -->
+            <div class="card">
+              <h3 style="font-size: 1.1rem; margin-bottom: 16px;">Top Selling Menu Items</h3>
+              <div class="table-container" style="margin-top: 0;">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Item Name</th>
+                      <th>Category</th>
+                      <th>Units Sold</th>
+                      <th>Revenue</th>
+                    </tr>
+                  </thead>
+                  <tbody id="report-top-items-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================================================================= -->
+        <!-- TAB 8: CHATBOT & AI LOGS -->
+        <!-- ================================================================= -->
+        <section id="tab-chatbot" class="tab-pane">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
+            <div>
+              <h2>Facebook Messenger Chatbot & NLP Logs</h2>
+              <p style="color: var(--text-muted); font-size: 0.88rem;">Live audit of customer messages, recognized intents, and bot replies</p>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="loadChatbotLogs()">🔄 Refresh Logs</button>
+          </div>
+
+          <!-- AI Chatbot Operational Status & Toggle Card -->
+          <div class="card" style="margin-bottom: 24px; border-left: 4px solid var(--status-success);" id="chatbot-status-card">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
+              <div>
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+                  <span style="font-size: 1.5rem;">🤖</span>
+                  <h3 style="font-size: 1.15rem; margin: 0;">AI Chatbot System Status: <span id="chatbot-status-badge" class="badge badge-success">ACTIVE (ON)</span></h3>
+                </div>
+                <p style="color: var(--text-secondary); font-size: 0.88rem; margin: 0;" id="chatbot-status-desc">
+                  The AI Chatbot is actively processing customer orders, food menus, payments, and natural language requests via Facebook Messenger.
+                </p>
+                <div style="font-size: 0.76rem; color: var(--text-muted); margin-top: 6px;" id="chatbot-status-time">
+                  Last updated: Active
+                </div>
+              </div>
+              <div>
+                <button id="btn-tab-chatbot-toggle" class="btn btn-danger btn-sm" onclick="handleChatbotToggleClick()" style="font-weight: 700;">
+                  ⏸️ Turn Off AI Chatbot
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div id="chatbot-logs-container">
+            <!-- Rendered via JS -->
+          </div>
+        </section>
+
+        <!-- ================================================================= -->
+        <!-- TAB 8: SETTINGS & ACCOUNT MANAGEMENT -->
+        <!-- ================================================================= -->
+        <section id="tab-settings" class="tab-pane">
+          <!-- Account Management Card -->
+          <div class="card" style="margin-bottom: 24px;">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+              <div>
+                <h3 class="card-title">Staff & User Account Management</h3>
+                <p style="font-size: 0.84rem; color: var(--text-secondary); margin-top: 4px;">
+                  Manage registered admin, barista, and delivery courier accounts, update credentials, and reset passwords.
+                </p>
+              </div>
+              <div>
+                <button class="btn btn-primary btn-sm" onclick="openUserModal()">
+                  ➕ Add New Staff Account
+                </button>
+              </div>
+            </div>
+
+            <!-- Staff Accounts Table -->
+            <div class="table-responsive">
+              <table class="table" id="users-table">
+                <thead>
+                  <tr>
+                    <th>User / Staff</th>
+                    <th>Email Address</th>
+                    <th>Role</th>
+                    <th>Contact</th>
+                    <th>Status</th>
+                    <th>Last Updated</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="users-table-tbody">
+                  <!-- Rendered via JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- System Overview & Database Status -->
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;">
+            <!-- Database Connection Card -->
+            <div class="card">
+              <h3 class="card-title" style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                <span>🗄️</span> <span>Database Configuration</span>
+              </h3>
+              <div style="font-size: 0.88rem; line-height: 1.6; color: var(--text-secondary);">
+                <div><strong>Primary Database:</strong> MySQL (InnoDB, UTF8MB4)</div>
+                <div><strong>Host / Port:</strong> <code>localhost:3306</code></div>
+                <div><strong>Database Name:</strong> <code>diners_cafe_db</code></div>
+                <div><strong>Tables:</strong> <code>admins_staff</code>, <code>orders</code>, <code>menu_items</code>, <code>inventory</code>, <code>deliveries</code>, <code>payments</code>, <code>feedback</code></div>
+                <div style="margin-top: 8px; padding: 8px 12px; background: rgba(34, 197, 94, 0.1); border-left: 3px solid var(--status-success); border-radius: 4px; color: #86efac; font-size: 0.82rem;">
+                  ✅ Resilient dual-engine pool active (MySQL primary with local fallback).
+                </div>
+              </div>
+            </div>
+
+            <!-- Password Security Policy Card -->
+            <div class="card">
+              <h3 class="card-title" style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                <span>🔒</span> <span>Password Security & Hashing</span>
+              </h3>
+              <div style="font-size: 0.88rem; line-height: 1.6; color: var(--text-secondary);">
+                <div><strong>Hashing Algorithm:</strong> Bcrypt / PHP <code>password_hash(PASSWORD_BCRYPT)</code></div>
+                <div><strong>Work Factor / Cost:</strong> 10 rounds salt</div>
+                <div><strong>Minimum Password Length:</strong> 6 characters</div>
+                <div><strong>Backend Endpoints:</strong></div>
+                <div style="font-size: 0.8rem; font-family: monospace; background: var(--bg-surface-elevated); padding: 8px; border-radius: 6px; margin-top: 6px;">
+                  • Node.js: <code>PUT /api/auth/users/:id/password</code><br>
+                  • PHP: <code>POST /backend/php/api/update_password.php</code>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- MODALS -->
+  <!-- ===================================================================== -->
+
+  <!-- 1. Order Details & Receipt Modal -->
+  <div id="modal-order-details" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modal-order-number">Order Details</h3>
+        <button class="modal-close" onclick="closeModal('modal-order-details')">&times;</button>
+      </div>
+      <div id="modal-order-body">
+        <!-- Injected via JS -->
+      </div>
+      <div style="margin-top: 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; border-top: 1px solid var(--border-subtle); padding-top: 18px;">
+        <div id="modal-order-actions-left">
+          <button id="btn-cancel-order-modal" class="btn btn-danger" onclick="triggerCancelCurrentOrder()" style="font-weight: 700; background: #ef4444; color: #ffffff; border: none; padding: 10px 18px; border-radius: 8px; cursor: pointer; box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4); display: inline-flex; align-items: center; gap: 6px;">
+            <span>❌ Cancel / Void Order</span>
+          </button>
+        </div>
+        <div style="display: flex; gap: 12px;">
+          <button class="btn btn-secondary" onclick="closeModal('modal-order-details')" style="padding: 10px 18px;">Close</button>
+          <button class="btn btn-primary" onclick="printReceipt()" style="padding: 10px 18px;">🖨️ Print Receipt</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1.1 Cancel / Void Order Modal (Role-Adaptive: Barista Request vs Owner Direct) -->
+  <div id="modal-cancel-order" class="modal-overlay">
+    <div class="modal-content" style="max-width: 500px;">
+      <div class="modal-header">
+        <h3 id="cancel-order-modal-title" style="color: var(--status-danger);">❌ Cancel / Void Order</h3>
+        <button class="modal-close" onclick="closeModal('modal-cancel-order')">&times;</button>
+      </div>
+
+      <!-- Barista Role Notification Header -->
+      <div id="barista-void-notice" style="display: none; padding: 12px 14px; background: rgba(234, 179, 8, 0.12); border-left: 4px solid var(--status-warning); border-radius: var(--radius-sm); margin-bottom: 16px;">
+        <div style="font-weight: 700; color: #facc15; font-size: 0.9rem;">🛡️ Owner / Manager Permission Required</div>
+        <div style="font-size: 0.82rem; color: var(--text-secondary); margin-top: 4px;">
+          As a Barista, voiding an order requires Owner approval. You can send a live request to the Owner or enter the Manager password for on-site override.
+        </div>
+      </div>
+
+      <form id="cancel-order-form" onsubmit="handleCancelOrderSubmit(event)">
+        <input type="hidden" id="cancel-order-id">
+        <input type="hidden" id="cancel-order-number">
+        
+        <p id="cancel-order-desc" style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5; margin-bottom: 14px;">
+          Select the reason for voiding this order:
+        </p>
+
+        <div class="form-group">
+          <label class="form-label">Cancellation / Void Reason</label>
+          <select id="cancel-reason-select" class="form-control" onchange="handleCancelReasonChange(this.value)" required>
+            <option value="Customer requested cancellation">Customer requested cancellation</option>
+            <option value="Out of stock / ingredients unavailable">Out of stock / ingredients unavailable</option>
+            <option value="Customer changed mind / unreachable">Customer changed mind / unreachable</option>
+            <option value="Delivery address out of service area">Delivery address out of service area</option>
+            <option value="Test or duplicate order">Test or duplicate order</option>
+            <option value="Other">Other (custom reason)</option>
+          </select>
+        </div>
+        <div class="form-group" id="cancel-custom-reason-group" style="display: none;">
+          <label class="form-label">Specify Reason</label>
+          <input type="text" id="cancel-custom-reason-input" class="form-control" placeholder="Enter specific reason...">
+        </div>
+
+        <!-- Barista Manager Password Override Option -->
+        <div id="barista-manager-auth-group" style="display: none; margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--border-subtle);">
+          <label class="form-label" style="display: flex; justify-content: space-between;">
+            <span>🔑 On-Site Manager Password (Optional)</span>
+            <span style="font-size: 0.75rem; color: var(--text-muted);">Leave blank to send request</span>
+          </label>
+          <input type="password" id="cancel-manager-password-input" class="form-control" placeholder="Enter Owner / Manager Password to void immediately">
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-cancel-order')">Back</button>
+          <button type="submit" id="btn-submit-cancel-order" class="btn btn-danger" style="font-weight: 700;">
+            Confirm Cancel / Void
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 2. Assign Rider Modal -->
+  <div id="modal-assign-rider" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Assign Delivery Rider</h3>
+        <button class="modal-close" onclick="closeModal('modal-assign-rider')">&times;</button>
+      </div>
+      <form id="assign-rider-form" onsubmit="handleAssignRiderSubmit(event)">
+        <input type="hidden" id="assign-del-id">
+        
+        <div class="form-group">
+          <label class="form-label">Select Rider</label>
+          <select id="assign-rider-select" class="form-control" required></select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Vehicle Type</label>
+          <select id="assign-vehicle-select" class="form-control">
+            <option value="motorcycle">Motorcycle</option>
+            <option value="bicycle">Bicycle</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Weather Condition</label>
+          <select id="assign-weather-select" class="form-control">
+            <option value="sunny">Sunny / Normal</option>
+            <option value="light_rain">Light Rain (+15%)</option>
+            <option value="heavy_rain">Heavy Rain (+35%)</option>
+            <option value="extreme_heat">Extreme Heat (+15%)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Manual Fare Override (Optional)</label>
+          <input type="number" id="assign-override-fare" class="form-control" placeholder="Leave empty for auto-calculated fare">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Override Reason (if overriding fare)</label>
+          <input type="text" id="assign-override-reason" class="form-control" placeholder="e.g. Weather promo, customer discount">
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-assign-rider')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Dispatch Rider</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 3. Add / Edit Menu Item Modal -->
+  <div id="modal-menu-item" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modal-menu-title">Add Menu Item</h3>
+        <button class="modal-close" onclick="closeModal('modal-menu-item')">&times;</button>
+      </div>
+      <form id="menu-item-form" onsubmit="handleMenuItemSubmit(event)">
+        <input type="hidden" id="menu-item-id">
+
+        <div class="form-group">
+          <label class="form-label">Category</label>
+          <select id="menu-cat-select" class="form-control" required></select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Item Name</label>
+          <input type="text" id="menu-name-input" class="form-control" placeholder="e.g. Signature Spanish Latte" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Description</label>
+          <textarea id="menu-desc-input" class="form-control" rows="2" placeholder="Item ingredients and flavor notes"></textarea>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;" class="form-group">
+          <div>
+            <label class="form-label">Price (₱)</label>
+            <input type="number" id="menu-price-input" class="form-control" step="0.5" required>
+          </div>
+          <div>
+            <label class="form-label">Prep Time (min)</label>
+            <input type="number" id="menu-prep-input" class="form-control" value="10">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Image URL</label>
+          <input type="url" id="menu-img-input" class="form-control" placeholder="https://images.unsplash.com/...">
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;" class="form-group" id="initial-stock-group">
+          <div>
+            <label class="form-label">Initial Stock</label>
+            <input type="number" id="menu-stock-input" class="form-control" value="25">
+          </div>
+          <div>
+            <label class="form-label">Unit</label>
+            <input type="text" id="menu-unit-input" class="form-control" value="servings">
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-menu-item')">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="menu-save-btn">Save Item</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 4. Restock Modal -->
+  <div id="modal-restock" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Restock Inventory</h3>
+        <button class="modal-close" onclick="closeModal('modal-restock')">&times;</button>
+      </div>
+      <form id="restock-form" onsubmit="handleRestockSubmit(event)">
+        <input type="hidden" id="restock-inv-id">
+
+        <div class="form-group">
+          <label class="form-label">Item Name</label>
+          <input type="text" id="restock-item-name" class="form-control" readonly>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Quantity to Add</label>
+          <input type="number" id="restock-qty-input" class="form-control" min="1" value="20" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Restock Notes</label>
+          <input type="text" id="restock-notes-input" class="form-control" placeholder="Supplier delivery, batch PO">
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-restock')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Confirm Restock</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 5. AI Chatbot Turn-Off Confirmation Modal -->
+  <div id="modal-chatbot-confirm" class="modal-overlay">
+    <div class="modal-content" style="max-width: 480px; text-align: center; padding: 32px 24px;">
+      <div style="font-size: 3.5rem; margin-bottom: 12px; animation: bounce 1s infinite alternate;">⚠️</div>
+      <h3 style="font-size: 1.35rem; margin-bottom: 12px; color: var(--status-danger);">Turn Off AI Chatbot?</h3>
+      <p style="color: var(--text-secondary); font-size: 0.92rem; line-height: 1.55; margin-bottom: 24px; text-align: left; background: rgba(239, 68, 68, 0.08); padding: 14px; border-radius: 8px; border-left: 3px solid var(--status-danger);">
+        <strong>Warning:</strong> Are you sure you want to turn off the AI Chatbot?
+        <br><br>
+        • Automated Messenger ordering and AI NLP conversations will be <strong>paused</strong>.
+        <br>
+        • Incoming customers will receive an automated message that the bot is offline and that cafe staff will assist them.
+      </p>
+      <div style="display: flex; gap: 12px; justify-content: center;">
+        <button class="btn btn-secondary" onclick="closeModal('modal-chatbot-confirm')">Cancel (Keep ON)</button>
+        <button class="btn btn-danger" onclick="executeChatbotToggle(false)" style="font-weight: 700;">Yes, Turn Off AI Chatbot</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. Reset / Update Password Modal -->
+  <div id="modal-reset-password" class="modal-overlay">
+    <div class="modal-content" style="max-width: 480px;">
+      <div class="modal-header">
+        <h3 id="reset-password-modal-title">🔑 Update Account Password</h3>
+        <button class="modal-close" onclick="closeModal('modal-reset-password')">&times;</button>
+      </div>
+      <form id="reset-password-form" onsubmit="handleResetPasswordSubmit(event)">
+        <input type="hidden" id="reset-password-user-id">
+
+        <div id="reset-user-summary-box" style="margin-bottom: 18px; padding: 12px 14px; background: var(--bg-surface-elevated); border-radius: var(--radius-sm); border-left: 3px solid var(--brand-primary);">
+          <div style="font-size: 0.82rem; color: var(--text-muted);">Target Account</div>
+          <div style="font-weight: 700; font-size: 1rem; color: #fff; margin-top: 2px;" id="reset-user-display-name">Maria Clara</div>
+          <div style="font-size: 0.82rem; color: var(--brand-primary);" id="reset-user-display-email">staff@dinerscafe.ph</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" style="display: flex; justify-content: space-between;">
+            <span>New Password</span>
+            <span style="font-size: 0.75rem; color: var(--text-muted);">Min. 6 characters</span>
+          </label>
+          <div style="position: relative;">
+            <input type="password" id="reset-new-password" class="form-control" placeholder="Enter new password" required minlength="6" style="padding-right: 42px;" oninput="validatePasswordInputs()">
+            <button type="button" onclick="togglePasswordVisibility('reset-new-password', this)" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 1.1rem; color: var(--text-muted);">👁️</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Confirm New Password</label>
+          <div style="position: relative;">
+            <input type="password" id="reset-confirm-password" class="form-control" placeholder="Confirm new password" required minlength="6" style="padding-right: 42px;" oninput="validatePasswordInputs()">
+            <button type="button" onclick="togglePasswordVisibility('reset-confirm-password', this)" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 1.1rem; color: var(--text-muted);">👁️</button>
+          </div>
+          <div id="password-match-feedback" style="font-size: 0.78rem; margin-top: 6px; display: none;"></div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-reset-password')">Cancel</button>
+          <button type="submit" id="btn-submit-reset-password" class="btn btn-primary" style="font-weight: 700;">
+            💾 Save & Update Password
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 7. Create / Edit Staff Account Modal -->
+  <div id="modal-user-form" class="modal-overlay">
+    <div class="modal-content" style="max-width: 500px;">
+      <div class="modal-header">
+        <h3 id="user-form-modal-title">➕ Add Staff Account</h3>
+        <button class="modal-close" onclick="closeModal('modal-user-form')">&times;</button>
+      </div>
+      <form id="user-account-form" onsubmit="handleUserFormSubmit(event)">
+        <input type="hidden" id="user-form-id">
+
+        <div class="form-group">
+          <label class="form-label">Full Name</label>
+          <input type="text" id="user-form-name" class="form-control" placeholder="e.g. Maria Clara" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Email Address (Login Username)</label>
+          <input type="email" id="user-form-email" class="form-control" placeholder="e.g. staff@dinerscafe.ph" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">System Role</label>
+          <select id="user-form-role" class="form-control" required>
+            <option value="staff">☕ Barista / Store Staff</option>
+            <option value="admin">👑 Administrator / Owner</option>
+            <option value="rider">🛵 Delivery Rider</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Contact Phone Number</label>
+          <input type="text" id="user-form-phone" class="form-control" placeholder="e.g. +63 917 123 4567">
+        </div>
+
+        <div class="form-group" id="user-form-password-group">
+          <label class="form-label">Initial Password</label>
+          <input type="password" id="user-form-password" class="form-control" placeholder="Enter initial password (min. 6 chars)" minlength="6">
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-user-form')">Cancel</button>
+          <button type="submit" class="btn btn-primary" style="font-weight: 700;">
+            💾 Save Account
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/api.js?v=6"></script>
+  <script src="js/dashboard.js?v=6"></script>
+</body>
+</html>

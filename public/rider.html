@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Rider Dispatch Portal | Diner's Cafe</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#d4a373">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .rider-container {
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 20px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .rider-header {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    .trip-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 22px;
+      margin-bottom: 16px;
+      border-left: 4px solid var(--brand-accent);
+      box-shadow: var(--shadow-sm);
+    }
+    .trip-card.delivered {
+      border-left-color: var(--status-success);
+      opacity: 0.75;
+    }
+    .action-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px dashed var(--border-subtle);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="rider-container">
+    <div class="rider-header">
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <div class="brand-icon" style="width: 40px; height: 40px; font-size: 1.2rem;">🛵</div>
+        <div>
+          <h2 style="font-size: 1.15rem;" id="rider-name-display">Marco Santos</h2>
+          <span style="font-size: 0.75rem; color: var(--brand-primary); font-weight: 600;" id="rider-vehicle-display">MOTORCYCLE (MC-7890-PH)</span>
+        </div>
+      </div>
+      <div>
+        <a href="dashboard.html" class="btn btn-secondary btn-sm">Dashboard</a>
+      </div>
+    </div>
+
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">
+      <h3 style="font-size: 1.1rem;">Assigned Deliveries</h3>
+      <button class="btn btn-secondary btn-sm" onclick="loadRiderDeliveries()">🔄 Refresh</button>
+    </div>
+
+    <div id="rider-trips-container" style="flex: 1;">
+      <!-- Populated via JS -->
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      loadRiderDeliveries();
+      API.connectSSE((eventType) => {
+        if (eventType === 'DELIVERY_ASSIGNED' || eventType === 'ORDER_STATUS_CHANGED') {
+          loadRiderDeliveries();
+        }
+      });
+    });
+
+    async function loadRiderDeliveries() {
+      try {
+        const res = await API.get('/deliveries');
+        const container = document.getElementById('rider-trips-container');
+        container.innerHTML = '';
+
+        if (res && res.deliveries) {
+          if (res.deliveries.length === 0) {
+            container.innerHTML = `<div class="card" style="text-align: center; color: var(--text-muted);">No active delivery trips assigned right now.</div>`;
+            return;
+          }
+
+          res.deliveries.forEach(del => {
+            const isDelivered = del.status === 'delivered';
+            const card = document.createElement('div');
+            card.className = `trip-card ${isDelivered ? 'delivered' : ''}`;
+            card.innerHTML = `
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <span style="font-weight: 700; font-size: 1.1rem; color: var(--brand-primary);">#${del.order_number}</span>
+                <span class="badge badge-${del.status}">${del.status}</span>
+              </div>
+              <div style="font-weight: 700; font-size: 1rem; margin-bottom: 4px;">👤 ${del.customer_name || 'Customer'}</div>
+              <div style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 6px;">📍 ${del.delivery_address || 'Store vicinity'}</div>
+              <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 10px;">
+                📏 Distance: <strong>${parseFloat(del.distance_km).toFixed(1)} km</strong> &bull; Fare: <strong style="color: var(--brand-gold);">₱${parseFloat(del.final_fare).toFixed(2)}</strong>
+              </div>
+              ${del.customer_notes ? `<div style="font-size: 0.82rem; padding: 6px 10px; background: var(--bg-surface-elevated); border-radius: 4px; color: var(--brand-crema);">Note: "${del.customer_notes}"</div>` : ''}
+
+              ${!isDelivered ? `
+                <div class="action-row">
+                  <a href="tel:${del.customer_phone || ''}" class="btn btn-secondary btn-sm" style="text-align: center;">
+                    📞 Call Customer
+                  </a>
+                  <button class="btn btn-success btn-sm" onclick="markDelivered(${del.order_id})">
+                    ✅ Complete Delivery
+                  </button>
+                </div>
+              ` : `
+                <div style="margin-top: 10px; font-size: 0.82rem; color: var(--status-success); font-weight: 600;">
+                  🎉 Completed & Feedback Requested
+                </div>
+              `}
+            `;
+            container.appendChild(card);
+          });
+        }
+      } catch (err) {
+        console.error('Rider trips load error:', err);
+      }
+    }
+
+    async function markDelivered(orderId) {
+      try {
+        const res = await API.patch(`/orders/${orderId}/status`, { status: 'delivered' });
+        if (res && res.success) {
+          API.toast('Delivery marked completed! Customer has been prompted for feedback.', 'success');
+          loadRiderDeliveries();
+        }
+      } catch (err) {
+        console.error('Mark delivered error:', err);
+      }
+    }
+  </script>
+</body>
+</html>

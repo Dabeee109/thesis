@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Diner's Cafe | Smart Conversational Ordering & Delivery System</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#d4a373">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/dashboard.css">
+  <style>
+    .hero-section {
+      min-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 60px 20px;
+      background: radial-gradient(circle at center, #26180f 0%, #0d0906 100%);
+      position: relative;
+    }
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px;
+      background: rgba(212, 163, 115, 0.15);
+      border: 1px solid var(--brand-primary);
+      border-radius: var(--radius-full);
+      color: var(--brand-crema);
+      font-size: 0.88rem;
+      font-weight: 600;
+      margin-bottom: 24px;
+    }
+    .hero-title {
+      font-size: 3.4rem;
+      font-weight: 800;
+      color: #fff;
+      max-width: 850px;
+      line-height: 1.15;
+      margin-bottom: 20px;
+      background: linear-gradient(135deg, #ffffff 0%, #faedcd 60%, #d4a373 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero-subtitle {
+      font-size: 1.2rem;
+      color: var(--text-secondary);
+      max-width: 680px;
+      margin-bottom: 40px;
+    }
+    .portal-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 28px;
+      max-width: 1140px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 0 20px 80px 20px;
+    }
+    .portal-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 32px 28px;
+      display: flex;
+      flex-direction: column;
+      transition: all var(--transition-normal);
+      position: relative;
+      overflow: hidden;
+    }
+    .portal-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, var(--brand-primary), var(--brand-accent));
+      opacity: 0;
+      transition: opacity var(--transition-fast);
+    }
+    .portal-card:hover {
+      transform: translateY(-6px);
+      border-color: var(--brand-primary);
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
+    }
+    .portal-card:hover::before {
+      opacity: 1;
+    }
+    .portal-icon {
+      width: 60px;
+      height: 60px;
+      border-radius: var(--radius-md);
+      background: var(--bg-surface-elevated);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.8rem;
+      margin-bottom: 20px;
+      border: 1px solid var(--border-subtle);
+    }
+    .portal-card h3 {
+      font-size: 1.4rem;
+      margin-bottom: 10px;
+    }
+    .portal-card p {
+      color: var(--text-muted);
+      font-size: 0.92rem;
+      margin-bottom: 24px;
+      flex: 1;
+    }
+    .feature-tag {
+      display: inline-block;
+      padding: 3px 8px;
+      background: rgba(212, 163, 115, 0.12);
+      color: var(--brand-crema);
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-right: 6px;
+      margin-bottom: 6px;
+    }
+  </style>
+</head>
+<body>
+
+  <header style="padding: 20px 40px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); background: var(--bg-surface);">
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <div class="brand-icon">☕</div>
+      <div>
+        <h2 style="font-size: 1.25rem; margin: 0;">Diner's Cafe</h2>
+        <span style="font-size: 0.75rem; color: var(--brand-primary); font-weight: 600;">Ordering & Delivery System</span>
+      </div>
+    </div>
+    <div style="display: flex; gap: 14px;">
+      <a href="login.html" class="btn btn-secondary btn-sm">Staff Login</a>
+      <a href="simulator.html" class="btn btn-primary btn-sm">Try Messenger Bot</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero-section">
+      <div class="hero-badge">✨ AI-Powered Conversational Cafe Operations</div>
+      <h1 class="hero-title">Diner's Cafe Ordering & Smart Delivery System</h1>
+      <p class="hero-subtitle">
+        Bridging customers via Facebook Messenger AI Chatbot with a real-time management dashboard, 
+        internal motorcycle & bicycle smart fare engine, and live kitchen operations.
+      </p>
+      <div style="display: flex; gap: 16px; justify-content: center; flex-wrap: wrap;">
+        <a href="dashboard.html" class="btn btn-primary btn-lg">🚀 Open Admin Dashboard</a>
+        <a href="simulator.html" class="btn btn-secondary btn-lg">📱 Launch Messenger Simulator</a>
+        <a href="rider.html" class="btn btn-outline btn-lg">🛵 Rider Mobile Portal</a>
+      </div>
+    </section>
+
+    <div class="portal-grid">
+      <!-- Card 1: Admin Dashboard -->
+      <div class="portal-card">
+        <div class="portal-icon">🛡️</div>
+        <h3>Admin & Operations Command</h3>
+        <p>Real-time order Kanban board, live stock tracking with auto-deduction, menu catalog CRUD, payment mismatch auditing, and sales reports.</p>
+        <div style="margin-bottom: 20px;">
+          <span class="feature-tag">Live Kanban</span>
+          <span class="feature-tag">Inventory Auto-Deduct</span>
+          <span class="feature-tag">GCash Mismatch Audit</span>
+          <span class="feature-tag">CSV / Print Reports</span>
+        </div>
+        <a href="dashboard.html" class="btn btn-primary">Enter Dashboard &rarr;</a>
+      </div>
+
+      <!-- Card 2: Messenger Chatbot Simulator -->
+      <div class="portal-card">
+        <div class="portal-icon">💬</div>
+        <h3>Facebook Messenger Chatbot</h3>
+        <p>Interactive web simulation of the Facebook Messenger bot. Browse carousel cards, place orders, validate GCash amount, and submit 5-star ratings.</p>
+        <div style="margin-bottom: 20px;">
+          <span class="feature-tag">NLP Intent Engine</span>
+          <span class="feature-tag">Menu Carousels</span>
+          <span class="feature-tag">GCash Amount Validation</span>
+          <span class="feature-tag">Post-Delivery Feedback (FR11)</span>
+        </div>
+        <a href="simulator.html" class="btn btn-secondary">Test Messenger Bot &rarr;</a>
+      </div>
+
+      <!-- Card 3: Smart Delivery Rider Portal -->
+      <div class="portal-card">
+        <div class="portal-icon">🛵</div>
+        <h3>Smart Delivery & Rider View</h3>
+        <p>Mobile-optimized dispatch interface for internal cafe motorcycle & bicycle couriers with 0–3 km distance-based fare computation and weather surcharges.</p>
+        <div style="margin-bottom: 20px;">
+          <span class="feature-tag">0–3 km Radius</span>
+          <span class="feature-tag">Motorcycle / Bicycle</span>
+          <span class="feature-tag">Weather Surcharges</span>
+          <span class="feature-tag">₱5 Rounding Formula</span>
+        </div>
+        <a href="rider.html" class="btn btn-outline">Open Rider View &rarr;</a>
+      </div>
+    </div>
+  </main>
+
+  <footer style="text-align: center; padding: 30px; border-top: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 0.88rem;">
+    &copy; 2026 Diner's Cafe Ordering & Delivery System &bull; Full-Stack AI Thesis Web Application
+  </footer>
+
+</body>
+</html>

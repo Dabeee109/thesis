@@ -1,0 +1,312 @@
+/* ==========================================================================
+   Diner's Cafe - Facebook Messenger Chatbot Webview Simulator UI
+   ========================================================================== */
+
+.simulator-layout {
+  display: flex;
+  min-height: 100vh;
+  background: #080604;
+  padding: 24px;
+  gap: 30px;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Phone Bezel Frame */
+.phone-frame {
+  width: 420px;
+  height: 840px;
+  background: #000000;
+  border-radius: 46px;
+  border: 10px solid #2a221b;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8), 0 0 30px rgba(212, 163, 115, 0.15);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Dynamic Island / Notch */
+.phone-notch {
+  width: 130px;
+  height: 24px;
+  background: #2a221b;
+  border-radius: 0 0 16px 16px;
+  margin: 0 auto;
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+}
+
+/* Messenger Header */
+.messenger-header {
+  background: #18120c;
+  border-bottom: 1px solid rgba(212, 163, 115, 0.2);
+  padding: 34px 16px 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 10;
+}
+
+.messenger-avatar-wrap {
+  position: relative;
+}
+
+.messenger-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--brand-primary) 0%, var(--brand-gold) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  border: 2px solid var(--brand-crema);
+}
+
+.online-dot {
+  width: 11px;
+  height: 11px;
+  background: #2ecc71;
+  border-radius: 50%;
+  border: 2px solid #18120c;
+  position: absolute;
+  bottom: 0;
+  right: 0;
+}
+
+.messenger-info h3 {
+  font-size: 1rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.verified-icon {
+  color: #0084ff;
+  font-size: 0.85rem;
+}
+
+.messenger-info span {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+/* Chat Messages Stream */
+.messenger-body {
+  flex: 1;
+  background: #120e0a;
+  padding: 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scroll-behavior: smooth;
+}
+
+/* Message Bubbles */
+.chat-msg {
+  display: flex;
+  gap: 8px;
+  max-width: 85%;
+  animation: popMessage 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes popMessage {
+  from { opacity: 0; transform: translateY(10px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.chat-msg.bot {
+  align-self: flex-start;
+}
+
+.chat-msg.user {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+.bubble {
+  padding: 12px 16px;
+  border-radius: 18px;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-msg.bot .bubble {
+  background: #241a12;
+  color: var(--text-primary);
+  border-bottom-left-radius: 4px;
+  border: 1px solid rgba(212, 163, 115, 0.15);
+}
+
+.chat-msg.user .bubble {
+  background: linear-gradient(135deg, #d4a373 0%, #b07d4b 100%);
+  color: #120904;
+  font-weight: 600;
+  border-bottom-right-radius: 4px;
+}
+
+/* Generic Carousel in Chat */
+.carousel-container {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 6px 2px 10px 2px;
+  max-width: 340px;
+}
+
+.carousel-card {
+  width: 220px;
+  flex-shrink: 0;
+  background: #241a12;
+  border: 1px solid rgba(212, 163, 115, 0.25);
+  border-radius: 16px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.carousel-card img {
+  width: 100%;
+  height: 110px;
+  object-fit: cover;
+}
+
+.carousel-card-body {
+  padding: 10px 12px;
+  flex: 1;
+}
+
+.carousel-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--brand-crema);
+  margin-bottom: 2px;
+}
+
+.carousel-subtitle {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.carousel-btn {
+  width: 100%;
+  padding: 8px 10px;
+  background: rgba(212, 163, 115, 0.15);
+  border: none;
+  border-top: 1px solid rgba(212, 163, 115, 0.2);
+  color: var(--brand-primary);
+  font-weight: 700;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.carousel-btn:hover {
+  background: var(--brand-primary);
+  color: #1a0f08;
+}
+
+/* Quick Replies Row */
+.quick-replies-wrap {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 8px 14px;
+  background: #18120c;
+  border-top: 1px solid rgba(212, 163, 115, 0.12);
+  white-space: nowrap;
+}
+
+.quick-reply-chip {
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--brand-primary);
+  color: var(--brand-crema);
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.quick-reply-chip:hover {
+  background: var(--brand-primary);
+  color: #120b06;
+  transform: translateY(-1px);
+}
+
+/* Input Bar */
+.messenger-input-bar {
+  background: #18120c;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.chat-input {
+  flex: 1;
+  background: #281e16;
+  border: 1px solid rgba(212, 163, 115, 0.2);
+  border-radius: 20px;
+  padding: 10px 16px;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  outline: none;
+}
+
+.chat-input:focus {
+  border-color: var(--brand-primary);
+}
+
+.send-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--brand-primary);
+  color: #120904;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  cursor: pointer;
+  transition: transform var(--transition-fast);
+}
+
+.send-btn:hover {
+  transform: scale(1.08);
+}
+
+/* Simulator Side Panel */
+.simulator-panel {
+  max-width: 440px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+@media (max-width: 960px) {
+  .simulator-layout {
+    flex-direction: column;
+    padding: 12px;
+  }
+  .phone-frame {
+    width: 100%;
+    max-width: 390px;
+    height: 750px;
+  }
+}

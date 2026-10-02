@@ -1,0 +1,216 @@
+/**
+ * Order Operations Controller (FR3, FR4, FR6, FR7, FR9)
+ * Handles listing orders, status progression, summary KPIs, and order cancellations.
+ */
+
+const { getOrdersList, getOrderDetails, updateOrderStatus, createOrder } = require('../services/orderService');
+const db = require('../../database/db');
+
+/**
+ * Get orders list with optional filters
+ */
+async function getOrders(req, res) {
+  try {
+    const { status, orderType, paymentMismatch } = req.query;
+    const orders = await getOrdersList({ status, orderType, paymentMismatch });
+    return res.json({ success: true, count: orders.length, orders });
+  } catch (err) {
+    console.error('[Order List Error]', err);
+    return res.status(500).json({ success: false, message: 'Failed to retrieve orders.' });
+  }
+}
+
+/**
+ * Get specific order details
+ */
+async function getOrder(req, res) {
+  try {
+    const { id } = req.params;
+    const order = await getOrderDetails(id);
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found.' });
+    }
+    return res.json({ success: true, order });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to retrieve order details.' });
+  }
+}
+
+/**
+ * Update order status
+ */
+async function changeOrderStatus(req, res) {
+  try {
+    const { id } = req.params;
+    const { status, riderId, cancellationReason } = req.body;
+
+    const validStatuses = ['pending', 'preparing', 'dispatched', 'delivered', 'cancelled'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ success: false, message: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+    }
+
+    const updated = await updateOrderStatus(parseInt(id, 10), status, { riderId, cancellationReason });
+    return res.json({ success: true, message: `Order status updated to ${status}.`, order: updated });
+  } catch (err) {
+    console.error('[Order Status Update Error]', err);
+    return res.status(500).json({ success: false, message: err.message || 'Failed to update order status.' });
+  }
+}
+
+/**
+ * Get Dashboard KPI Summary Cards
+ */
+async function getSummaryKPIs(req, res) {
+  try {
+    // Total Orders Today & Total Revenue Today
+    const [salesToday] = await db.query(`
+      SELECT 
+        COUNT(*) AS total_orders,
+        COALESCE(SUM(CASE WHEN status != 'cancelled' THEN total_amount ELSE 0 END), 0) AS total_revenue
+      FROM orders
+      WHERE DATE(created_at) = DATE('now')
+    `);
+
+    // Pending Orders Count
+    const [pendingOrders] = await db.query(`
+      SELECT COUNT(*) AS count FROM orders WHERE status = 'pending'
+    `);
+
+    // Active Deliveries Count (dispatched / assigned)
+    const [activeDeliveries] = await db.query(`
+      SELECT COUNT(*) AS count FROM deliveries WHERE status IN ('assigned', 'dispatched')
+    `);
+
+    // GCash Mismatch Alerts Count
+    const [paymentMismatches] = await db.query(`
+      SELECT COUNT(*) AS count FROM payments WHERE is_mismatch = 1 AND status = 'mismatch_flagged'
+    `);
+
+    // Low Stock Items Count
+    const [lowStock] = await db.query(`
+      SELECT COUNT(*) AS count FROM inventory WHERE stock_quantity <= low_stock_threshold
+    `);
+
+    // Customer Satisfaction Rating
+    const [ratings] = await db.query(`
+      SELECT AVG(rating) AS avg_rating, COUNT(*) AS feedback_count FROM feedback
+    `);
+
+    return res.json({
+      success: true,
+      kpi: {
+        totalOrdersToday: salesToday[0]?.total_orders || 0,
+        totalRevenueToday: parseFloat(salesToday[0]?.total_revenue || 0),
+        pendingOrders: pendingOrders[0]?.count || 0,
+        activeDeliveries: activeDeliveries[0]?.count || 0,
+        paymentMismatches: paymentMismatches[0]?.count || 0,
+        lowStockItems: lowStock[0]?.count || 0,
+        averageRating: ratings[0]?.avg_rating ? parseFloat(Number(ratings[0].avg_rating).toFixed(1)) : 5.0,
+        totalFeedback: ratings[0]?.feedback_count || 0
+      }
+    });
+  } catch (err) {
+    console.error('[KPI Summary Error]', err);
+    return res.status(500).json({ success: false, message: 'Failed to retrieve summary statistics.' });
+  }
+}
+
+/**
+ * Create order directly from admin POS / dashboard
+ */
+async function createManualOrder(req, res) {
+  try {
+    const order = await createOrder(req.body);
+    return res.status(201).json({ success: true, message: 'Order created successfully.', order });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+}
+
+/**
+ * Barista requests void authorization from Owner
+ */
+async function requestVoid(req, res) {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    if (!reason) {
+      return res.status(400).json({ success: false, message: 'Cancellation reason is required.' });
+    }
+
+    const user = req.user || { name: 'Barista', role: 'staff' };
+    const result = await require('../services/orderService').requestVoidOrder(parseInt(id, 10), user, reason);
+    return res.json({
+      success: true,
+      message: `Void request for Order #${result.orderNumber} has been sent to the Owner for approval.`,
+      result
+    });
+  } catch (err) {
+    console.error('[Request Void Error]', err);
+    return res.status(500).json({ success: false, message: err.message || 'Failed to request void.' });
+  }
+}
+
+/**
+ * Owner authorizes void OR barista authorizes with Owner Password/PIN
+ */
+async function authorizeVoid(req, res) {
+  try {
+    const { id } = req.params;
+    const { reason, managerPassword } = req.body;
+
+    const user = req.user || { name: 'Admin', role: 'admin' };
+
+    // If user is staff/barista, verify Manager Password ('password123')
+    if (user.role !== 'admin') {
+      if (managerPassword !== 'password123' && managerPassword !== 'admin123') {
+        return res.status(403).json({ success: false, message: 'Invalid Owner/Manager authorization password.' });
+      }
+    }
+
+    const updated = await require('../services/orderService').authorizeVoidOrder(parseInt(id, 10), user, reason);
+    return res.json({
+      success: true,
+      message: `Order #${updated.orderNumber} has been successfully cancelled and voided.`,
+      order: updated
+    });
+  } catch (err) {
+    console.error('[Authorize Void Error]', err);
+    return res.status(500).json({ success: false, message: err.message || 'Failed to authorize void.' });
+  }
+}
+
+/**
+ * Owner rejects void request
+ */
+async function rejectVoid(req, res) {
+  try {
+    const { id } = req.params;
+    const { rejectionNote } = req.body;
+    const user = req.user || { name: 'Admin', role: 'admin' };
+
+    if (user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Only the Owner/Manager can reject void requests.' });
+    }
+
+    const result = await require('../services/orderService').rejectVoidOrder(parseInt(id, 10), user, rejectionNote);
+    return res.json({
+      success: true,
+      message: `Void request for Order #${result.orderNumber} was rejected.`,
+      result
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message || 'Failed to reject void.' });
+  }
+}
+
+module.exports = {
+  getOrders,
+  getOrder,
+  changeOrderStatus,
+  getSummaryKPIs,
+  createManualOrder,
+  requestVoid,
+  authorizeVoid,
+  rejectVoid
+};
