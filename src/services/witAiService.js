@@ -80,6 +80,7 @@ function mapWitIntent(witIntent, text) {
   if (lower.includes('store') || lower.includes('hour') || lower.includes('location')) return 'STORE_INFO';
   if (lower.includes('greet') || lower.includes('hello') || lower.includes('hi')) return 'GREETING';
   if (lower.includes('clear') || lower.includes('cancel') || lower.includes('reset')) return 'CLEAR_CART';
+  if (lower.includes('thank') || lower.includes('salamat')) return 'THANK_YOU';
 
   // Fallback to text inspection
   return localNluParse(text).intent;
@@ -117,7 +118,9 @@ function localNluParse(text) {
   // Intent classification
   if (/^(hi|hello|hey|good morning|good afternoon|good evening|start|kamusta|hola)\b/i.test(lower)) {
     intent = 'GREETING';
-  } else if (/(menu|food|drink|coffee|pastry|meal|snack|categories|catalog)/i.test(lower)) {
+  } else if (/^(thank\s*you|thanks|salamat|thank\s*u|ty|arigato)\b/i.test(lower)) {
+    intent = 'THANK_YOU';
+  } else if (/^(menu|categories|catalog|view menu|show menu|see menu|browse menu)$/i.test(lower) || lower === 'food' || lower === 'drinks') {
     intent = 'BROWSE_MENU';
   } else if (/(cart|basket|checkout|my order|bill|total)/i.test(lower)) {
     intent = 'VIEW_CART';
@@ -128,7 +131,7 @@ function localNluParse(text) {
   } else if (/(clear|reset|cancel order|restart)/i.test(lower)) {
     intent = 'CLEAR_CART';
   } else {
-    // Menu item matching pattern
+    // Menu item matching pattern (e.g. "iced coffee", "do you have iced coffee", "spanish latte")
     intent = 'MENU_ITEM_SEARCH';
     menuItem = text;
   }

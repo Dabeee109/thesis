@@ -22,6 +22,8 @@ module.exports = {
     appSecret: process.env.FB_APP_SECRET || ''
   },
 
+  geminiApiKey: process.env.GEMINI_API_KEY || '',
+
   witAi: {
     serverAccessToken: process.env.WIT_AI_SERVER_ACCESS_TOKEN || process.env.WIT_AI_TOKEN || ''
   },

@@ -17,6 +17,7 @@ const {
 } = require('./messengerService');
 const { broadcastSSE } = require('./notificationService');
 const { queryWitAi } = require('./witAiService');
+const { generateGeminiResponse } = require('./geminiService');
 
 // In-memory active customer conversation sessions (backed up to DB customers table)
 const userSessions = new Map();
@@ -150,6 +151,12 @@ async function handleMessageEvent(psid, incomingText = '', payload = null) {
       } else if (eventPayload === 'VIEW_CART') {
         detectedIntent = 'VIEW_CART';
         await sendCartSummary(psid, session);
+      } else if (eventPayload.startsWith('REMOVE_ITEM_')) {
+        detectedIntent = 'REMOVE_CART_ITEM';
+        await handleRemoveCartItem(psid, session, '', eventPayload);
+      } else if (eventPayload === 'PROMPT_REMOVE_ITEM') {
+        detectedIntent = 'PROMPT_REMOVE_ITEM';
+        await handleRemoveCartItem(psid, session, '');
       } else if (eventPayload === 'CLEAR_CART') {
         detectedIntent = 'CLEAR_CART';
         session.cart = [];
@@ -217,14 +224,99 @@ async function handleMessageEvent(psid, incomingText = '', payload = null) {
       return;
     }
 
-    // 2. Wit.ai NLU Intent & Entity Processing
+    // 2. Cart Item Removal / Reduction (e.g. "remove 1 order on the cart", "remove 1 spanish latte", "tanggalin ang carbonara")
+    if (/(remove|delete|cancel|tanggalin|bawasan|bawas|minus|alisin|tanggal|paki\s*tanggal)\b/i.test(lower)) {
+      detectedIntent = 'REMOVE_CART_ITEM';
+      await handleRemoveCartItem(psid, session, text);
+      return;
+    }
+
+    // 3. Try Google Gemini AI Generative Barista if configured
+    const [allMenuItems] = await db.query(
+      `SELECT m.id, m.name, m.price, m.description, c.name as category_name 
+       FROM menu_items m 
+       JOIN categories c ON m.category_id = c.id 
+       WHERE m.is_available = 1`
+    );
+
+    if (config.geminiApiKey && (session.state === 'IDLE' || session.state === 'BROWSING')) {
+      const geminiRes = await generateGeminiResponse(text, session, allMenuItems);
+      if (geminiRes && geminiRes.replyText) {
+        detectedIntent = geminiRes.intent || 'GEMINI_CONVERSATION';
+        botReplyLog = geminiRes.replyText;
+
+        // If Gemini extracted items to add directly to cart
+        if (geminiRes.extractedItems && geminiRes.extractedItems.length > 0) {
+          const matchedFromGemini = [];
+          for (const ext of geminiRes.extractedItems) {
+            const mItem = allMenuItems.find(m => m.id === ext.menuItemId || m.name.toLowerCase() === (ext.name || '').toLowerCase());
+            if (mItem) {
+              matchedFromGemini.push({ item: mItem, quantity: Math.max(1, ext.quantity || 1) });
+            }
+          }
+          if (matchedFromGemini.length > 0) {
+            await handleMultiItemOrder(psid, session, matchedFromGemini);
+            return;
+          }
+        }
+
+        const formattedQuickReplies = (geminiRes.suggestedReplies || [
+          'Browse Menu',
+          'View Cart',
+          'Order Delivery'
+        ]).map(t => ({ title: t.substring(0, 20), payload: t.toUpperCase().replace(/\s+/g, '_') }));
+
+        await sendQuickReplies(psid, geminiRes.replyText, formattedQuickReplies);
+        return;
+      }
+    }
+
+    // 4. Conversational FAQ, Recommendations & Cafe Banter Handler
+    const handledFaq = await handleFaqAndBanter(psid, text);
+    if (handledFaq) {
+      detectedIntent = 'CONVERSATIONAL_FAQ';
+      return;
+    }
+
+    // 5. Multi-Item Natural Language Order Extraction (e.g. "2 spanish latte and 1 carbonara")
+    const extractedMultiItems = await extractMultipleItemsFromText(text);
+    if (extractedMultiItems && extractedMultiItems.length > 0) {
+      // If user typed only the item name or specified quantities
+      if (extractedMultiItems.length > 1 || (extractedMultiItems.length === 1 && (extractedMultiItems[0].quantity > 1 || /order|pabili|buy|padeliver|gusto/i.test(text)))) {
+        detectedIntent = 'MULTI_ITEM_ORDER';
+        await handleMultiItemOrder(psid, session, extractedMultiItems);
+        return;
+      }
+    }
+
+    // 6. Wit.ai NLU Intent & Entity Processing
     const nlu = await queryWitAi(text);
     detectedIntent = nlu.intent;
 
     if (nlu.intent === 'GREETING') {
       await sendWelcomeMenu(psid, session);
+    } else if (nlu.intent === 'THANK_YOU' || /^(thank\s*you|thanks|salamat|thank\s*u|ty)\b/i.test(text)) {
+      detectedIntent = 'THANK_YOU';
+      const tyText = `❤️ You're very welcome! Thank you for choosing Diner's Cafe. Is there anything else we can prepare for you today?`;
+      const quickReplies = [
+        { title: '☕ Browse Menu', payload: 'MENU_HOME' },
+        { title: '🛒 View Cart', payload: 'VIEW_CART' },
+        { title: '🛵 Track Order', payload: 'TRACK_LATEST_ORDER' },
+        { title: 'ℹ️ Store Info', payload: 'STORE_INFO' }
+      ];
+      await sendQuickReplies(psid, tyText, quickReplies);
     } else if (nlu.intent === 'BROWSE_MENU') {
-      await sendCategorySelector(psid);
+      // Check if text is actually inquiring about an item
+      const matchedItem = await findMenuItemByName(text);
+      if (matchedItem) {
+        detectedIntent = 'MENU_ITEM_SEARCH';
+        session.pendingItem = matchedItem;
+        session.state = 'ADDING_ITEM';
+        await saveSession(session);
+        await promptItemQuantity(psid, session, matchedItem.id);
+      } else {
+        await sendCategorySelector(psid);
+      }
     } else if (nlu.intent === 'VIEW_CART') {
       await sendCartSummary(psid, session);
     } else if (nlu.intent === 'TRACK_ORDER') {
@@ -350,13 +442,12 @@ async function promptItemQuantity(psid, session, menuItemId) {
   session.state = 'ADDING_ITEM';
   await saveSession(session);
 
-  const text = `How many servings of "${item.name}" (₱${parseFloat(item.price).toFixed(2)}) would you like?`;
+  const text = `☕ Thank you for asking! Yes, we have "${item.name}" (₱${parseFloat(item.price).toFixed(2)}) available in our cafe! 😋\n\nHow many servings would you like to order?`;
   const quickReplies = [
-    { title: '1', payload: 'QTY_1' },
-    { title: '2', payload: 'QTY_2' },
-    { title: '3', payload: 'QTY_3' },
-    { title: '4', payload: 'QTY_4' },
-    { title: 'Cancel', payload: 'MENU_HOME' }
+    { title: '1 Serving', payload: 'QTY_1' },
+    { title: '2 Servings', payload: 'QTY_2' },
+    { title: '3 Servings', payload: 'QTY_3' },
+    { title: 'Browse Menu', payload: 'MENU_HOME' }
   ];
 
   await sendQuickReplies(psid, text, quickReplies);
@@ -389,7 +480,7 @@ async function addItemToCart(psid, session, qty) {
   await saveSession(session);
 
   const itemTotal = parseFloat(item.price) * quantity;
-  const replyText = `✅ Added ${quantity}x "${item.name}" (₱${itemTotal.toFixed(2)}) to your cart!`;
+  const replyText = `✅ Thank you! Added ${quantity}x "${item.name}" (₱${itemTotal.toFixed(2)}) to your cart!`;
 
   const quickReplies = [
     { title: '🛒 View Cart & Checkout', payload: 'VIEW_CART' },
@@ -416,11 +507,12 @@ async function sendCartSummary(psid, session) {
     summaryText += `${index + 1}. ${item.name}\n   Qty: ${item.quantity} × ₱${item.price.toFixed(2)} = ₱${itemSub.toFixed(2)}\n`;
   });
 
-  summaryText += `------------------------------\nSubtotal: ₱${subtotal.toFixed(2)}\n\nHow would you like to receive your order?`;
+  summaryText += `------------------------------\nSubtotal: ₱${subtotal.toFixed(2)}\n\nHow would you like to proceed with your order?`;
 
   const quickReplies = [
     { title: '🛵 Delivery', payload: 'CHECKOUT_DELIVERY' },
     { title: '🛍️ Store Pickup', payload: 'CHECKOUT_PICKUP' },
+    { title: '❌ Remove Item', payload: 'PROMPT_REMOVE_ITEM' },
     { title: '➕ Add More Items', payload: 'MENU_HOME' },
     { title: '🗑️ Clear Cart', payload: 'CLEAR_CART' }
   ];
@@ -667,17 +759,372 @@ async function handleFeedbackComment(psid, session, commentText) {
 }
 
 async function findMenuItemByName(queryText) {
+  if (!queryText) return null;
   const [items] = await db.query(
-    `SELECT id, name, price FROM menu_items WHERE is_available = 1`
+    `SELECT id, name, price, description FROM menu_items WHERE is_available = 1`
   );
 
-  const q = queryText.toLowerCase();
+  const clean = queryText.toLowerCase()
+    .replace(/do\s+you\s+have|may\s+roon|meron\s+ba|meron\s+kayong|may\s+ba|is\s+there|available\s+ba|i\s+want|order|gusto\s+ko|pabili\s+ng|buy|please|\?|\!/gi, ' ')
+    .trim();
+
+  // 1. Direct or substring match on item name
   for (const item of items) {
-    if (item.name.toLowerCase().includes(q) || q.includes(item.name.toLowerCase())) {
+    const name = item.name.toLowerCase();
+    if (name === clean || name.includes(clean) || (clean.length >= 3 && clean.includes(name))) {
       return item;
     }
   }
+
+  // 2. Iced coffee alias & beverage mapping
+  if (/iced\s*coffee|cold\s*coffee|ice\s*coffee/i.test(clean)) {
+    const icedCoffee = items.find(i => i.name.toLowerCase().includes('iced americano') || i.name.toLowerCase().includes('latte'));
+    if (icedCoffee) return icedCoffee;
+  }
+
+  // 3. Keyword matching across name & description
+  const words = clean.split(/\s+/).filter(w => w.length > 2);
+  if (words.length > 0) {
+    for (const item of items) {
+      const target = `${item.name} ${item.description || ''}`.toLowerCase();
+      if (words.every(w => target.includes(w))) {
+        return item;
+      }
+    }
+    for (const item of items) {
+      const target = `${item.name} ${item.description || ''}`.toLowerCase();
+      if (words.some(w => target.includes(w))) {
+        return item;
+      }
+    }
+  }
+
   return null;
+}
+
+function parseTagalogNumber(word) {
+  const w = (word || '').toLowerCase();
+  if (/^(\d+)$/.test(w)) return parseInt(w, 10);
+  if (/^(isa|isang|one|single|1x)$/.test(w)) return 1;
+  if (/^(dalawa|dalawang|two|pair|double|2x)$/.test(w)) return 2;
+  if (/^(tatlo|tatlong|three|triple|3x)$/.test(w)) return 3;
+  if (/^(apat|apat na|four|4x)$/.test(w)) return 4;
+  if (/^(lima|limang|five|5x)$/.test(w)) return 5;
+  return null;
+}
+
+async function extractMultipleItemsFromText(text) {
+  const clean = text.toLowerCase()
+    .replace(/^(pa\s*order|pabili|order|buy|i\s*want|give\s*me|padeliver|can\s*i\s*get|please|pwede\s*ba\s*order)\s*(ng|nang|of)?/i, '')
+    .trim();
+
+  const segments = clean.split(/\s*(?:and|at|tapos|tsaka|plus|,|&|\+)\s*/i);
+  const foundItems = [];
+
+  for (const seg of segments) {
+    const trimmed = seg.trim();
+    if (!trimmed) continue;
+
+    const qtyMatch = trimmed.match(/^(\d+|isa|isang|dalawa|dalawang|tatlo|tatlong|apat|lima|one|two|three|four|five)\s*(?:pcs|pieces|orders|order|cups|cup|serving|servings|x)?\s+(.+)$/i);
+    let qty = 1;
+    let queryPart = trimmed;
+
+    if (qtyMatch) {
+      const parsedQty = parseTagalogNumber(qtyMatch[1]);
+      if (parsedQty && parsedQty > 0) {
+        qty = parsedQty;
+        queryPart = qtyMatch[2];
+      }
+    } else {
+      const trailingMatch = trimmed.match(/^(.+?)\s+(\d+)$/i);
+      if (trailingMatch) {
+        qty = parseInt(trailingMatch[2], 10);
+        queryPart = trailingMatch[1];
+      }
+    }
+
+    const matched = await findMenuItemByName(queryPart);
+    if (matched) {
+      const existing = foundItems.find(f => f.item.id === matched.id);
+      if (existing) {
+        existing.quantity += qty;
+      } else {
+        foundItems.push({ item: matched, quantity: qty });
+      }
+    }
+  }
+
+  return foundItems;
+}
+
+async function handleMultiItemOrder(psid, session, itemsToAdd) {
+  if (!itemsToAdd || itemsToAdd.length === 0) return false;
+
+  let addedSummary = '';
+  let runningSubtotal = 0;
+
+  for (const entry of itemsToAdd) {
+    const { item, quantity } = entry;
+    const existingIndex = session.cart.findIndex(c => c.menuItemId === item.id);
+    if (existingIndex >= 0) {
+      session.cart[existingIndex].quantity += quantity;
+    } else {
+      session.cart.push({
+        menuItemId: item.id,
+        name: item.name,
+        price: parseFloat(item.price),
+        quantity,
+        specialInstructions: ''
+      });
+    }
+    const itemSub = parseFloat(item.price) * quantity;
+    addedSummary += `• ${quantity}x "${item.name}" (₱${itemSub.toFixed(2)})\n`;
+  }
+
+  session.cart.forEach(c => {
+    runningSubtotal += c.price * c.quantity;
+  });
+
+  session.state = 'IDLE';
+  session.pendingItem = null;
+  await saveSession(session);
+
+  const replyText = `✅ Added to your cart:\n${addedSummary}\n🛒 Current Cart Total: ₱${runningSubtotal.toFixed(2)}\n\nWhat would you like to do next?`;
+  const quickReplies = [
+    { title: '🛒 View Cart & Checkout', payload: 'VIEW_CART' },
+    { title: '🛵 Deliver Order', payload: 'CHECKOUT_DELIVERY' },
+    { title: '➕ Add More Items', payload: 'MENU_HOME' },
+    { title: '🗑️ Clear Cart', payload: 'CLEAR_CART' }
+  ];
+
+  await sendQuickReplies(psid, replyText, quickReplies);
+  return true;
+}
+
+async function handleRemoveCartItem(psid, session, text = '', payload = '') {
+  if (!session.cart || session.cart.length === 0) {
+    const emptyReply = '🛒 Your cart is currently empty! There are no items to remove.';
+    await sendQuickReplies(psid, emptyReply, [{ title: '☕ Browse Menu', payload: 'MENU_HOME' }]);
+    return true;
+  }
+
+  // 1. Direct Payload Handling (e.g. REMOVE_ITEM_1)
+  if (payload && payload.startsWith('REMOVE_ITEM_')) {
+    const menuItemId = parseInt(payload.replace('REMOVE_ITEM_', ''), 10);
+    const itemIndex = session.cart.findIndex(c => c.menuItemId === menuItemId);
+    if (itemIndex >= 0) {
+      const removedItem = session.cart[itemIndex];
+      session.cart.splice(itemIndex, 1);
+      await saveSession(session);
+      return sendCartUpdateAfterRemoval(psid, session, `🗑️ Removed "${removedItem.name}" from your cart.`);
+    }
+  }
+
+  const lower = text.toLowerCase().trim();
+
+  // If user just says "remove item", prompt with buttons
+  if (lower === '' || lower === 'remove' || lower === 'remove item' || lower === 'bawas' || lower === 'tanggalin') {
+    const promptText = `Which item would you like to remove from your cart?`;
+    const itemButtons = session.cart.map(c => ({
+      title: `❌ ${c.name.substring(0, 15)}`,
+      payload: `REMOVE_ITEM_${c.menuItemId}`
+    }));
+    itemButtons.push({ title: '🛒 Keep Cart', payload: 'VIEW_CART' });
+    await sendQuickReplies(psid, promptText, itemButtons);
+    return true;
+  }
+
+  // 2. Check for quantity or ordinal removal (e.g. "remove 1 order on the cart", "remove 1 order in the cart", "remove 1 item")
+  let removeQty = 1;
+  const qtyMatch = lower.match(/\b(\d+|isa|isang|dalawa|dalawang|tatlo|tatlong|one|two|three)\b/);
+  if (qtyMatch) {
+    const parsed = parseTagalogNumber(qtyMatch[1]);
+    if (parsed && parsed > 0) removeQty = parsed;
+  }
+
+  // Clean the text to find item name
+  const cleanItemQuery = lower
+    .replace(/(?:on|in|from|to|into|sa)\s+(?:the\s+)?(?:cart|basket|order|bag|list)/gi, ' ')
+    .replace(/\b(?:cart|basket)\b/gi, ' ')
+    .replace(/\b(?:can\s+you|could\s+you|please|paki|pakisuyo|pwede|pakiusap|mo|ba|nga|naman|po|yung|ang|nang|ng|sa|mga|the|of|a|an)\b/gi, ' ')
+    .replace(/\b(?:remove|delete|cancel|tanggalin|bawasan|bawas|minus|alisin|tanggal|alisan)\b/gi, ' ')
+    .replace(/\b(?:order|orders|item|items|pieces|pcs|cup|cups|serving|servings|x|na|sa)\b/gi, ' ')
+    .replace(/\b(?:one|two|three|four|five|isa|isang|dalawa|dalawang|tatlo|tatlong|apat|lima|\d+)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  let matchedIndex = -1;
+  if (cleanItemQuery.length > 0) {
+    matchedIndex = session.cart.findIndex(c => {
+      const cName = c.name.toLowerCase();
+      return cName.includes(cleanItemQuery) || cleanItemQuery.includes(cName);
+    });
+  }
+
+  // Check by index number (e.g., "item 1", "first item", or if only 1 item exists in cart)
+  if (matchedIndex === -1) {
+    const indexMatch = lower.match(/(?:item|order)\s*#?(\d+)/i);
+    if (indexMatch) {
+      const idx = parseInt(indexMatch[1], 10) - 1;
+      if (idx >= 0 && idx < session.cart.length) {
+        matchedIndex = idx;
+      }
+    }
+  }
+
+  // If there's only 1 item in the cart and the user asks to remove 1 order / item
+  if (matchedIndex === -1 && session.cart.length === 1) {
+    matchedIndex = 0;
+  }
+
+  if (matchedIndex >= 0) {
+    const item = session.cart[matchedIndex];
+    if (item.quantity > removeQty) {
+      item.quantity -= removeQty;
+      await saveSession(session);
+      return sendCartUpdateAfterRemoval(psid, session, `➖ Reduced ${removeQty}x "${item.name}". Remaining: ${item.quantity} in your cart.`);
+    } else {
+      session.cart.splice(matchedIndex, 1);
+      await saveSession(session);
+      return sendCartUpdateAfterRemoval(psid, session, `🗑️ Removed "${item.name}" from your cart.`);
+    }
+  }
+
+  // If multiple items and item couldn't be unambiguously matched, ask via buttons
+  const promptText = `Which item would you like to remove from your cart?`;
+  const itemButtons = session.cart.map(c => ({
+    title: `❌ ${c.name.substring(0, 15)}`,
+    payload: `REMOVE_ITEM_${c.menuItemId}`
+  }));
+  itemButtons.push({ title: '🛒 Keep Cart', payload: 'VIEW_CART' });
+
+  await sendQuickReplies(psid, promptText, itemButtons);
+  return true;
+}
+
+async function sendCartUpdateAfterRemoval(psid, session, headerMessage) {
+  if (!session.cart || session.cart.length === 0) {
+    const text = `${headerMessage}\n\n🛒 Your cart is now completely empty! Would you like to check out our menu?`;
+    const quickReplies = [
+      { title: '☕ Browse Menu', payload: 'MENU_HOME' },
+      { title: '⭐ Best Sellers', payload: 'MENU_HOME' }
+    ];
+    await sendQuickReplies(psid, text, quickReplies);
+    return true;
+  }
+
+  let runningSubtotal = 0;
+  let summary = '';
+  session.cart.forEach((c, idx) => {
+    const itemSub = c.price * c.quantity;
+    runningSubtotal += itemSub;
+    summary += `${idx + 1}. ${c.name} (${c.quantity}x) = ₱${itemSub.toFixed(2)}\n`;
+  });
+
+  const text = `${headerMessage}\n\n🛒 UPDATED CART:\n${summary}------------------------------\nSubtotal: ₱${runningSubtotal.toFixed(2)}`;
+  const quickReplies = [
+    { title: '🛒 View Cart & Checkout', payload: 'VIEW_CART' },
+    { title: '🛵 Deliver Order', payload: 'CHECKOUT_DELIVERY' },
+    { title: '❌ Remove Another', payload: 'PROMPT_REMOVE_ITEM' },
+    { title: '➕ Add More Items', payload: 'MENU_HOME' },
+    { title: '🗑️ Clear Cart', payload: 'CLEAR_CART' }
+  ];
+
+  await sendQuickReplies(psid, text, quickReplies);
+  return true;
+}
+
+async function handleFaqAndBanter(psid, text) {
+  const lower = text.toLowerCase();
+
+  // 1. Wi-Fi Inquiries
+  if (/(wifi|internet|connection|pass|password)/i.test(lower)) {
+    const reply = `📶 Yes po! We have high-speed complimentary Wi-Fi for all our cafe guests at ${config.store.name}. Feel free to study, work, or relax while enjoying your favorite coffee! ☕💻`;
+    const quickReplies = [
+      { title: '☕ Browse Menu', payload: 'MENU_HOME' },
+      { title: '🛒 View Cart', payload: 'VIEW_CART' },
+      { title: 'ℹ️ Store Info', payload: 'STORE_INFO' }
+    ];
+    await sendQuickReplies(psid, reply, quickReplies);
+    return true;
+  }
+
+  // 2. Recommendations / Best Sellers / Cravings
+  if (/(ano|anong|what)\s*(ang|yung)?\s*(masarap|best|bestseller|best\s*seller|reco|recommend|specialty|patok)/i.test(lower) || /^(recommend|reco|best\s*seller|bestseller|masarap)$/i.test(lower) || /(gutom|hungry|food reco|craving|meron kayo)/i.test(lower)) {
+    const reply = `🌟 Here are our top customer favorites at Diner's Cafe!
+
+☕ MUST-TRY COFFEE & DRINKS:
+• Signature Spanish Latte (₱145.00) - Sweet & velvety double espresso
+• Caramel Macchiato (₱150.00) - Fresh steamed milk & caramel drizzle
+• Iced Americano (₱110.00) - Crisp & bold espresso on ice
+
+🍝 FAVORITE MEALS & BITES:
+• Creamy Truffle Bacon Carbonara (₱220.00) - Rich parmesan truffle pasta
+• Classic Beef Tapa Rice Bowl (₱195.00) - Tender sirloin with garlic rice & egg
+• Almond Butter Croissant (₱95.00) - Flaky French pastry
+
+Which one would you like to taste today?`;
+
+    const quickReplies = [
+      { title: '☕ Spanish Latte', payload: 'ADD_ITEM_1' },
+      { title: '🍝 Truffle Carbonara', payload: 'ADD_ITEM_7' },
+      { title: '🍳 Beef Tapa Bowl', payload: 'ADD_ITEM_6' },
+      { title: '📖 Browse Full Menu', payload: 'MENU_HOME' }
+    ];
+    await sendQuickReplies(psid, reply, quickReplies);
+    return true;
+  }
+
+  // 3. Payment Inquiries
+  if (/(payment|bayad|gcash|cod|cash on delivery|credit card|card|cash)/i.test(lower) && /(pwede|accept|tanggap|options|how to pay|how do i pay)/i.test(lower)) {
+    const reply = `💳 We accept two hassle-free payment options:
+1. 💵 Cash on Delivery (COD) / Cash on Pickup
+2. 📱 GCash Instant Transfer (${config.store.gcashNumber} - ${config.store.gcashName})
+
+You can choose your preferred payment method right during checkout!`;
+    const quickReplies = [
+      { title: '☕ Browse Menu', payload: 'MENU_HOME' },
+      { title: '🛒 View Cart', payload: 'VIEW_CART' }
+    ];
+    await sendQuickReplies(psid, reply, quickReplies);
+    return true;
+  }
+
+  // 4. Delivery Distance & Rules
+  if (/(hanggang saan|saan abot|delivery range|delivery fee|fare|radius|how far|deliver ba kayo)/i.test(lower)) {
+    const reply = `🛵 We offer fast internal delivery within a 3.0 km radius from the cafe!
+
+• Motorcycle & Eco-Bicycle couriers
+• Smart weather-adjusted fair rates starting at ₱35 (Bicycle) / ₱49 (Motorcycle)
+• Average delivery time: 15–25 minutes!`;
+    const quickReplies = [
+      { title: '☕ Order Now', payload: 'MENU_HOME' },
+      { title: 'ℹ️ Store Info', payload: 'STORE_INFO' }
+    ];
+    await sendQuickReplies(psid, reply, quickReplies);
+    return true;
+  }
+
+  // 5. Friendly Persona & Jokes
+  if (/(joke|joke ka|patawa|funny|make me laugh)/i.test(lower)) {
+    const jokes = [
+      "Bakit masarap ang kape sa umaga? Kasi may 'latte'-r in life! ☕😄",
+      "Anong sabi ng espresso sa milk? You make me whole-milk! 🥛❤️",
+      "Bakit malamig ang iced coffee? Kasi ice-olang niya ang init ng ulo mo! 🧊😆"
+    ];
+    const joke = jokes[Math.floor(Math.random() * jokes.length)];
+    const reply = `☕ Here's a coffee joke for you:\n\n${joke}\n\nReady for some real handcrafted coffee or delicious food?`;
+    await sendQuickReplies(psid, reply, [{ title: '☕ Browse Menu', payload: 'MENU_HOME' }, { title: '🛒 View Cart', payload: 'VIEW_CART' }]);
+    return true;
+  }
+
+  if (/(who are you|sino ka|bot ka ba|are you a bot|are you real|are you human|ano pangalan mo)/i.test(lower)) {
+    const reply = `👋 Hi! I'm Barista Dan, the smart AI assistant of Diner's Cafe! ☕\n\nI can take your orders, recommend bestsellers, calculate delivery fares, and make sure your coffee cravings are satisfied. How can I help you today?`;
+    await sendQuickReplies(psid, reply, [{ title: '☕ Browse Menu', payload: 'MENU_HOME' }, { title: '⭐ Best Sellers', payload: 'MENU_HOME' }]);
+    return true;
+  }
+
+  return false;
 }
 
 async function sendFallbackResponse(psid, text) {
