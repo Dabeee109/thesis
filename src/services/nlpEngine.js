@@ -5,6 +5,7 @@
  */
 
 const db = require('../../database/db');
+const config = require('../config/config');
 const { calculateDeliveryFare, MAX_DELIVERY_DISTANCE_KM } = require('./fareCalculator');
 const { createOrder, getOrderDetails } = require('./orderService');
 const { quoteDelivery, verifyQuote, GeoError } = require('./geoService');
