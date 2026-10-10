@@ -81,6 +81,9 @@ async function sendTextMessage(psid, text) {
  */
 async function sendQuickReplies(psid, text, quickReplies = []) {
   const formattedReplies = quickReplies.map(qr => {
+    if (qr && qr.content_type === 'location') {
+      return { content_type: 'location' };
+    }
     const rawTitle = typeof qr === 'string' ? qr : qr.title;
     const cleanTitle = stripIcons(rawTitle);
     const title = cleanTitle.length > 20 ? cleanTitle.substring(0, 20) : cleanTitle || 'Option';

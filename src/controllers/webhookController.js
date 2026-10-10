@@ -48,7 +48,12 @@ async function processWebhookEvents(req, res) {
 
       if (webhookEvent.message) {
         const message = webhookEvent.message;
-        if (message.quick_reply) {
+        if (message.attachments?.[0]?.type === 'location') {
+          const coords = message.attachments[0].payload?.coordinates;
+          const lat = coords ? coords.lat : null;
+          const lng = coords ? coords.long : null;
+          await handleMessageEvent(senderPsid, '', null, { lat, lng });
+        } else if (message.quick_reply) {
           // User clicked a Quick Reply button
           await handleMessageEvent(senderPsid, message.text, message.quick_reply.payload);
         } else if (message.text) {

@@ -5,9 +5,9 @@
  */
 
 const db = require('../../database/db');
-const config = require('../config/config');
-const { calculateDeliveryFare } = require('./fareCalculator');
+const { calculateDeliveryFare, MAX_DELIVERY_DISTANCE_KM } = require('./fareCalculator');
 const { createOrder, getOrderDetails } = require('./orderService');
+const { quoteDelivery, verifyQuote, GeoError } = require('./geoService');
 const {
   sendTextMessage,
   sendQuickReplies,
@@ -64,6 +64,11 @@ async function getSession(psid) {
     phone: '',
     address: '',
     distanceKm: 1.2,
+    deliveryFee: 0,
+    quoteToken: null,
+    lat: null,
+    lng: null,
+    vehicleType: 'motorcycle',
     state: 'IDLE', // IDLE, BROWSING, ADDING_ITEM, AWAITING_ADDRESS, AWAITING_PAYMENT, AWAITING_GCASH_AMOUNT, AWAITING_FEEDBACK_COMMENT
     cart: [],
     pendingItem: null,
@@ -112,7 +117,7 @@ async function saveSession(session) {
 /**
  * Main Message & Event Handler for Facebook Messenger Webhook
  */
-async function handleMessageEvent(psid, incomingText = '', payload = null) {
+async function handleMessageEvent(psid, incomingText = '', payload = null, location = null) {
   const session = await getSession(psid);
   const text = (incomingText || '').trim();
   const eventPayload = payload || '';
@@ -122,6 +127,21 @@ async function handleMessageEvent(psid, incomingText = '', payload = null) {
   let botReplyLog = '';
 
   try {
+    // If location pin is provided, handle it before text or intent logic
+    if (location && (location.lat !== undefined && location.lng !== undefined)) {
+      if (session.state === 'AWAITING_ADDRESS' || session.orderType === 'delivery') {
+        detectedIntent = 'LOCATION_INPUT';
+        await handleLocationInput(psid, session, location);
+      } else {
+        await sendQuickReplies(
+          psid,
+          `📍 Thanks for sharing your location! We don't see an active delivery checkout in progress. Would you like to check out our menu?`,
+          [{ title: '☕ Browse Menu', payload: 'MENU_HOME' }]
+        );
+      }
+      return;
+    }
+
     // If AI Chatbot is turned OFF by admin, send the offline message
     if (!isChatbotActive) {
       detectedIntent = 'CHATBOT_OFFLINE';
@@ -169,7 +189,15 @@ async function handleMessageEvent(psid, incomingText = '', payload = null) {
         session.orderType = 'delivery';
         session.state = 'AWAITING_ADDRESS';
         await saveSession(session);
-        await sendTextMessage(psid, `🛵 Delivery Selected!\n\nPlease enter your complete delivery address (and landmark):\n(Note: We deliver within 3.0 km of the cafe)`);
+        const maxRadius = Math.min(config.store.maxDeliveryKm || 3.0, MAX_DELIVERY_DISTANCE_KM);
+        await sendQuickReplies(
+          psid,
+          `🛵 Delivery Selected!\n\nPlease share your delivery location, or type your address. We deliver within ${maxRadius.toFixed(1)} km of the cafe.`,
+          [
+            { content_type: 'location' },
+            { title: 'Store pickup instead', payload: 'CHECKOUT_PICKUP' }
+          ]
+        );
       } else if (eventPayload === 'CHECKOUT_PICKUP') {
         detectedIntent = 'CHECKOUT_PICKUP';
         session.orderType = 'pickup';
@@ -520,14 +548,109 @@ async function sendCartSummary(psid, session) {
   await sendQuickReplies(psid, summaryText, quickReplies);
 }
 
-async function handleAddressInput(psid, session, addressText) {
-  session.address = addressText;
-  // Estimate distance (defaulting to 1.5 km or simulated distance)
-  session.distanceKm = 1.5;
-  session.state = 'AWAITING_PAYMENT';
-  await saveSession(session);
+async function processDeliveryQuote(psid, session, quoteInput) {
+  try {
+    const quote = await quoteDelivery(quoteInput);
+    session.address = quote.destination.formattedAddress;
+    session.distanceKm = quote.distanceKm;
+    session.deliveryFee = quote.fare.finalFare;
+    session.quoteToken = quote.quoteToken;
+    session.lat = quote.destination.lat;
+    session.lng = quote.destination.lng;
+    session.vehicleType = quote.vehicleType;
+    session.state = 'AWAITING_PAYMENT';
+    await saveSession(session);
 
-  await sendPaymentOptions(psid, session);
+    const summary = `📍 Delivery Address Confirmed:\n${session.address}\n\n🛵 Distance: ${session.distanceKm} km (${session.vehicleType})\n💵 Delivery Fee: ₱${session.deliveryFee.toFixed(2)}`;
+    await sendTextMessage(psid, summary);
+    await sendPaymentOptions(psid, session);
+  } catch (err) {
+    session.state = 'AWAITING_ADDRESS';
+    await saveSession(session);
+
+    if (err instanceof GeoError) {
+      if (err.code === 'GEO_TOO_FAR') {
+        const roadKm = err.details?.roadKm ? `${err.details.roadKm.toFixed(1)} km` : 'beyond our radius';
+        const maxKm = err.details?.maxKm || config.store.maxDeliveryKm || 3.0;
+        await sendQuickReplies(
+          psid,
+          `⚠️ Sorry, that location is ${roadKm} away, which exceeds our maximum delivery radius of ${maxKm} km.\n\nWould you like to switch to Store Pickup or try another address?`,
+          [
+            { title: '🛍️ Store Pickup', payload: 'CHECKOUT_PICKUP' },
+            { content_type: 'location' },
+            { title: '☕ View Cart', payload: 'VIEW_CART' }
+          ]
+        );
+        return;
+      }
+
+      if (err.code === 'GEO_LOW_PRECISION' || err.code === 'GEO_NOT_FOUND') {
+        await sendQuickReplies(
+          psid,
+          `📍 We couldn't pinpoint that exact address. Please share a GPS location pin or provide a more specific landmark and street name:`,
+          [
+            { content_type: 'location' },
+            { title: '🛍️ Store Pickup', payload: 'CHECKOUT_PICKUP' }
+          ]
+        );
+        return;
+      }
+
+      if (err.code === 'GEO_PROVIDER_ERROR') {
+        await sendQuickReplies(
+          psid,
+          `⚠️ We are temporarily experiencing an issue with our mapping service. Please retry or choose store pickup:`,
+          [
+            { title: '🔄 Retry', payload: 'CHECKOUT_DELIVERY' },
+            { title: '🛍️ Store Pickup', payload: 'CHECKOUT_PICKUP' }
+          ]
+        );
+        return;
+      }
+
+      if (err.code === 'GEO_INVALID_COORDS' || err.code === 'GEO_OUT_OF_COUNTRY') {
+        await sendQuickReplies(
+          psid,
+          `📍 The coordinates provided appear invalid or outside our Philippine service region. Please share your location again:`,
+          [
+            { content_type: 'location' },
+            { title: '🛍️ Store Pickup', payload: 'CHECKOUT_PICKUP' }
+          ]
+        );
+        return;
+      }
+
+      if (err.code === 'VALIDATION_ERROR') {
+        await sendQuickReplies(
+          psid,
+          `⚠️ ${err.message}\n\nPlease share your location pin or enter a valid address:`,
+          [
+            { content_type: 'location' },
+            { title: '🛍️ Store Pickup', payload: 'CHECKOUT_PICKUP' }
+          ]
+        );
+        return;
+      }
+    }
+
+    console.error('[Delivery Processing Error]', err);
+    await sendQuickReplies(
+      psid,
+      `⚠️ An unexpected error occurred while calculating your delivery. Please share your location or switch to pickup:`,
+      [
+        { content_type: 'location' },
+        { title: '🛍️ Store Pickup', payload: 'CHECKOUT_PICKUP' }
+      ]
+    );
+  }
+}
+
+async function handleAddressInput(psid, session, addressText) {
+  await processDeliveryQuote(psid, session, { address: addressText });
+}
+
+async function handleLocationInput(psid, session, location) {
+  await processDeliveryQuote(psid, session, { lat: location.lat, lng: location.lng });
 }
 
 async function sendPaymentOptions(psid, session) {
@@ -536,8 +659,31 @@ async function sendPaymentOptions(psid, session) {
   let fareBreakdown = '';
 
   if (session.orderType === 'delivery') {
-    const fare = calculateDeliveryFare(session.distanceKm, 'motorcycle', 'sunny', new Date());
-    deliveryFee = fare.finalFare;
+    // Before showing totals, verifyQuote(session.quoteToken); if expired, silently request a new quote
+    try {
+      verifyQuote(session.quoteToken);
+    } catch (err) {
+      if (err.code === 'QUOTE_EXPIRED' && session.lat && session.lng) {
+        try {
+          const newQuote = await quoteDelivery({ lat: session.lat, lng: session.lng });
+          const oldFee = session.deliveryFee;
+          session.quoteToken = newQuote.quoteToken;
+          session.deliveryFee = newQuote.fare.finalFare;
+          session.distanceKm = newQuote.distanceKm;
+          session.vehicleType = newQuote.vehicleType;
+          if (oldFee !== session.deliveryFee) {
+            await sendTextMessage(
+              psid,
+              `ℹ️ Note: Delivery conditions updated. Your delivery fee is now ₱${session.deliveryFee.toFixed(2)}.`
+            );
+          }
+        } catch (refreshErr) {
+          console.error('[Quote Refresh Error]', refreshErr);
+        }
+      }
+    }
+
+    deliveryFee = session.deliveryFee || 0;
     fareBreakdown = `\n🛵 Delivery Fee (${session.distanceKm} km): ₱${deliveryFee.toFixed(2)}`;
   }
 
@@ -563,7 +709,7 @@ async function completeOrderWithCash(psid, session) {
     customerPhone: session.phone,
     orderType: session.orderType || 'delivery',
     deliveryAddress: session.address,
-    distanceKm: session.distanceKm,
+    quoteToken: session.quoteToken,
     items: session.cart,
     paymentMethod: 'cash'
   });
@@ -611,7 +757,7 @@ async function handleGCashAmountInput(psid, session, text) {
     customerPhone: session.phone,
     orderType: session.orderType || 'delivery',
     deliveryAddress: session.address,
-    distanceKm: session.distanceKm,
+    quoteToken: session.quoteToken,
     items: session.cart,
     paymentMethod: 'gcash',
     amountPaid: enteredAmount,
