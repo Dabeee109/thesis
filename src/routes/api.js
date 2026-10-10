@@ -9,6 +9,23 @@ const inventoryController = require('../controllers/inventoryController');
 const feedbackController = require('../controllers/feedbackController');
 const reportController = require('../controllers/reportController');
 const chatbotController = require('../controllers/chatbotController');
+const deliveryQuoteController = require('../controllers/deliveryQuoteController');
+const rateLimit = require('express-rate-limit');
+
+const quoteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    return res.status(429).json({
+      success: false,
+      code: 'RATE_LIMITED',
+      message: 'Too many delivery quote requests. Please wait a moment before trying again.',
+      details: {}
+    });
+  }
+});
 
 // 1. Authentication & Staff Account Management Routes (FR1)
 router.post('/auth/login', authController.login);
@@ -43,6 +60,8 @@ router.get('/riders', authController.authMiddleware, deliveryController.getRider
 router.post('/deliveries/compute-fare', deliveryController.computeFare);
 router.post('/deliveries/assign-rider', authController.authMiddleware, deliveryController.assignRider);
 router.patch('/deliveries/:id/override-fare', authController.authMiddleware, deliveryController.overrideFare);
+router.post('/delivery/quote', quoteLimiter, deliveryQuoteController.getQuote);
+router.get('/delivery/service-area', deliveryQuoteController.getServiceArea);
 
 // 5. Inventory Management Routes (FR8)
 router.get('/inventory', authController.authMiddleware, inventoryController.getInventory);

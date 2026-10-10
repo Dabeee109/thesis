@@ -9,6 +9,7 @@ const { calculateDeliveryFare } = require('./fareCalculator');
 const { verifyStockAvailability, deductStockForOrder } = require('./inventoryService');
 const { processPayment } = require('./paymentService');
 const { broadcastSSE, sendNotification } = require('./notificationService');
+const { verifyQuote } = require('./geoService');
 
 /**
  * Generate unique order number (e.g. DNR-20260901-004)
@@ -86,11 +87,39 @@ async function createOrder(orderData) {
     paymentMethod = 'cash',
     amountPaid = 0,
     referenceNo = null,
-    customerNotes = ''
+    customerNotes = '',
+    quoteToken = null
   } = orderData;
 
   if (!items || items.length === 0) {
     throw new Error('Order must contain at least one item.');
+  }
+
+  // Delivery orders require a valid delivery quote
+  let effectiveDistanceKm = distanceKm;
+  let effectiveVehicleType = vehicleType;
+  let effectiveWeatherCondition = weatherCondition;
+  let effectiveDeliveryAddress = deliveryAddress;
+  let deliveryFee = 0.00;
+  let fareDetails = null;
+
+  if (orderType === 'delivery') {
+    if (!quoteToken) {
+      throw new Error('Delivery orders require a valid delivery quote.');
+    }
+    const claims = verifyQuote(quoteToken);
+    effectiveDistanceKm = claims.distanceKm;
+    effectiveVehicleType = claims.vehicleType;
+    effectiveWeatherCondition = claims.weatherCondition;
+    effectiveDeliveryAddress = claims.address || deliveryAddress;
+    deliveryFee = claims.deliveryFee;
+    fareDetails = {
+      rawFinalFare: claims.deliveryFee,
+      finalFare: claims.deliveryFee,
+      distanceKm: claims.distanceKm,
+      vehicleType: claims.vehicleType,
+      weatherCondition: claims.weatherCondition
+    };
   }
 
   // 1. Verify stock availability
@@ -111,8 +140,8 @@ async function createOrder(orderData) {
     firstName,
     lastName,
     phone: customerPhone,
-    address: deliveryAddress,
-    distanceKm
+    address: effectiveDeliveryAddress,
+    distanceKm: effectiveDistanceKm
   });
 
   // 3. Calculate line items subtotal and enrich with menu details
@@ -143,15 +172,7 @@ async function createOrder(orderData) {
     });
   }
 
-  // 4. Compute delivery fare if delivery order
-  let deliveryFee = 0.00;
-  let fareDetails = null;
-
-  if (orderType === 'delivery') {
-    fareDetails = calculateDeliveryFare(distanceKm, vehicleType, weatherCondition, new Date());
-    deliveryFee = fareDetails.finalFare;
-  }
-
+  // 4. Delivery fare is set from verified quote for delivery orders (or 0 for pickup)
   const totalAmount = subtotal + deliveryFee;
   const orderNumber = generateOrderNumber();
 
@@ -160,7 +181,7 @@ async function createOrder(orderData) {
     `INSERT INTO orders 
      (order_number, customer_id, order_type, status, subtotal, delivery_fee, total_amount, delivery_address, distance_km, customer_notes)
      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
-    [orderNumber, customerId, orderType, subtotal, deliveryFee, totalAmount, deliveryAddress, distanceKm, customerNotes]
+    [orderNumber, customerId, orderType, subtotal, deliveryFee, totalAmount, effectiveDeliveryAddress, effectiveDistanceKm, customerNotes]
   );
   const orderId = orderResult.insertId;
 
@@ -193,12 +214,12 @@ async function createOrder(orderData) {
        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
       [
         orderId,
-        vehicleType,
-        distanceKm,
-        weatherCondition,
+        effectiveVehicleType,
+        effectiveDistanceKm,
+        effectiveWeatherCondition,
         fareDetails.rawFinalFare,
         fareDetails.finalFare,
-        vehicleType === 'motorcycle' ? 20 : 30
+        effectiveVehicleType === 'motorcycle' ? 20 : 30
       ]
     );
     deliveryId = delResult.insertId;
