@@ -18,7 +18,8 @@ test('Frontend Static Assets & Pages Routing Suite', async (t) => {
     { path: '/js/dashboard.js', expectedStatus: 200, contentType: 'text/javascript' },
     { path: '/js/simulator.js', expectedStatus: 200, contentType: 'text/javascript' },
     { path: '/manifest.json', expectedStatus: 200, contentType: 'application/json' },
-    { path: '/sw.js', expectedStatus: 200, contentType: 'text/javascript' }
+    { path: '/sw.js', expectedStatus: 200, contentType: 'text/javascript' },
+    { path: '/delivery-check.html', expectedStatus: 200, contentType: 'text/html' }
   ];
 
   for (const r of routes) {

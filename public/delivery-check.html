@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Delivery Service Area & Fare Checker | Diner's Cafe</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body {
+      background: var(--bg-main);
+      color: var(--text-primary);
+      font-family: var(--font-body);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      margin: 0;
+    }
+    .check-header {
+      padding: 16px 24px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .check-header h1 {
+      font-family: var(--font-heading);
+      font-size: 1.25rem;
+      margin: 0;
+      color: var(--brand-crema);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .check-container {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      flex: 1;
+      height: calc(100vh - 65px);
+    }
+    #map {
+      height: 100%;
+      width: 100%;
+      background: #111;
+    }
+    .check-sidebar {
+      background: var(--bg-surface);
+      border-left: 1px solid var(--border-subtle);
+      padding: 24px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .card {
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 18px;
+    }
+    .btn-action {
+      background: var(--brand-primary);
+      color: var(--brand-espresso);
+      border: none;
+      padding: 12px 18px;
+      border-radius: var(--radius-sm);
+      font-weight: 600;
+      font-family: var(--font-body);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      transition: background 0.2s;
+    }
+    .btn-action:hover {
+      background: var(--brand-primary-hover);
+    }
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      font-size: 0.9rem;
+    }
+    .stat-label {
+      color: var(--text-secondary);
+    }
+    .stat-value {
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .price-highlight {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: var(--brand-crema);
+      font-family: var(--font-heading);
+      margin-top: 4px;
+    }
+    .status-box {
+      border-radius: var(--radius-sm);
+      padding: 12px;
+      font-size: 0.88rem;
+      line-height: 1.4;
+    }
+    .status-box.error {
+      background: var(--status-danger-bg);
+      border: 1px solid var(--status-danger);
+      color: #ff858d;
+    }
+    .status-box.success {
+      background: var(--status-success-bg);
+      border: 1px solid var(--status-success);
+      color: #70d6c7;
+    }
+    @media (max-width: 800px) {
+      .check-container {
+        grid-template-columns: 1fr;
+        grid-template-rows: 60vh auto;
+        height: auto;
+      }
+      #map {
+        height: 60vh;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="check-header">
+    <h1><span>☕</span> Diner's Cafe &bull; Smart Delivery Zone</h1>
+    <a href="index.html" style="color: var(--brand-primary); text-decoration: none; font-size: 0.9rem; font-weight: 500;">
+      &larr; Back to Portal
+    </a>
+  </header>
+
+  <main class="check-container">
+    <div id="map"></div>
+
+    <aside class="check-sidebar">
+      <div>
+        <h2 style="font-family: var(--font-heading); font-size: 1.15rem; margin: 0 0 8px 0; color: var(--brand-crema);">
+          Interactive Delivery Fare Quote
+        </h2>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin: 0;">
+          Tap anywhere on the map, drag the delivery pin, or use your GPS location to check service coverage and fare breakdown.
+        </p>
+      </div>
+
+      <button id="btn-locate" class="btn-action">
+        <span>📍</span> Use My Current Location
+      </button>
+
+      <div class="card">
+        <h3 style="font-size: 0.95rem; margin: 0 0 12px 0; color: var(--brand-crema);">Selected Location</h3>
+        <div class="stat-row">
+          <span class="stat-label">Latitude:</span>
+          <span class="stat-value" id="val-lat">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Longitude:</span>
+          <span class="stat-value" id="val-lng">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Address:</span>
+          <span class="stat-value" id="val-address" style="text-align: right; max-width: 200px;">--</span>
+        </div>
+      </div>
+
+      <div id="result-card" class="card" style="display: none;">
+        <h3 style="font-size: 0.95rem; margin: 0 0 12px 0; color: var(--brand-crema);">Estimated Fare & Transit</h3>
+        <div class="stat-row">
+          <span class="stat-label">Road Distance:</span>
+          <span class="stat-value" id="val-distance">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Estimated Transit:</span>
+          <span class="stat-value" id="val-eta">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Courier Vehicle:</span>
+          <span class="stat-value" id="val-vehicle">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Current Weather:</span>
+          <span class="stat-value" id="val-weather">--</span>
+        </div>
+        <hr style="border: none; border-top: 1px solid var(--border-subtle); margin: 12px 0;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-end;">
+          <div>
+            <span class="stat-label" style="font-size: 0.8rem; text-transform: uppercase;">Total Delivery Fee</span>
+            <div class="price-highlight" id="val-fee">₱0.00</div>
+          </div>
+          <span class="badge badge-cash" id="badge-status" style="font-size: 0.75rem; padding: 4px 8px; border-radius: 4px;">Quote Valid</span>
+        </div>
+      </div>
+
+      <div id="status-message" class="status-box" style="display: none;"></div>
+    </aside>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    let map;
+    let storeMarker;
+    let serviceCircle;
+    let userMarker;
+    let storeLat = 14.6042;
+    let storeLng = 120.9822;
+    let maxRadiusKm = 3.0;
+
+    const elLat = document.getElementById('val-lat');
+    const elLng = document.getElementById('val-lng');
+    const elAddress = document.getElementById('val-address');
+    const elDistance = document.getElementById('val-distance');
+    const elEta = document.getElementById('val-eta');
+    const elVehicle = document.getElementById('val-vehicle');
+    const elWeather = document.getElementById('val-weather');
+    const elFee = document.getElementById('val-fee');
+    const resultCard = document.getElementById('result-card');
+    const statusMsg = document.getElementById('status-message');
+    const btnLocate = document.getElementById('btn-locate');
+
+    function showStatus(text, isError = false) {
+      statusMsg.style.display = 'block';
+      statusMsg.className = 'status-box ' + (isError ? 'error' : 'success');
+      statusMsg.textContent = text;
+    }
+
+    function hideStatus() {
+      statusMsg.style.display = 'none';
+      statusMsg.textContent = '';
+    }
+
+    async function init() {
+      // 1. Fetch public service area
+      try {
+        const res = await fetch('/api/delivery/service-area');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success) {
+            storeLat = data.storeLat;
+            storeLng = data.storeLng;
+            maxRadiusKm = data.maxDeliveryKm;
+          }
+        }
+      } catch (e) {
+        console.warn('Could not load service area config:', e);
+      }
+
+      // 2. Initialize Leaflet map
+      map = L.map('map').setView([storeLat, storeLng], 14);
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
+        maxZoom: 19
+      }).addTo(map);
+
+      // Store marker
+      const storeIcon = L.divIcon({
+        className: 'custom-store-pin',
+        html: '<div style="background: #26170f; border: 2px solid #d4a373; border-radius: 50%; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; font-size: 18px; box-shadow: 0 4px 12px rgba(0,0,0,0.5);">☕</div>',
+        iconSize: [34, 34],
+        iconAnchor: [17, 17]
+      });
+
+      storeMarker = L.marker([storeLat, storeLng], { icon: storeIcon })
+        .addTo(map)
+        .bindPopup("<strong>Diner's Cafe (Store Entrance)</strong><br>Our Kitchen & Dispatch Center")
+        .openPopup();
+
+      // Coverage circle
+      serviceCircle = L.circle([storeLat, storeLng], {
+        radius: maxRadiusKm * 1000,
+        color: '#d4a373',
+        fillColor: '#d4a373',
+        fillOpacity: 0.12,
+        weight: 2,
+        dashArray: '6, 6'
+      }).addTo(map);
+
+      // Default user pin 1.0 km north
+      const initialUserLat = storeLat + 0.009;
+      const initialUserLng = storeLng;
+      placeUserPin(initialUserLat, initialUserLng);
+
+      // Tap on map to move pin
+      map.on('click', (e) => {
+        placeUserPin(e.latlng.lat, e.latlng.lng);
+      });
+
+      btnLocate.addEventListener('click', () => {
+        if (!navigator.geolocation) {
+          showStatus('Geolocation is not supported by your browser.', true);
+          return;
+        }
+        btnLocate.textContent = 'Locating...';
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            btnLocate.innerHTML = '<span>📍</span> Use My Current Location';
+            placeUserPin(pos.coords.latitude, pos.coords.longitude);
+            map.setView([pos.coords.latitude, pos.coords.longitude], 15);
+          },
+          (err) => {
+            btnLocate.innerHTML = '<span>📍</span> Use My Current Location';
+            showStatus('Unable to retrieve location: ' + err.message, true);
+          },
+          { timeout: 10000 }
+        );
+      });
+    }
+
+    function placeUserPin(lat, lng) {
+      if (!userMarker) {
+        userMarker = L.marker([lat, lng], { draggable: true }).addTo(map);
+        userMarker.on('dragend', () => {
+          const pos = userMarker.getLatLng();
+          updateQuote(pos.lat, pos.lng);
+        });
+      } else {
+        userMarker.setLatLng([lat, lng]);
+      }
+
+      updateQuote(lat, lng);
+    }
+
+    async function updateQuote(lat, lng) {
+      elLat.textContent = lat.toFixed(5);
+      elLng.textContent = lng.toFixed(5);
+      elAddress.textContent = 'Calculating...';
+      hideStatus();
+
+      try {
+        const res = await fetch('/api/delivery/quote', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lat, lng })
+        });
+
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          elAddress.textContent = data.destination.formattedAddress || 'Pinned Location';
+          elDistance.textContent = data.distanceKm + ' km';
+          elEta.textContent = (data.etaMin || 10) + ' mins';
+          elVehicle.textContent = data.vehicleType === 'bicycle' ? '🚲 Bicycle Eco-Courier' : '🛵 Motorcycle Courier';
+          elWeather.textContent = data.weatherCondition ? data.weatherCondition.replace('_', ' ') : 'sunny';
+          elFee.textContent = '₱' + data.fare.finalFare.toFixed(2);
+          resultCard.style.display = 'block';
+          hideStatus();
+        } else {
+          resultCard.style.display = 'none';
+          elAddress.textContent = 'Out of Service Area';
+          const errMsg = data.message || ('Error ' + res.status + ': Failed to calculate quote.');
+          showStatus(errMsg, true);
+        }
+      } catch (err) {
+        resultCard.style.display = 'none';
+        elAddress.textContent = 'Network Error';
+        showStatus('Network connection error: ' + err.message, true);
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>
