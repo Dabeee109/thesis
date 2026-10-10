@@ -2,10 +2,12 @@
  * Diner's Cafe Ordering & Delivery System - Server Bootstrap
  */
 
+const config = require('./config/config');
+process.env.TZ = config.timezone || 'Asia/Manila';
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const config = require('./config/config');
 const { initDatabase } = require('../database/db');
 const { addSSEClient, broadcastSSE } = require('./services/notificationService');
 
@@ -72,6 +74,25 @@ app.use((err, req, res, next) => {
 
 // Start Server
 async function startServer() {
+  if (!Number.isFinite(config.store.lat) || !Number.isFinite(config.store.lng)) {
+    throw new Error('STORE_LAT and STORE_LNG must be set to enable delivery.');
+  }
+
+  if (config.nodeEnv === 'production' && config.jwtSecret === 'diners_cafe_super_secure_secret_key_2026_thesis') {
+    throw new Error('JWT_SECRET must be set to a secure secret in production.');
+  }
+
+  // Maps provider resolution & boot validation
+  if (!config.maps.provider && !config.maps.googleKey) {
+    if (config.nodeEnv === 'production') {
+      throw new Error('GOOGLE_MAPS_API_KEY is required in production.');
+    } else {
+      console.warn('[Maps Warning] MAPS_PROVIDER is unset and no GOOGLE_MAPS_API_KEY found. Defaulting to mock provider for development.');
+    }
+  } else if ((config.maps.provider === 'google' || !config.maps.provider) && !config.maps.googleKey && config.nodeEnv === 'production') {
+    throw new Error('GOOGLE_MAPS_API_KEY is required in production.');
+  }
+
   await initDatabase();
 
   app.listen(config.port, () => {

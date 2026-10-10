@@ -33,6 +33,8 @@ module.exports = {
     projectId: process.env.FIREBASE_PROJECT_ID || 'diners-cafe-delivery'
   },
 
+  timezone: process.env.TZ_NAME || 'Asia/Manila',
+
   store: {
     name: process.env.STORE_NAME || "Diner's Cafe",
     phone: process.env.STORE_PHONE || '+63 912 345 6789',
@@ -40,6 +42,25 @@ module.exports = {
     gcashName: process.env.STORE_GCASH_NAME || "Diner's Cafe Official",
     gcashNumber: process.env.STORE_GCASH_NUMBER || '0912-345-6789',
     hours: process.env.STORE_HOURS || 'Monday - Sunday: 8:00 AM - 9:00 PM',
-    maxDeliveryKm: parseFloat(process.env.STORE_MAX_DELIVERY_KM || '3.0')
+    maxDeliveryKm: parseFloat(process.env.STORE_MAX_DELIVERY_KM || '3.0'),
+    lat: parseFloat(process.env.STORE_LAT),
+    lng: parseFloat(process.env.STORE_LNG)
+  },
+
+  maps: {
+    provider: process.env.MAPS_PROVIDER || '',          // 'google' | 'mock' | ''
+    googleKey: process.env.GOOGLE_MAPS_API_KEY || '',
+    timeoutMs: parseInt(process.env.MAPS_TIMEOUT_MS, 10) || 5000
+  },
+
+  delivery: {
+    quoteTtlSec: parseInt(process.env.QUOTE_TTL_SEC, 10) || 600,
+    bicycleMaxKm: parseFloat(process.env.BICYCLE_MAX_KM || '1.5'),
+    routeCacheTtlSec: parseInt(process.env.ROUTE_CACHE_TTL_SEC, 10) || 600
+  },
+
+  weather: {
+    openWeatherKey: process.env.OPENWEATHER_API_KEY || '',
+    heavyRainMmPerHour: parseFloat(process.env.HEAVY_RAIN_MM_H || '7.5')
   }
 };
