@@ -158,11 +158,46 @@ function renderQuickReplies(replies) {
   replies.forEach(qr => {
     const btn = document.createElement('button');
     btn.className = 'quick-reply-chip';
-    btn.innerText = qr.title;
-    btn.onclick = () => {
-      appendUserMessage(qr.title);
-      sendSimulatedPayload(qr.payload);
-    };
+
+    if (qr.content_type === 'location') {
+      btn.innerText = '📍 Share location';
+      btn.onclick = async () => {
+        try {
+          const area = await API.get('/delivery/service-area');
+          const storeLat = area && Number.isFinite(area.storeLat) ? area.storeLat : 14.6042;
+          const storeLng = area && Number.isFinite(area.storeLng) ? area.storeLng : 120.9822;
+          const defaultPromptVal = `${(storeLat + 0.005).toFixed(4)}, ${(storeLng + 0.005).toFixed(4)}`;
+          const input = window.prompt('Latitude, longitude', defaultPromptVal);
+          if (!input) return;
+
+          const parts = input.split(',').map(s => parseFloat(s.trim()));
+          if (parts.length !== 2 || isNaN(parts[0]) || isNaN(parts[1])) {
+            alert('Invalid latitude, longitude format. Please enter as "lat, lng".');
+            return;
+          }
+
+          const [lat, lng] = parts;
+          appendUserMessage('📍 Location shared');
+          hideQuickReplies();
+
+          const res = await API.post('/chatbot/simulate', {
+            psid: SIMULATOR_PSID,
+            location: { lat, lng }
+          });
+          if (res && res.session) {
+            currentSession = res.session;
+          }
+        } catch (err) {
+          console.error('Error sharing location:', err);
+        }
+      };
+    } else {
+      btn.innerText = qr.title;
+      btn.onclick = () => {
+        appendUserMessage(qr.title);
+        sendSimulatedPayload(qr.payload);
+      };
+    }
     wrap.appendChild(btn);
   });
 }

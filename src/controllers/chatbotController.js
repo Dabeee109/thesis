@@ -34,13 +34,13 @@ async function getChatbotLogs(req, res) {
  */
 async function simulateMessage(req, res) {
   try {
-    const { psid = 'PSID_SIMULATOR_USER', text = '', payload = null } = req.body;
+    const { psid = 'PSID_SIMULATOR_USER', text = '', payload = null, location = null } = req.body;
 
-    if (!text && !payload) {
-      return res.status(400).json({ success: false, message: 'Text message or payload is required.' });
+    if (!text && !payload && !location) {
+      return res.status(400).json({ success: false, message: 'Text message, payload, or location is required.' });
     }
 
-    await handleMessageEvent(psid, text, payload);
+    await handleMessageEvent(psid, text, payload, location);
 
     const session = await getSession(psid);
     return res.json({ success: true, message: 'Message processed by chatbot engine.', session });

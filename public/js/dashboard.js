@@ -8,6 +8,16 @@ let allInventory = [];
 let allRiders = [];
 let activeCategoryFilter = 'all';
 
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   // 1. Verify User Authentication
   const user = API.getUser();
@@ -430,7 +440,7 @@ async function viewOrderDetails(orderId) {
             <span>Status: <span class="badge badge-${o.status}">${o.status}</span></span>
           </div>
           <div style="font-size: 0.88rem; color: var(--text-secondary);">Phone: ${o.customer_phone || 'N/A'}</div>
-          <div style="font-size: 0.88rem; color: var(--text-secondary);">Address: ${o.delivery_address || 'Store Pickup'}</div>
+          <div style="font-size: 0.88rem; color: var(--text-secondary);">Address: ${escapeHtml(o.delivery_address || 'Store Pickup')}</div>
         </div>
 
         <h4 style="font-size: 0.95rem; margin: 16px 0 8px 0; color: var(--brand-crema);">Ordered Items:</h4>
