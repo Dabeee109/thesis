@@ -115,7 +115,7 @@ async function assignRider(req, res) {
     await db.query(
       `UPDATE deliveries 
        SET rider_id = ?, vehicle_type = ?, weather_condition = ?, computed_fare = ?, final_fare = ?, 
-           is_fare_overridden = ?, override_reason = ?, status = 'assigned', updated_at = CURRENT_TIMESTAMP
+           is_fare_overridden = ?, override_reason = ?, status = 'dispatched', dispatched_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [riderId, vType, wCondition, fareCalc.rawFinalFare, finalFare, isOverridden, reason, deliveryId]
     );
@@ -123,12 +123,16 @@ async function assignRider(req, res) {
     // Update rider status to on_delivery
     await db.query(`UPDATE delivery_personnel SET status = 'on_delivery' WHERE id = ?`, [riderId]);
 
+    // Advance order status to dispatched
+    const { updateOrderStatus } = require('../services/orderService');
+    await updateOrderStatus(del.order_id, 'dispatched', { riderId });
+
     broadcastSSE('DELIVERY_ASSIGNED', {
       deliveryId,
       orderId: del.order_id,
       riderId,
       finalFare,
-      status: 'assigned'
+      status: 'dispatched'
     });
 
     return res.json({ success: true, message: 'Rider assigned and fare updated.', finalFare });

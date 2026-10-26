@@ -292,7 +292,7 @@ function renderKanban(orders) {
     } else if (status === 'preparing') {
       actionBtn = `
         <div style="display: flex; gap: 6px; align-items: center;">
-          <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openAssignRiderModal(${order.id}, ${order.delivery_id || 'null'})">🛵 Dispatch</button>
+          <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); advanceOrderStatus(${order.id}, 'dispatched')">🛵 Dispatch</button>
           <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); openCancelOrderModal(${order.id}, '${order.order_number}')" title="Cancel / Void Order" style="background: #ef4444; border: none; padding: 4px 8px; font-size: 0.75rem;">❌ Void</button>
         </div>
       `;
