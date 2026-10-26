@@ -10,6 +10,9 @@ const { verifyStockAvailability, deductStockForOrder } = require('./inventorySer
 const { processPayment } = require('./paymentService');
 const { broadcastSSE, sendNotification } = require('./notificationService');
 const { verifyQuote } = require('./geoService');
+const { sendFeedbackPrompt, sendTextMessage } = require('./messengerService');
+const { getSession, saveSession } = require('./sessionManager');
+const feedbackService = require('./feedbackService');
 
 /**
  * Generate unique order number (e.g. DNR-20260901-004)
@@ -73,7 +76,14 @@ async function upsertCustomer({ psid, firstName = '', lastName = '', phone = '',
  * @param {string} [orderData.referenceNo]
  * @param {string} [orderData.customerNotes]
  */
-async function createOrder(orderData) {
+async function createOrder(orderDataOrPsid, maybeOrderData) {
+  let orderData = orderDataOrPsid;
+  if (typeof orderDataOrPsid === 'string' && maybeOrderData && typeof maybeOrderData === 'object') {
+    orderData = { psid: orderDataOrPsid, ...maybeOrderData };
+  } else if (!orderData || typeof orderData !== 'object') {
+    orderData = {};
+  }
+
   const {
     psid,
     customerName = '',
@@ -249,6 +259,7 @@ async function createOrder(orderData) {
   return {
     orderId,
     orderNumber,
+    order_number: orderNumber,
     customerId,
     orderType,
     subtotal,
@@ -360,10 +371,15 @@ async function updateOrderStatus(orderId, newStatus, extraData = {}) {
     notifMessage = `🛵 Great news! Your order #${order.order_number} has been dispatched and is currently on its way to ${order.delivery_address}.`;
     await sendNotification(order.psid, 'dispatched', `Order #${order.order_number} Dispatched`, notifMessage);
   } else if (newStatus === 'delivered') {
-    notifMessage = `🎉 Your order #${order.order_number} has been delivered! Enjoy your meal from Diner's Cafe.`;
+    notifMessage = `Order #${order.order_number} delivered.`;
     await sendNotification(order.psid, 'delivered', `Order #${order.order_number} Delivered`, notifMessage);
 
-    // FR11: Trigger feedback request
+    // Asynchronously request feedback via feedbackService (without blocking status change)
+    feedbackService.requestFeedback(orderId).catch(err => {
+      console.warn('[orderService] feedback request failed:', err.message);
+    });
+
+    // Keep existing FEEDBACK_PROMPT_TRIGGERED SSE event for dashboard
     broadcastSSE('FEEDBACK_PROMPT_TRIGGERED', {
       orderId,
       orderNumber: order.order_number,
@@ -382,6 +398,35 @@ async function updateOrderStatus(orderId, newStatus, extraData = {}) {
     newStatus,
     psid: order.psid
   };
+}
+
+/**
+ * Dispatch delivery feedback prompt push notification to customer via Messenger Send API (Deliverable 4)
+ * Transitions customer conversation session state from 'order_placed' to 'awaiting_feedback'.
+ * @param {string} psid - Customer Facebook PSID
+ * @param {string} orderNumber - Order reference number
+ * @param {number|string} orderId - Database order ID
+ */
+async function dispatchDeliveryFeedbackNotification(psid, orderNumber, orderId) {
+  if (!psid) return;
+
+  // 1. Transition customer conversation state to 'awaiting_feedback'
+  try {
+    const session = await getSession(psid);
+    session.state = 'awaiting_feedback';
+    session.pendingFeedbackOrderId = orderId;
+    session.pendingFeedbackOrderNumber = orderNumber;
+    await saveSession(session);
+  } catch (sessErr) {
+    console.error('[Delivery Push Notification Session Error]', sessErr.message);
+  }
+
+  // 2. Explicitly call Messenger Send API with rating buttons (⭐ to ⭐⭐⭐⭐⭐ / 1 to 5)
+  try {
+    await sendFeedbackPrompt(psid, orderNumber);
+  } catch (sendErr) {
+    console.error('[Delivery Push Notification Send API Error]', sendErr.message);
+  }
 }
 
 /**
@@ -603,6 +648,7 @@ async function rejectVoidOrder(orderId, adminUser, rejectionNote) {
 module.exports = {
   createOrder,
   updateOrderStatus,
+  dispatchDeliveryFeedbackNotification,
   getOrdersList,
   getOrderDetails,
   generateOrderNumber,
