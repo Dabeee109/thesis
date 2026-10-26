@@ -778,6 +778,101 @@ async function deleteMenuItem(itemId) {
   }
 }
 
+let stagedMenuImageBase64 = null;
+let stagedMenuImageChanged = false;
+
+function handleMenuImageSelect(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+
+  if (!file.type.startsWith('image/')) {
+    API.toast('Please select a valid image file (JPG, PNG, WEBP, GIF).', 'danger');
+    return;
+  }
+
+  // Max 8MB
+  if (file.size > 8 * 1024 * 1024) {
+    API.toast('Image exceeds the 8MB limit. Please choose a smaller file.', 'danger');
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    stagedMenuImageBase64 = e.target.result;
+    stagedMenuImageChanged = true;
+
+    const preview = document.getElementById('menu-img-preview');
+    const emptyState = document.getElementById('menu-img-empty-state');
+    const removeBtn = document.getElementById('menu-img-remove-btn');
+    const status = document.getElementById('menu-img-status');
+    const urlInput = document.getElementById('menu-img-input');
+
+    if (preview) {
+      preview.src = stagedMenuImageBase64;
+      preview.style.display = 'block';
+    }
+    if (emptyState) emptyState.style.display = 'none';
+    if (removeBtn) removeBtn.style.display = 'inline-flex';
+    if (status) status.innerText = `✓ Selected: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+    if (urlInput) urlInput.value = '';
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearMenuImageSelection() {
+  stagedMenuImageBase64 = null;
+  stagedMenuImageChanged = true;
+
+  const fileInput = document.getElementById('menu-img-file');
+  if (fileInput) fileInput.value = '';
+
+  const preview = document.getElementById('menu-img-preview');
+  const emptyState = document.getElementById('menu-img-empty-state');
+  const removeBtn = document.getElementById('menu-img-remove-btn');
+  const status = document.getElementById('menu-img-status');
+  const urlInput = document.getElementById('menu-img-input');
+
+  if (preview) {
+    preview.src = '';
+    preview.style.display = 'none';
+  }
+  if (emptyState) emptyState.style.display = 'flex';
+  if (removeBtn) removeBtn.style.display = 'none';
+  if (status) status.innerText = 'Picture removed';
+  if (urlInput) urlInput.value = '';
+}
+
+function handleManualImageUrl(url) {
+  stagedMenuImageBase64 = null;
+  stagedMenuImageChanged = true;
+  const fileInput = document.getElementById('menu-img-file');
+  if (fileInput) fileInput.value = '';
+
+  const preview = document.getElementById('menu-img-preview');
+  const emptyState = document.getElementById('menu-img-empty-state');
+  const removeBtn = document.getElementById('menu-img-remove-btn');
+  const status = document.getElementById('menu-img-status');
+
+  if (url && url.trim()) {
+    if (preview) {
+      preview.src = url.trim();
+      preview.style.display = 'block';
+    }
+    if (emptyState) emptyState.style.display = 'none';
+    if (removeBtn) removeBtn.style.display = 'inline-flex';
+    if (status) status.innerText = 'External image URL loaded';
+  } else {
+    clearMenuImageSelection();
+  }
+}
+
+function toggleImageUrlInput() {
+  const container = document.getElementById('menu-url-container');
+  if (container) {
+    container.style.display = container.style.display === 'none' ? 'block' : 'none';
+  }
+}
+
 function openAddMenuItemModal() {
   document.getElementById('menu-item-id').value = '';
   document.getElementById('modal-menu-title').innerText = 'Add New Menu Item';
@@ -785,8 +880,25 @@ function openAddMenuItemModal() {
   document.getElementById('menu-desc-input').value = '';
   document.getElementById('menu-price-input').value = '';
   document.getElementById('menu-prep-input').value = '10';
-  document.getElementById('menu-img-input').value = '';
   document.getElementById('initial-stock-group').style.display = 'grid';
+
+  // Reset image picker
+  stagedMenuImageBase64 = null;
+  stagedMenuImageChanged = false;
+  const fileInput = document.getElementById('menu-img-file');
+  if (fileInput) fileInput.value = '';
+  const urlInput = document.getElementById('menu-img-input');
+  if (urlInput) urlInput.value = '';
+  const preview = document.getElementById('menu-img-preview');
+  if (preview) { preview.src = ''; preview.style.display = 'none'; }
+  const emptyState = document.getElementById('menu-img-empty-state');
+  if (emptyState) emptyState.style.display = 'flex';
+  const removeBtn = document.getElementById('menu-img-remove-btn');
+  if (removeBtn) removeBtn.style.display = 'none';
+  const status = document.getElementById('menu-img-status');
+  if (status) status.innerText = '';
+  const urlContainer = document.getElementById('menu-url-container');
+  if (urlContainer) urlContainer.style.display = 'none';
 
   const select = document.getElementById('menu-cat-select');
   select.innerHTML = allMenuCategories.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
@@ -809,8 +921,39 @@ function openEditMenuItemModal(itemId) {
   document.getElementById('menu-desc-input').value = targetItem.description || '';
   document.getElementById('menu-price-input').value = targetItem.price;
   document.getElementById('menu-prep-input').value = targetItem.preparation_time_min || 10;
-  document.getElementById('menu-img-input').value = targetItem.image_url || '';
   document.getElementById('initial-stock-group').style.display = 'none';
+
+  // Populate image picker with current item image
+  stagedMenuImageBase64 = null;
+  stagedMenuImageChanged = false;
+  const fileInput = document.getElementById('menu-img-file');
+  if (fileInput) fileInput.value = '';
+  const urlInput = document.getElementById('menu-img-input');
+  if (urlInput) urlInput.value = targetItem.image_url || '';
+  const preview = document.getElementById('menu-img-preview');
+  const emptyState = document.getElementById('menu-img-empty-state');
+  const removeBtn = document.getElementById('menu-img-remove-btn');
+  const status = document.getElementById('menu-img-status');
+  const urlContainer = document.getElementById('menu-url-container');
+  if (urlContainer) urlContainer.style.display = 'none';
+
+  if (targetItem.image_url) {
+    if (preview) {
+      preview.src = targetItem.image_url;
+      preview.style.display = 'block';
+    }
+    if (emptyState) emptyState.style.display = 'none';
+    if (removeBtn) removeBtn.style.display = 'inline-flex';
+    if (status) status.innerText = 'Current picture loaded';
+  } else {
+    if (preview) {
+      preview.src = '';
+      preview.style.display = 'none';
+    }
+    if (emptyState) emptyState.style.display = 'flex';
+    if (removeBtn) removeBtn.style.display = 'none';
+    if (status) status.innerText = '';
+  }
 
   const select = document.getElementById('menu-cat-select');
   select.innerHTML = allMenuCategories.map(c => `
@@ -828,11 +971,32 @@ async function handleMenuItemSubmit(e) {
   const description = document.getElementById('menu-desc-input').value;
   const price = document.getElementById('menu-price-input').value;
   const prepTimeMin = document.getElementById('menu-prep-input').value;
-  const imageUrl = document.getElementById('menu-img-input').value;
+  let imageUrl = document.getElementById('menu-img-input').value;
   const initialStock = document.getElementById('menu-stock-input').value;
   const unit = document.getElementById('menu-unit-input').value;
 
+  const saveBtn = document.getElementById('menu-save-btn');
+  const origBtnText = saveBtn ? saveBtn.innerText : 'Save Item';
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.innerText = 'Saving...';
+  }
+
   try {
+    // If a new image file was chosen from the device, upload it first
+    if (stagedMenuImageBase64) {
+      if (saveBtn) saveBtn.innerText = 'Uploading pic...';
+      const uploadRes = await API.post('/menu/upload-image', {
+        imageBase64: stagedMenuImageBase64
+      });
+      if (uploadRes && uploadRes.imageUrl) {
+        imageUrl = uploadRes.imageUrl;
+      }
+    } else if (stagedMenuImageChanged && !imageUrl) {
+      // User explicitly cleared the picture
+      imageUrl = '';
+    }
+
     if (id) {
       await API.put(`/menu/${id}`, { categoryId, name, description, price, prepTimeMin, imageUrl });
       API.toast('Menu item updated!', 'success');
@@ -844,6 +1008,11 @@ async function handleMenuItemSubmit(e) {
     loadMenu();
   } catch (err) {
     console.error('Menu submit error:', err);
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.innerText = origBtnText;
+    }
   }
 }
 

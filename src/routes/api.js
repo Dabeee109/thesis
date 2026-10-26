@@ -41,6 +41,7 @@ router.patch('/auth/users/:id/toggle-status', authController.authMiddleware, aut
 // 2. Menu Management Routes (FR2, FR8)
 router.get('/menu', menuController.getMenu);
 router.post('/menu', authController.authMiddleware, menuController.createMenuItem);
+router.post('/menu/upload-image', authController.authMiddleware, menuController.uploadMenuImage);
 router.put('/menu/:id', authController.authMiddleware, menuController.updateMenuItem);
 router.patch('/menu/:id/toggle-availability', authController.authMiddleware, menuController.toggleAvailability);
 router.delete('/menu/:id', authController.authMiddleware, menuController.deleteMenuItem);

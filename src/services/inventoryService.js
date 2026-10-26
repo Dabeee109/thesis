@@ -30,6 +30,7 @@ async function getInventoryList() {
     FROM inventory i
     JOIN menu_items m ON i.menu_item_id = m.id
     JOIN categories c ON m.category_id = c.id
+    WHERE COALESCE(m.is_deleted, 0) = 0
     ORDER BY (i.stock_quantity <= i.low_stock_threshold) DESC, m.name ASC
   `);
   return rows;

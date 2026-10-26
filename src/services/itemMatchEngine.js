@@ -290,7 +290,7 @@ async function findMenuItemByName(queryText, options = {}) {
   if (!items) {
     const [rows] = await db.query(
       `SELECT id, category_id, name, price, description, is_available, is_bestseller 
-       FROM menu_items WHERE is_available = 1`
+       FROM menu_items WHERE is_available = 1 AND COALESCE(is_deleted, 0) = 0`
     );
     items = rows || [];
   }

@@ -65,6 +65,7 @@ function initSqliteFallback() {
         is_available INTEGER NOT NULL DEFAULT 1,
         is_bestseller INTEGER NOT NULL DEFAULT 0,
         synonyms TEXT DEFAULT NULL,
+        is_deleted INTEGER NOT NULL DEFAULT 0,
         preparation_time_min INTEGER NOT NULL DEFAULT 15,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -210,6 +211,7 @@ function initSqliteFallback() {
     try { sqliteDb.exec(`ALTER TABLE customers ADD COLUMN session_json TEXT DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN feedback_requested_at DATETIME DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE menu_items ADD COLUMN synonyms TEXT DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE menu_items ADD COLUMN is_deleted INTEGER DEFAULT 0;`); } catch (e) { }
 
     // Migration: Update deliveries status check constraint to include 'cancelled'
     try {
@@ -416,7 +418,8 @@ async function initDatabase() {
       const cols = [
         { table: 'customers', column: 'session_json', type: 'TEXT NULL' },
         { table: 'orders', column: 'feedback_requested_at', type: 'DATETIME NULL' },
-        { table: 'menu_items', column: 'synonyms', type: 'VARCHAR(255) NULL' }
+        { table: 'menu_items', column: 'synonyms', type: 'VARCHAR(255) NULL' },
+        { table: 'menu_items', column: 'is_deleted', type: 'TINYINT(1) NOT NULL DEFAULT 0' }
       ];
       for (const c of cols) {
         const [rows] = await conn.query(

@@ -760,7 +760,7 @@ async function sendFullMenu(psid, session) {
     FROM menu_items m
     JOIN categories c ON c.id = m.category_id AND c.is_active = 1
     JOIN inventory i ON i.menu_item_id = m.id
-    WHERE m.is_available = 1 AND i.stock_quantity > 0
+    WHERE m.is_available = 1 AND i.stock_quantity > 0 AND COALESCE(m.is_deleted, 0) = 0
     ORDER BY c.display_order ASC, m.is_bestseller DESC, m.name ASC
   `);
 
@@ -785,7 +785,11 @@ async function sendFullMenu(psid, session) {
     }
     subtitle = subtitle.substring(0, 80);
 
-    const imageUrl = it.image_url || 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=500&auto=format&fit=crop&q=60';
+    let imageUrl = it.image_url || 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=500&auto=format&fit=crop&q=60';
+    if (imageUrl.startsWith('/')) {
+      const base = (config.appUrl || '').replace(/\/$/, '');
+      if (base) imageUrl = `${base}${imageUrl}`;
+    }
 
     return {
       title,
@@ -826,7 +830,7 @@ async function sendCategoryMenu(psid, slug) {
     FROM menu_items m
     JOIN categories c ON c.id = m.category_id
     JOIN inventory i ON i.menu_item_id = m.id
-    WHERE c.slug = ? AND m.is_available = 1 AND i.stock_quantity > 0
+    WHERE c.slug = ? AND m.is_available = 1 AND i.stock_quantity > 0 AND COALESCE(m.is_deleted, 0) = 0
     ORDER BY m.is_bestseller DESC, m.name ASC
   `, [slug]);
 
@@ -835,12 +839,19 @@ async function sendCategoryMenu(psid, slug) {
     return;
   }
 
-  const elements = items.slice(0, 10).map(it => ({
-    title: `${it.name} · ${peso(it.price)}`.substring(0, 80),
-    subtitle: String(it.description || '').substring(0, 80),
-    image_url: it.image_url,
-    buttons: [{ type: 'postback', title: '➕ Add to order', payload: `ADD_ITEM_${it.id}` }]
-  }));
+  const elements = items.slice(0, 10).map(it => {
+    let imageUrl = it.image_url || 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=500&auto=format&fit=crop&q=60';
+    if (imageUrl.startsWith('/')) {
+      const base = (config.appUrl || '').replace(/\/$/, '');
+      if (base) imageUrl = `${base}${imageUrl}`;
+    }
+    return {
+      title: `${it.name} · ${peso(it.price)}`.substring(0, 80),
+      subtitle: String(it.description || '').substring(0, 80),
+      image_url: imageUrl,
+      buttons: [{ type: 'postback', title: '➕ Add to order', payload: `ADD_ITEM_${it.id}` }]
+    };
+  });
 
   await sendGenericTemplate(psid, elements);
 }

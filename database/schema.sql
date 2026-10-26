@@ -76,12 +76,14 @@ CREATE TABLE `menu_items` (
   `is_available` TINYINT(1) NOT NULL DEFAULT 1,
   `is_bestseller` TINYINT(1) NOT NULL DEFAULT 0,
   `synonyms` VARCHAR(255) DEFAULT NULL COMMENT 'Comma-separated lookup synonyms and keywords',
+  `is_deleted` TINYINT(1) NOT NULL DEFAULT 0,
   `preparation_time_min` INT NOT NULL DEFAULT 15,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (`category_id`) REFERENCES `categories`(`id`) ON DELETE CASCADE,
   INDEX `idx_category_id` (`category_id`),
-  INDEX `idx_is_available` (`is_available`)
+  INDEX `idx_is_available` (`is_available`),
+  INDEX `idx_is_deleted` (`is_deleted`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 5. Inventory Table (Item stock counts & threshold alerts)

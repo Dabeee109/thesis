@@ -134,3 +134,134 @@ test('Menu - carousels chunked to at most 10 cards per carousel', async () => {
   await db.query('DELETE FROM inventory WHERE menu_item_id >= 100');
   await db.query('DELETE FROM menu_items WHERE id >= 100');
 });
+
+test('Menu - deleteMenuItem safely hard-deletes unreferenced menu item', async () => {
+  const menuController = require('../src/controllers/menuController');
+  
+  // Insert unreferenced item
+  const [insertRes] = await db.query(
+    `INSERT INTO menu_items (category_id, name, description, price, is_available)
+     VALUES (1, 'Unreferenced Deletable Latte', 'Test desc', 120.00, 1)`
+  );
+  const itemId = insertRes.insertId;
+
+  await db.query(
+    `INSERT INTO inventory (menu_item_id, stock_quantity, low_stock_threshold)
+     VALUES (?, 15, 5)`,
+    [itemId]
+  );
+
+  let responseData = null;
+  let statusCode = 200;
+  const req = { params: { id: itemId } };
+  const res = {
+    status(code) { statusCode = code; return this; },
+    json(data) { responseData = data; return this; }
+  };
+
+  await menuController.deleteMenuItem(req, res);
+
+  assert.strictEqual(statusCode, 200);
+  assert.strictEqual(responseData.success, true);
+
+  // Check it is completely gone from DB
+  const [rows] = await db.query(`SELECT id FROM menu_items WHERE id = ?`, [itemId]);
+  assert.strictEqual(rows.length, 0);
+});
+
+test('Menu - deleteMenuItem soft-deletes referenced item without foreign key violation', async () => {
+  const menuController = require('../src/controllers/menuController');
+  
+  // Insert item
+  const [insertRes] = await db.query(
+    `INSERT INTO menu_items (category_id, name, description, price, is_available)
+     VALUES (1, 'Referenced Historical Item', 'Test historical order item', 150.00, 1)`
+  );
+  const itemId = insertRes.insertId;
+
+  await db.query(
+    `INSERT INTO inventory (menu_item_id, stock_quantity, low_stock_threshold)
+     VALUES (?, 20, 5)`,
+    [itemId]
+  );
+
+  // Create a customer and order referencing this item
+  const [custRes] = await db.query(
+    `INSERT INTO customers (psid, first_name, phone_number)
+     VALUES ('TEST_PSID_FK_${Date.now()}', 'FKTest', '09123456789')`
+  );
+  const custId = custRes.insertId;
+
+  const [ordRes] = await db.query(
+    `INSERT INTO orders (order_number, customer_id, total_amount, status)
+     VALUES ('ORD-TEST-FK-${Date.now()}', ?, 150.00, 'delivered')`,
+    [custId]
+  );
+  const orderId = ordRes.insertId;
+
+  await db.query(
+    `INSERT INTO order_items (order_id, menu_item_id, item_name, unit_price, quantity, subtotal)
+     VALUES (?, ?, 'Referenced Historical Item', 150.00, 1, 150.00)`,
+    [orderId, itemId]
+  );
+
+  let responseData = null;
+  let statusCode = 200;
+  const req = { params: { id: itemId } };
+  const res = {
+    status(code) { statusCode = code; return this; },
+    json(data) { responseData = data; return this; }
+  };
+
+  // Must not throw or return 500 error
+  await menuController.deleteMenuItem(req, res);
+
+  assert.strictEqual(statusCode, 200);
+  assert.strictEqual(responseData.success, true);
+
+  // Item row still exists for historical foreign key reference, but marked is_deleted = 1
+  const [rows] = await db.query(`SELECT is_deleted, is_available FROM menu_items WHERE id = ?`, [itemId]);
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].is_deleted, 1);
+  assert.strictEqual(rows[0].is_available, 0);
+
+  // getMenu must exclude it
+  let menuResData = null;
+  const menuReq = {};
+  const menuRes = {
+    status(code) { return this; },
+    json(data) { menuResData = data; return this; }
+  };
+  await menuController.getMenu(menuReq, menuRes);
+  const inMenu = (menuResData.allItems || []).find(it => it.id === itemId);
+  assert.strictEqual(inMenu, undefined, 'Soft-deleted item must not appear in menu');
+});
+
+test('Menu - uploadMenuImage saves base64 picture to public/uploads directory', async () => {
+  const menuController = require('../src/controllers/menuController');
+  
+  // Minimal valid 1x1 PNG base64
+  const pngBase64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+  let responseData = null;
+  let statusCode = 200;
+  const req = { body: { imageBase64: pngBase64 } };
+  const res = {
+    status(code) { statusCode = code; return this; },
+    json(data) { responseData = data; return this; }
+  };
+
+  await menuController.uploadMenuImage(req, res);
+
+  assert.strictEqual(statusCode, 200);
+  assert.strictEqual(responseData.success, true);
+  assert.ok(responseData.imageUrl.startsWith('/uploads/menu_'));
+  assert.ok(responseData.imageUrl.endsWith('.png'));
+
+  // Verify file exists on disk
+  const diskPath = path.join(__dirname, '../public', responseData.imageUrl.replace(/^\//, ''));
+  assert.ok(fs.existsSync(diskPath), 'Uploaded image must exist in public/uploads');
+
+  // Clean up
+  try { fs.unlinkSync(diskPath); } catch (e) {}
+});

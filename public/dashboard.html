@@ -920,8 +920,40 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label">Image URL</label>
-          <input type="url" id="menu-img-input" class="form-control" placeholder="https://images.unsplash.com/...">
+          <label class="form-label">Menu Item Picture</label>
+          <div style="background: var(--bg-surface-elevated, #241a12); border: 1px dashed var(--border-subtle, rgba(212, 163, 115, 0.25)); border-radius: var(--radius-md, 12px); padding: 14px; text-align: center;">
+            <div id="menu-img-preview-container" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 110px;">
+              <img id="menu-img-preview" src="" alt="Menu item preview" style="display: none; max-height: 140px; max-width: 100%; border-radius: 8px; object-fit: cover; box-shadow: 0 4px 14px rgba(0,0,0,0.4); margin-bottom: 8px;">
+              <div id="menu-img-empty-state" style="color: var(--text-muted, #8c7a6e); font-size: 0.88rem; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 0;">
+                <span style="font-size: 1.8rem;">📷</span>
+                <span>No picture selected. Click below to choose from your device.</span>
+              </div>
+            </div>
+
+            <!-- Hidden native file input -->
+            <input type="file" id="menu-img-file" accept="image/*" style="display: none;" onchange="handleMenuImageSelect(event)">
+
+            <div style="display: flex; gap: 8px; justify-content: center; align-items: center; margin-top: 10px; flex-wrap: wrap;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('menu-img-file').click()">
+                📁 Choose Pic on Device
+              </button>
+              <button type="button" class="btn btn-outline btn-sm" id="menu-img-remove-btn" style="display: none;" onclick="clearMenuImageSelection()">
+                ✕ Remove Pic
+              </button>
+            </div>
+
+            <div id="menu-img-status" style="margin-top: 6px; font-size: 0.78rem; color: var(--brand-primary, #d4a373);"></div>
+
+            <!-- Optional external URL toggle -->
+            <div style="margin-top: 10px; border-top: 1px solid var(--border-subtle, rgba(212, 163, 115, 0.15)); padding-top: 8px;">
+              <a href="javascript:void(0)" onclick="toggleImageUrlInput()" style="font-size: 0.78rem; color: var(--text-muted, #8c7a6e); text-decoration: underline;">
+                Or enter an image URL
+              </a>
+              <div id="menu-url-container" style="display: none; margin-top: 8px;">
+                <input type="url" id="menu-img-input" class="form-control" placeholder="https://images.unsplash.com/..." oninput="handleManualImageUrl(this.value)">
+              </div>
+            </div>
+          </div>
         </div>
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;" class="form-group" id="initial-stock-group">
