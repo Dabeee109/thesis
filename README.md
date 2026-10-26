@@ -148,3 +148,88 @@ If clients could supply vehicle type, weather condition, distance, or fee, malic
 ### 8. Reverse Proxy Configuration
 If running behind reverse proxies (Nginx, Cloudflare, AWS ALB, Heroku), configure `app.set('trust proxy', 1)` in Express so that `express-rate-limit` identifies client IP addresses accurately from the `X-Forwarded-For` header.
 
+---
+
+## 🤖 Conversational Flow v2
+
+The Diner's Cafe conversational AI provides an end-to-end ordering and support experience via Facebook Messenger and the built-in browser simulator (`/simulator.html`).
+
+### 1. Conversation States & Macro States
+The bot state machine manages 16 granular states and maps them into 5 derived `macroState` categories (`idle | ordering | awaiting_checkout | order_placed | awaiting_feedback`) for logging and metrics:
+- `IDLE`: No active operation; accepts any command or intent.
+- `BROWSING`: Full menu displayed; user is selecting items or issuing orders.
+- `ADDING_ITEM`: Awaiting quantity selection for a pending menu item.
+- `AWAITING_CHECKOUT_CONFIRM`: Open yes/no question: "Check out?".
+- `AWAITING_CLEAR_CONFIRM`: Open yes/no question: "Clear your whole cart?".
+- `AWAITING_ORDER_TYPE`: Selecting delivery (`🛵 Delivery`) or pickup (`🛍️ Pickup`).
+- `AWAITING_DETAILS_REUSE`: Prompting returning customer to reuse saved address/phone.
+- `AWAITING_NAME`: Collecting recipient customer full name.
+- `AWAITING_ADDRESS`: Collecting street address with landmark (delivery only).
+- `AWAITING_PHONE`: Collecting Philippine mobile contact number (`09XXXXXXXXX` / `+639XXXXXXXXX`).
+- `AWAITING_DETAILS_CONFIRM`: Reviewing order breakdown (items, subtotal, delivery fee, total).
+- `AWAITING_EDIT_FIELD`: Selecting which customer field to update from the summary.
+- `AWAITING_PAYMENT`: Choosing cash on delivery/counter or GCash.
+- `AWAITING_GCASH_AMOUNT`: Customer sending amount sent via GCash.
+- `AWAITING_REMOVE_ITEM`: Selecting which item to decrement or delete from cart.
+- `AWAITING_FEEDBACK_COMMENT`: Optional comment input after a 1–3 star rating.
+
+### 2. Button Payloads
+All payloads carry IDs rather than names and execute idempotently:
+- `MENU_HOME`: Immediate whole-menu carousel.
+- `VIEW_CART`: Show formatted cart contents and subtotal.
+- `CONFIRM_CHECKOUT`: Transition from browsing/cart to order type selection.
+- `KEEP_SHOPPING`: Retain cart and return to browsing.
+- `CHECKOUT_DELIVERY` / `CHECKOUT_PICKUP`: Set order fulfillment type.
+- `USE_SAVED_DETAILS` / `CHANGE_DETAILS`: Accept or re-enter customer details.
+- `CONFIRM_DETAILS`: Validate pricing and move to payment selection.
+- `EDIT_DETAILS`, `EDIT_NAME`, `EDIT_ADDRESS`, `EDIT_PHONE`: Field-level inline edits.
+- `BACK_TO_SUMMARY`: Return directly to order breakdown.
+- `BACK_TO_CART`: Return directly to cart summary.
+- `PAY_CASH` / `PAY_GCASH`: Choose payment method.
+- `REMOVE_ITEM`: Prompt for item to remove with quick-reply buttons.
+- `REMOVE_ITEM_<id>`: Remove whole line or decrement selected item.
+- `CLEAR_CART` / `CLEAR_CART_YES`: Confirmation and execution of cart reset.
+- `RESET_SESSION`: Complete hard-reset of customer session state and cart.
+- `ADD_ITEM_<id>` / `QTY_<n>`: Item addition and quantity selection.
+- `FEEDBACK_RATE_<1-5>_<orderNumber>`: Post-delivery star rating.
+- `FEEDBACK_SKIP_<orderNumber>`: Skip optional comment on low rating.
+- `TRACK_LATEST_ORDER`: Track latest active order status.
+- `STORE_INFO`: Return cafe hours, location, and contact numbers.
+
+### 3. Priority Routing Order (Code-First)
+Incoming messages are routed strictly in this order before invoking external NLU:
+1. **Session Expiry**: Stale states older than 30 minutes (`NLP_STATE_TTL_MIN`) reset to `IDLE`.
+2. **Button Payloads**: Validated postbacks and quick-reply action triggers.
+3. **Open State Text Handlers**: Free text expected for name, address, phone, quantity, GCash amount, or feedback comments.
+4. **Yes/No Lexicon**: Affirmative/negative answers evaluated via `classifyShort` only when a yes/no state is open. Non-answers replace the open question and route normally.
+5. **Shortcut Keywords**: Exact or normalized single words (`menu`, `cart`, `track`, `hi`, `hours`, `help`, `cancel`).
+6. **Wit.ai NLU / Local Fallback**: Unstructured queries parsed for intents and entities.
+
+### 4. Matching Thresholds & Tuning
+Configured in `src/services/textMatch.js` and `src/services/nlpEngine.js`:
+- **Intent Act Threshold**: Confidence $\ge 0.80$ acts immediately.
+- **Intent Confirm Threshold**: Confidence $0.55 - 0.79$ prompts with `Yes` / `No` confirmation.
+- **Intent Fallback Threshold**: Confidence $< 0.55$ sends polite fallback quick replies.
+- **Menu Item Similarity**:
+  - `fuzzyAccept`: $0.78$ (clear single match adds directly).
+  - `fuzzyConfirm`: $0.55$ (prompts "Did you mean X?").
+  - `ambiguityGap`: $0.08$ (candidates within gap trigger quick-reply selection buttons).
+
+### 5. Retraining Wit.ai
+See [`docs/wit-training.md`](file:///c:/Users/USER/Desktop/Thesis/docs/wit-training.md) for full instructions:
+- Test dry-run: `node scripts/uploadWitData.js --dry-run`
+- Upload dataset: `WIT_AI_SERVER_ACCESS_TOKEN="YOUR_TOKEN" node scripts/uploadWitData.js`
+
+### 6. Automatic Feedback Architecture
+1. When staff or rider advances an order to `delivered` via `PATCH /api/orders/:id/status`, `orderService.updateOrderStatus` calls `feedbackService.requestFeedback(orderId)`.
+2. `orders.feedback_requested_at` is claimed atomically in the database to guarantee exactly one prompt per order.
+3. The prompt is sent via `sendFeedbackPrompt` using `messaging_type: 'UPDATE'`.
+4. When customer taps a star rating (`FEEDBACK_RATE_<n>_<orderNumber>`), `handleFeedbackRating` verifies sender ownership (`c.psid === psid`) and inserts a row into `feedback`.
+5. An SSE event `NEW_FEEDBACK` is broadcast to connected dashboard clients, instantly updating the **Feedback & Ratings** table without page refresh.
+6. If 1–3 stars are submitted in `IDLE`, the bot prompts for an optional comment; submitting a comment updates `feedback.comments` and re-emits `NEW_FEEDBACK` so the card displays the comment in real time.
+7. HTML escaping (`escapeHtml`) prevents stored XSS across all customer-supplied fields.
+
+### 7. Customizing Message Wording
+All bot text and quick-reply copy are centralized in `src/services/botMessages.js`. Edit strings or functions in that file to adjust phrasing, button titles, or formatting across the entire chatbot without touching the state machine.
+
+

@@ -72,8 +72,8 @@ YOU MUST ALWAYS RESPOND ONLY WITH A VALID JSON OBJECT matching this exact schema
 }`;
 
   try {
-    // Try Gemini 3.5 Flash first, then fallback to Gemini Flash Latest / 3.8 Flash
-    const modelsToTry = ['gemini-3.5-flash', 'gemini-flash-latest', 'gemini-3.8-flash'];
+    // Try Gemini 3.7 Flash first, then fallback to Gemini 3.5 Flash / Gemini 3.8 Flash
+    const modelsToTry = ['gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-3.8-flash'];
     let candidateText = null;
 
     for (const model of modelsToTry) {

@@ -53,6 +53,13 @@ test('Diner Cafe End-to-End API Integration Suite', async (t) => {
   });
 
   await t.test('5. Conversational Order via Chatbot Simulator (POST /api/chatbot/simulate)', async () => {
+    // Reset session before running order flow
+    await fetch(`${BASE_URL}/api/chatbot/simulate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ psid: 'TEST_PSID_E2E', payload: 'RESET_SESSION' })
+    });
+
     // 5a. Greet
     const greetRes = await fetch(`${BASE_URL}/api/chatbot/simulate`, {
       method: 'POST',
@@ -84,14 +91,40 @@ test('Diner Cafe End-to-End API Integration Suite', async (t) => {
       body: JSON.stringify({ psid: 'TEST_PSID_E2E', payload: 'CHECKOUT_DELIVERY' })
     });
     assert.equal(delivRes.status, 200);
+    const delivData = await delivRes.json();
 
-    // 5e. Provide Address
-    const addrRes = await fetch(`${BASE_URL}/api/chatbot/simulate`, {
+    // 5e. Provide Details (Flow v2: Name, Address, Phone, or saved details)
+    if (delivData.session?.state === 'AWAITING_DETAILS_REUSE') {
+      await fetch(`${BASE_URL}/api/chatbot/simulate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ psid: 'TEST_PSID_E2E', payload: 'USE_SAVED_DETAILS' })
+      });
+    } else {
+      await fetch(`${BASE_URL}/api/chatbot/simulate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ psid: 'TEST_PSID_E2E', text: 'Juan Dela Cruz' })
+      });
+      const addrRes = await fetch(`${BASE_URL}/api/chatbot/simulate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ psid: 'TEST_PSID_E2E', text: '123 Test St., Near Library' })
+      });
+      assert.equal(addrRes.status, 200);
+      await fetch(`${BASE_URL}/api/chatbot/simulate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ psid: 'TEST_PSID_E2E', text: '0917 123 4567' })
+      });
+    }
+
+    // Confirm summary
+    await fetch(`${BASE_URL}/api/chatbot/simulate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ psid: 'TEST_PSID_E2E', text: '123 Test St., Near Library' })
+      body: JSON.stringify({ psid: 'TEST_PSID_E2E', payload: 'CONFIRM_DETAILS' })
     });
-    assert.equal(addrRes.status, 200);
 
     // 5f. Choose Cash Payment
     const cashRes = await fetch(`${BASE_URL}/api/chatbot/simulate`, {
@@ -408,4 +441,83 @@ test('Diner Cafe End-to-End API Integration Suite', async (t) => {
       })
     });
   });
+
+  await t.test('13. Settings: Facebook Page Access Token Management', async () => {
+    // 1. Non-admin staff cannot access settings
+    const staffLoginRes = await fetch(`${BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'staff@dinerscafe.ph', password: 'password123' })
+    });
+    const staffLoginData = await staffLoginRes.json();
+    const staffToken = staffLoginData.token;
+
+    const forbiddenRes = await fetch(`${BASE_URL}/api/settings/facebook`, {
+      headers: { 'Authorization': `Bearer ${staffToken}` }
+    });
+    assert.equal(forbiddenRes.status, 403);
+
+    // 2. Admin can read Facebook settings
+    const getRes = await fetch(`${BASE_URL}/api/settings/facebook`, {
+      headers: { 'Authorization': `Bearer ${authToken}` }
+    });
+    assert.equal(getRes.status, 200);
+    const getData = await getRes.json();
+    assert.equal(getData.success, true);
+    assert.ok(getData.tokenPreview);
+    assert.equal(typeof getData.isConfigured, 'boolean');
+
+    // 3. Admin can update the Facebook Page Access Token
+    const originalToken = getData.fullToken;
+    const testNewToken = 'EAAQORBW_TEST_UPDATED_TOKEN_FOR_E2E_SUITE_123456';
+    const updateRes = await fetch(`${BASE_URL}/api/settings/facebook`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`
+      },
+      body: JSON.stringify({ pageAccessToken: testNewToken })
+    });
+    assert.equal(updateRes.status, 200);
+    const updateData = await updateRes.json();
+    assert.equal(updateData.success, true);
+    assert.ok(updateData.tokenPreview.includes('EAAQORBW'));
+
+    // 4. Test validation error when missing token parameter
+    const invalidRes = await fetch(`${BASE_URL}/api/settings/facebook`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`
+      },
+      body: JSON.stringify({})
+    });
+    assert.equal(invalidRes.status, 400);
+
+    // 5. Test token format validation
+    const testRes = await fetch(`${BASE_URL}/api/settings/facebook/test`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`
+      },
+      body: JSON.stringify({ pageAccessToken: 'INVALID_TOKEN_PREFIX' })
+    });
+    assert.equal(testRes.status, 400);
+    const testData = await testRes.json();
+    assert.equal(testData.verified, false);
+
+    // 6. Restore original token
+    if (originalToken) {
+      await fetch(`${BASE_URL}/api/settings/facebook`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
+        body: JSON.stringify({ pageAccessToken: originalToken })
+      });
+    }
+  });
 });
+
