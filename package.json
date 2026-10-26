@@ -8,6 +8,7 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "test": "node --test tests/*.test.js",
+    "tunnel": "ngrok http --url=headboard-reversing-celery.ngrok-free.dev 3000",
     "cap:init": "cap init",
     "cap:sync": "cap sync android",
     "cap:open": "cap open android"

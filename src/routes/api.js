@@ -10,6 +10,7 @@ const feedbackController = require('../controllers/feedbackController');
 const reportController = require('../controllers/reportController');
 const chatbotController = require('../controllers/chatbotController');
 const deliveryQuoteController = require('../controllers/deliveryQuoteController');
+const settingsController = require('../controllers/settingsController');
 const rateLimit = require('express-rate-limit');
 
 const quoteLimiter = rateLimit({
@@ -83,5 +84,10 @@ router.post('/chatbot/simulate', chatbotController.simulateMessage);
 router.get('/chatbot/session', chatbotController.getSimulatorSession);
 router.get('/chatbot/status', chatbotController.getStatus);
 router.post('/chatbot/toggle', authController.authMiddleware, chatbotController.toggleStatus);
+
+// 9. System Settings & Integration Routes
+router.get('/settings/facebook', authController.authMiddleware, authController.requireAdmin, settingsController.getFacebookSettings);
+router.put('/settings/facebook', authController.authMiddleware, authController.requireAdmin, settingsController.updateFacebookSettings);
+router.post('/settings/facebook/test', authController.authMiddleware, authController.requireAdmin, settingsController.testFacebookToken);
 
 module.exports = router;

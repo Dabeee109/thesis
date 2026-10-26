@@ -74,3 +74,6 @@ coverage/
 .tmp/
 tmp/
 cloudflared.exe
+ngrok.exe
+*.exe.old
+tests/*.sqlite

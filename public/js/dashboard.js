@@ -82,7 +82,10 @@ function switchTab(tabId) {
   if (tabId === 'feedback') loadFeedback();
   if (tabId === 'reports') loadReports();
   if (tabId === 'chatbot') loadChatbotLogs();
-  if (tabId === 'settings') loadUsers();
+  if (tabId === 'settings') {
+    loadUsers();
+    loadFacebookSettings();
+  }
 }
 
 async function refreshAllData() {
@@ -95,7 +98,8 @@ async function refreshAllData() {
     loadFeedback(),
     loadReports(),
     loadChatbotStatus(),
-    loadUsers()
+    loadUsers(),
+    loadFacebookSettings()
   ]);
 }
 
@@ -329,7 +333,7 @@ function renderKanban(orders) {
         <span class="order-number">#${order.order_number}</span>
         ${paymentBadge}
       </div>
-      <div style="font-weight: 700; font-size: 0.92rem; margin-bottom: 4px;">${order.customer_name || 'Customer'}</div>
+      <div style="font-weight: 700; font-size: 0.92rem; margin-bottom: 4px;">${escapeHtml(order.customer_name || 'Customer')}</div>
       <div class="order-items-preview">${itemsSummary || '1x Order item'}</div>
       ${voidNotice}
       ${order.cancellation_reason ? `<div style="font-size: 0.76rem; color: var(--status-danger); margin-top: 4px;">Reason: ${order.cancellation_reason}</div>` : ''}
@@ -363,7 +367,7 @@ function renderOrdersTable(orders) {
     tr.innerHTML = `
       <td><strong>#${order.order_number}</strong></td>
       <td>${new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
-      <td>${order.customer_name || 'Customer'}</td>
+      <td>${escapeHtml(order.customer_name || 'Customer')}</td>
       <td><span class="badge ${order.order_type === 'delivery' ? 'badge-dispatched' : 'badge-preparing'}">${order.order_type}</span></td>
       <td>${itemsCount} items</td>
       <td><strong>₱${parseFloat(order.total_amount).toFixed(2)}</strong></td>
@@ -389,7 +393,7 @@ function renderOverviewOrders(orders) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td><strong>#${order.order_number}</strong></td>
-      <td>${order.customer_name || 'Customer'}</td>
+      <td>${escapeHtml(order.customer_name || 'Customer')}</td>
       <td><span class="badge badge-info">${order.order_type}</span></td>
       <td><strong>₱${parseFloat(order.total_amount).toFixed(2)}</strong></td>
       <td><span class="badge ${order.payment_mismatch ? 'badge-mismatch' : 'badge-cash'}">${order.payment_method}</span></td>
@@ -427,7 +431,7 @@ async function viewOrderDetails(orderId) {
         <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed var(--border-subtle);">
           <div>
             <strong>${i.quantity}x ${i.item_name}</strong>
-            ${i.special_instructions ? `<div style="font-size: 0.78rem; color: var(--brand-primary);">${i.special_instructions}</div>` : ''}
+            ${i.special_instructions ? `<div style="font-size: 0.78rem; color: var(--brand-primary);">${escapeHtml(i.special_instructions)}</div>` : ''}
           </div>
           <div>₱${parseFloat(i.subtotal).toFixed(2)}</div>
         </div>
@@ -436,10 +440,10 @@ async function viewOrderDetails(orderId) {
       document.getElementById('modal-order-body').innerHTML = `
         <div style="margin-bottom: 16px;">
           <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-            <span>Customer: <strong>${o.first_name || ''} ${o.last_name || ''}</strong></span>
+            <span>Customer: <strong>${escapeHtml((o.first_name || '') + ' ' + (o.last_name || ''))}</strong></span>
             <span>Status: <span class="badge badge-${o.status}">${o.status}</span></span>
           </div>
-          <div style="font-size: 0.88rem; color: var(--text-secondary);">Phone: ${o.customer_phone || 'N/A'}</div>
+          <div style="font-size: 0.88rem; color: var(--text-secondary);">Phone: ${escapeHtml(o.customer_phone || 'N/A')}</div>
           <div style="font-size: 0.88rem; color: var(--text-secondary);">Address: ${escapeHtml(o.delivery_address || 'Store Pickup')}</div>
         </div>
 
@@ -964,7 +968,7 @@ function renderDeliveriesTable(deliveries) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td><strong>#${del.order_number}</strong></td>
-      <td>${del.customer_name || 'Customer'}</td>
+      <td>${escapeHtml(del.customer_name || 'Customer')}</td>
       <td>${del.rider_name || '<em style="color: var(--text-muted);">Unassigned</em>'}</td>
       <td>${parseFloat(del.distance_km).toFixed(1)} km</td>
       <td><strong>₱${parseFloat(del.final_fare).toFixed(2)}</strong></td>
@@ -1071,22 +1075,28 @@ async function loadFeedback() {
         const card = document.createElement('div');
         card.className = 'card';
         card.style.padding = '18px';
+        const safeCustName = escapeHtml(f.customer_name || 'Customer');
+        const safeOrderNum = escapeHtml(f.order_number || '');
+        const safeComment = f.comments ? escapeHtml(f.comments) : '<em>No written comment provided.</em>';
+        const safeRider = f.rider_name ? `&bull; Delivered by ${escapeHtml(f.rider_name)}` : '';
+        const safeSentiment = escapeHtml(f.sentiment || '');
+
         card.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
             <div>
-              <strong>${f.customer_name || 'Customer'}</strong>
-              <span style="font-size: 0.8rem; color: var(--text-muted); margin-left: 8px;">Order #${f.order_number}</span>
+              <strong>${safeCustName}</strong>
+              <span style="font-size: 0.8rem; color: var(--text-muted); margin-left: 8px;">Order #${safeOrderNum}</span>
             </div>
             <div>
               <span class="badge ${f.sentiment === 'positive' ? 'badge-delivered' : f.sentiment === 'neutral' ? 'badge-pending' : 'badge-mismatch'}">
-                ${f.sentiment}
+                ${safeSentiment}
               </span>
             </div>
           </div>
           <div style="color: var(--brand-gold); margin-bottom: 6px;">${stars}</div>
-          <div style="font-size: 0.92rem; color: var(--text-primary);">${f.comments || '<em>No written comment provided.</em>'}</div>
+          <div style="font-size: 0.92rem; color: var(--text-primary);">${safeComment}</div>
           <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 8px;">
-            ${new Date(f.created_at).toLocaleString()} ${f.rider_name ? `&bull; Delivered by ${f.rider_name}` : ''}
+            ${new Date(f.created_at).toLocaleString()} ${safeRider}
           </div>
         `;
         container.appendChild(card);
@@ -1582,3 +1592,247 @@ function openNewOrderModal() {
   API.toast('Open the Messenger Simulator to experience placing full conversational orders!', 'info');
   switchTab('orders');
 }
+
+// ----------------------------------------------------------------------------
+// 9. Facebook Page Access Token Settings
+// ----------------------------------------------------------------------------
+let currentFbTokenData = null;
+let isFbTokenRevealed = false;
+
+async function loadFacebookSettings() {
+  const badge = document.getElementById('fb-token-status-badge');
+  const preview = document.getElementById('fb-token-preview');
+  const feedback = document.getElementById('fb-token-feedback');
+
+  if (feedback) feedback.style.display = 'none';
+
+  try {
+    const res = await API.get('/settings/facebook');
+    if (res && res.success) {
+      currentFbTokenData = res;
+      updateFbTokenDisplay();
+    } else {
+      if (preview) preview.innerText = 'Unable to load configuration.';
+      if (badge) {
+        badge.innerText = 'Error';
+        badge.className = 'badge badge-danger';
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load FB settings:', err);
+    if (preview) preview.innerText = 'Not accessible or unauthorized.';
+    if (badge) {
+      badge.innerText = 'Offline';
+      badge.className = 'badge badge-danger';
+    }
+  }
+}
+
+function updateFbTokenDisplay() {
+  const badge = document.getElementById('fb-token-status-badge');
+  const preview = document.getElementById('fb-token-preview');
+  const lengthIndicator = document.getElementById('fb-token-length-indicator');
+  const toggleBtn = document.getElementById('btn-toggle-reveal-fb-token');
+
+  if (!currentFbTokenData) return;
+
+  const isConfigured = currentFbTokenData.isConfigured;
+  const token = currentFbTokenData.fullToken || '';
+
+  if (badge) {
+    if (isConfigured) {
+      badge.innerText = 'Active & Configured';
+      badge.style.background = 'rgba(34, 197, 94, 0.15)';
+      badge.style.color = '#86efac';
+      badge.style.border = '1px solid #22c55e';
+    } else {
+      badge.innerText = 'Missing / Incomplete';
+      badge.style.background = 'rgba(239, 68, 68, 0.15)';
+      badge.style.color = '#fca5a5';
+      badge.style.border = '1px solid #ef4444';
+    }
+  }
+
+  if (lengthIndicator) {
+    lengthIndicator.innerText = token ? `${token.length} chars` : '0 chars';
+  }
+
+  if (preview) {
+    if (!token) {
+      preview.innerText = 'No Page Access Token configured yet.';
+      preview.style.color = 'var(--text-muted)';
+    } else if (isFbTokenRevealed) {
+      preview.innerText = token;
+      preview.style.color = '#faedcd';
+    } else {
+      preview.innerText = currentFbTokenData.tokenPreview || '••••••••••••••••';
+      preview.style.color = '#faedcd';
+    }
+  }
+
+  if (toggleBtn) {
+    toggleBtn.innerText = isFbTokenRevealed ? '🙈 Hide' : '👁️ Reveal';
+  }
+}
+
+function toggleRevealFbToken() {
+  isFbTokenRevealed = !isFbTokenRevealed;
+  updateFbTokenDisplay();
+}
+
+async function copyCurrentFbToken() {
+  if (!currentFbTokenData || !currentFbTokenData.fullToken) {
+    API.toast('No token available to copy.', 'warning');
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(currentFbTokenData.fullToken);
+    API.toast('📋 Page Access Token copied to clipboard!', 'success');
+  } catch (e) {
+    API.toast('Failed to copy token: please select and copy manually.', 'error');
+  }
+}
+
+async function pasteFbTokenFromClipboard() {
+  try {
+    const text = await navigator.clipboard.readText();
+    if (text) {
+      const input = document.getElementById('fb-page-access-token-input');
+      if (input) {
+        input.value = text.trim();
+        API.toast('Pasted token from clipboard.', 'info');
+      }
+    }
+  } catch (e) {
+    API.toast('Could not access clipboard. Please paste manually.', 'warning');
+  }
+}
+
+async function saveFbPageAccessToken() {
+  const input = document.getElementById('fb-page-access-token-input');
+  const btn = document.getElementById('btn-save-fb-token');
+  const feedback = document.getElementById('fb-token-feedback');
+
+  if (!input) return;
+  const newToken = input.value.trim();
+
+  if (!newToken) {
+    API.toast('Please enter or paste a valid Facebook Page Access Token.', 'warning');
+    input.focus();
+    return;
+  }
+
+  if (!newToken.startsWith('EAA')) {
+    const confirmNonStandard = confirm(
+      'Warning: Standard Facebook Page Access Tokens start with "EAA". Are you sure you want to save this token?'
+    );
+    if (!confirmNonStandard) return;
+  }
+
+  const origBtnText = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span>⏳ Saving Token...</span>';
+  }
+
+  try {
+    const res = await API.put('/settings/facebook', { pageAccessToken: newToken });
+    if (res && res.success) {
+      API.toast('✅ Facebook Page Access Token updated successfully!', 'success');
+      currentFbTokenData = res;
+      input.value = '';
+      updateFbTokenDisplay();
+
+      if (feedback) {
+        feedback.style.display = 'block';
+        feedback.style.background = 'rgba(34, 197, 94, 0.12)';
+        feedback.style.borderLeft = '4px solid var(--status-success)';
+        feedback.style.color = '#86efac';
+        feedback.innerHTML = `<strong>✅ Token Saved & Active:</strong> System memory and <code>.env</code> file were updated. Outbound Messenger replies are now using this token.`;
+      }
+    } else {
+      API.toast(res.message || 'Failed to update token.', 'error');
+      if (feedback) {
+        feedback.style.display = 'block';
+        feedback.style.background = 'rgba(239, 68, 68, 0.12)';
+        feedback.style.borderLeft = '4px solid var(--status-danger)';
+        feedback.style.color = '#fca5a5';
+        feedback.innerHTML = `<strong>❌ Error:</strong> ${res.message || 'Failed to save token.'}`;
+      }
+    }
+  } catch (err) {
+    console.error('Error saving FB token:', err);
+    API.toast(err.message || 'Failed to save token.', 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = origBtnText;
+    }
+  }
+}
+
+async function testFbPageAccessToken() {
+  const input = document.getElementById('fb-page-access-token-input');
+  const btn = document.getElementById('btn-test-fb-token');
+  const feedback = document.getElementById('fb-token-feedback');
+
+  const tokenToTest = input && input.value.trim() ? input.value.trim() : (currentFbTokenData?.fullToken || '');
+
+  if (!tokenToTest) {
+    API.toast('No token entered or saved to test.', 'warning');
+    return;
+  }
+
+  const origBtnText = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span>⏳ Testing with Meta...</span>';
+  }
+
+  if (feedback) {
+    feedback.style.display = 'block';
+    feedback.style.background = 'rgba(59, 130, 246, 0.12)';
+    feedback.style.borderLeft = '4px solid #3b82f6';
+    feedback.style.color = '#93c5fd';
+    feedback.innerHTML = `<span>Connecting to Meta Graph API <code>/me</code>...</span>`;
+  }
+
+  try {
+    const res = await API.post('/settings/facebook/test', { pageAccessToken: tokenToTest });
+    if (res && res.verified) {
+      API.toast(`✅ Verified! Connected to Page: ${res.page.name}`, 'success');
+      if (feedback) {
+        feedback.style.display = 'block';
+        feedback.style.background = 'rgba(34, 197, 94, 0.12)';
+        feedback.style.borderLeft = '4px solid var(--status-success)';
+        feedback.style.color = '#86efac';
+        feedback.innerHTML = `<strong>✅ Verification Successful:</strong> Connected to Facebook Page <strong>"${res.page.name}"</strong> (Page ID: <code>${res.page.id}</code>, Category: ${res.page.category || 'N/A'}).`;
+      }
+    } else {
+      API.toast(res.message || 'Meta API verification failed.', 'error');
+      if (feedback) {
+        feedback.style.display = 'block';
+        feedback.style.background = 'rgba(239, 68, 68, 0.12)';
+        feedback.style.borderLeft = '4px solid var(--status-danger)';
+        feedback.style.color = '#fca5a5';
+        feedback.innerHTML = `<strong>❌ Verification Failed:</strong> ${res.message || 'Token rejected by Meta.'}`;
+      }
+    }
+  } catch (err) {
+    console.error('Error testing FB token:', err);
+    API.toast(err.message || 'Failed to verify token with Meta.', 'error');
+    if (feedback) {
+      feedback.style.display = 'block';
+      feedback.style.background = 'rgba(239, 68, 68, 0.12)';
+      feedback.style.borderLeft = '4px solid var(--status-danger)';
+      feedback.style.color = '#fca5a5';
+      feedback.innerHTML = `<strong>❌ Connection Error:</strong> ${err.message || 'Network error reaching Meta API.'}`;
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = origBtnText;
+    }
+  }
+}
+

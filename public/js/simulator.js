@@ -15,7 +15,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       renderBotPayload(data.payload.message);
     }
     if (eventType === 'FEEDBACK_PROMPT_TRIGGERED' && data.psid === SIMULATOR_PSID) {
-      renderFeedbackPrompt(data.orderNumber);
+      // Automatic feedback prompt arrives as normal SIMULATOR_MESSAGE; no duplicate rendering
     }
     if (eventType === 'CHATBOT_STATUS_CHANGED') {
       updateBotStatusIndicator(data.isEnabled);
@@ -261,18 +261,18 @@ function triggerDeliveryCompletedPrompt() {
 
 function renderFeedbackPrompt(orderNumber) {
   renderBotPayload({
-    text: `🎉 Order #${orderNumber} has been delivered!\n\nHow was your food and delivery experience with Diner's Cafe? Please rate us:`,
+    text: 'Your order has been delivered! How was your experience today?',
     quick_replies: [
-      { title: '⭐ 5 - Excellent', payload: `FEEDBACK_RATE_5_${orderNumber}` },
-      { title: '⭐ 4 - Very Good', payload: `FEEDBACK_RATE_4_${orderNumber}` },
-      { title: '⭐ 3 - Average', payload: `FEEDBACK_RATE_3_${orderNumber}` },
-      { title: '⭐ 2 - Poor', payload: `FEEDBACK_RATE_2_${orderNumber}` },
-      { title: '⭐ 1 - Terrible', payload: `FEEDBACK_RATE_1_${orderNumber}` }
+      { title: '5 ⭐', payload: `FEEDBACK_RATE_5_${orderNumber}` },
+      { title: '4 ⭐', payload: `FEEDBACK_RATE_4_${orderNumber}` },
+      { title: '3 ⭐', payload: `FEEDBACK_RATE_3_${orderNumber}` },
+      { title: '2 ⭐', payload: `FEEDBACK_RATE_2_${orderNumber}` },
+      { title: '1 ⭐', payload: `FEEDBACK_RATE_1_${orderNumber}` }
     ]
   });
 }
 
 async function resetChat() {
   document.getElementById('chat-messages').innerHTML = '';
-  await sendSimulatedPayload('CLEAR_CART');
+  await sendSimulatedPayload('RESET_SESSION');
 }

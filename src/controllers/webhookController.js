@@ -14,13 +14,14 @@ function verifyWebhook(req, res) {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
+  console.log(`[Webhook Handshake] Received GET /webhook from Meta: mode=${mode}, token=${token}`);
 
   if (mode && token) {
     if (mode === 'subscribe' && token === config.facebook.verifyToken) {
       console.log('[Webhook] Webhook successfully verified with Facebook challenge handshake.');
       return res.status(200).send(challenge);
     } else {
-      console.warn('[Webhook] Verification token mismatch.');
+      console.warn(`[Webhook] Verification token mismatch! Expected "${config.facebook.verifyToken}", got "${token}"`);
       return res.sendStatus(403);
     }
   }
@@ -34,6 +35,7 @@ function verifyWebhook(req, res) {
  */
 async function processWebhookEvents(req, res) {
   const body = req.body;
+  console.log('[Webhook POST] Incoming payload received from Meta:', JSON.stringify(body, null, 2));
 
   if (body.object === 'page') {
     // Acknowledge receipt to Facebook within 20 seconds

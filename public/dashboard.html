@@ -641,6 +641,71 @@
 
           <!-- System Overview & Database Status -->
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;">
+            <!-- Facebook Messenger API & Page Access Token Card (Bubble) -->
+            <div class="card" id="card-fb-token" style="display: flex; flex-direction: column;">
+              <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle);">
+                <h3 class="card-title" style="margin: 0; display: flex; align-items: center; gap: 8px;">
+                  <span>💬</span> <span>Facebook Page Access Token</span>
+                </h3>
+                <span id="fb-token-status-badge" class="badge" style="background: rgba(212, 163, 115, 0.15); color: var(--brand-primary); border: 1px solid var(--brand-primary);">
+                  Checking...
+                </span>
+              </div>
+
+              <p style="font-size: 0.84rem; color: var(--text-secondary); margin-bottom: 14px; line-height: 1.5;">
+                Configure the Meta Page Access Token used for automated chatbot replies, order tracking messages, and customer notifications.
+              </p>
+
+              <!-- Active Token Display Box -->
+              <div style="background: var(--bg-surface-elevated); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); margin-bottom: 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <span style="font-size: 0.74rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px;">Current Active Token</span>
+                  <span id="fb-token-length-indicator" style="font-size: 0.74rem; color: var(--brand-primary); font-family: monospace;">--</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <code id="fb-token-preview" style="flex: 1; word-break: break-all; font-size: 0.82rem; color: #faedcd; background: transparent; padding: 0;">Loading token...</code>
+                  <div style="display: flex; gap: 4px;">
+                    <button type="button" class="btn btn-secondary btn-sm" id="btn-toggle-reveal-fb-token" onclick="toggleRevealFbToken()" title="Reveal or hide token" style="padding: 4px 8px; font-size: 0.74rem; cursor: pointer;">
+                      👁️ Reveal
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-sm" id="btn-copy-fb-token" onclick="copyCurrentFbToken()" title="Copy active token" style="padding: 4px 8px; font-size: 0.74rem; cursor: pointer;">
+                      📋 Copy
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Input / Change Token Area -->
+              <div class="form-group" style="margin-bottom: 12px; flex: 1;">
+                <label for="fb-page-access-token-input" style="display: flex; justify-content: space-between; align-items: center; font-size: 0.84rem; font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">
+                  <span>Input / Change Page Access Token:</span>
+                  <span style="font-size: 0.74rem; color: var(--text-muted);">Starts with <code>EAA...</code></span>
+                </label>
+                <textarea id="fb-page-access-token-input" rows="2" class="form-control" placeholder="Paste new Facebook Page Access Token (EAA...) to replace" style="width: 100%; font-family: monospace; font-size: 0.82rem; padding: 10px; resize: vertical; border-radius: var(--radius-sm);"></textarea>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
+                  <small style="color: var(--text-muted); font-size: 0.75rem;">
+                    From <a href="https://developers.facebook.com/apps/" target="_blank" rel="noopener noreferrer" style="color: var(--brand-primary); text-decoration: underline;">Meta Developer Portal</a> &rarr; Messenger &rarr; API Settings.
+                  </small>
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="pasteFbTokenFromClipboard()" style="padding: 2px 8px; font-size: 0.72rem; cursor: pointer;">
+                    📋 Paste
+                  </button>
+                </div>
+              </div>
+
+              <!-- Action Buttons -->
+              <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: auto; padding-top: 10px;">
+                <button type="button" id="btn-save-fb-token" class="btn btn-primary btn-sm" onclick="saveFbPageAccessToken()" style="flex: 1; min-width: 140px; font-weight: 700; padding: 8px 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
+                  <span>💾 Save & Update Token</span>
+                </button>
+                <button type="button" id="btn-test-fb-token" class="btn btn-secondary btn-sm" onclick="testFbPageAccessToken()" style="font-weight: 600; padding: 8px 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
+                  <span>⚡ Test Connection</span>
+                </button>
+              </div>
+
+              <!-- Live Status / Feedback Alert -->
+              <div id="fb-token-feedback" style="display: none; margin-top: 12px; padding: 10px 12px; border-radius: 6px; font-size: 0.8rem; line-height: 1.4;"></div>
+            </div>
+
             <!-- Database Connection Card -->
             <div class="card">
               <h3 class="card-title" style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
