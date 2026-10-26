@@ -26,17 +26,17 @@ INSERT INTO `categories` (`id`, `name`, `slug`, `description`, `display_order`, 
 (5, 'Sandwiches & Light Bites', 'snacks', 'Grilled sourdough panini, wraps, and savory cafe sides', 5, 1);
 
 -- 4. Menu Items
-INSERT INTO `menu_items` (`id`, `category_id`, `name`, `description`, `price`, `image_url`, `is_available`, `is_bestseller`, `preparation_time_min`) VALUES
-(1, 1, 'Signature Spanish Latte', 'Double espresso shot with creamy condensed milk and velvety textured milk', 145.00, 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=500&auto=format&fit=crop&q=60', 1, 1, 5),
-(2, 1, 'Caramel Macchiato', 'Freshly steamed milk with vanilla-flavored syrup, marked with espresso and caramel drizzle', 150.00, 'https://images.unsplash.com/photo-1485808191679-5f86510681a2?w=500&auto=format&fit=crop&q=60', 1, 1, 5),
-(3, 1, 'Iced Americano', 'Bold rich espresso shots topped with cold water and ice for a crisp finish', 110.00, 'https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?w=500&auto=format&fit=crop&q=60', 1, 0, 4),
-(4, 2, 'Kyoto Uji Matcha Latte', 'Ceremonial grade green tea whisked with creamy oat or dairy milk', 160.00, 'https://images.unsplash.com/photo-1536256263959-770b48d82b0a?w=500&auto=format&fit=crop&q=60', 1, 1, 6),
-(5, 2, 'Hibiscus Berry Iced Tea', 'Refreshing cold brewed botanical tea infused with wild berries and mint', 125.00, 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=500&auto=format&fit=crop&q=60', 1, 0, 4),
-(6, 3, 'Classic Beef Tapa Rice Bowl', 'Tender marinated beef sirloin slices, garlic fried rice, and sunny-side-up egg', 195.00, 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=500&auto=format&fit=crop&q=60', 1, 1, 15),
-(7, 3, 'Creamy Truffle Bacon Carbonara', 'Fettuccine pasta tossed in rich parmesan truffle cream with crispy bacon bits', 220.00, 'https://images.unsplash.com/photo-1612874742237-6526221588e3?w=500&auto=format&fit=crop&q=60', 1, 1, 15),
-(8, 4, 'Almond Butter Croissant', 'Flaky, buttery French croissant filled with rich almond cream and toasted flakes', 95.00, 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=500&auto=format&fit=crop&q=60', 1, 1, 3),
-(9, 4, 'Dark Chocolate Chunk Cookie', 'Chewy warm cookie loaded with 70% Belgian dark chocolate chunks and sea salt', 75.00, 'https://images.unsplash.com/photo-1499636136210-6f4ee915583e?w=500&auto=format&fit=crop&q=60', 1, 0, 2),
-(10, 5, 'Grilled Chicken Pesto Panini', 'Herb-roasted chicken breast, basil pesto, mozzarella on toasted artisan sourdough', 175.00, 'https://images.unsplash.com/photo-1528735602780-2552fd46c7af?w=500&auto=format&fit=crop&q=60', 1, 1, 10);
+INSERT INTO `menu_items` (`id`, `category_id`, `name`, `description`, `price`, `image_url`, `is_available`, `is_bestseller`, `synonyms`, `preparation_time_min`) VALUES
+(1, 1, 'Signature Spanish Latte', 'Double espresso shot with creamy condensed milk and velvety textured milk', 145.00, 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=500&auto=format&fit=crop&q=60', 1, 1, 'spanish latte, spanish, spanish coffee', 5),
+(2, 1, 'Caramel Macchiato', 'Freshly steamed milk with vanilla-flavored syrup, marked with espresso and caramel drizzle', 150.00, 'https://images.unsplash.com/photo-1485808191679-5f86510681a2?w=500&auto=format&fit=crop&q=60', 1, 1, 'macchiato, caramel', 5),
+(3, 1, 'Iced Americano', 'Bold rich espresso shots topped with cold water and ice for a crisp finish', 110.00, 'https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?w=500&auto=format&fit=crop&q=60', 1, 0, 'americano, iced americano', 4),
+(4, 2, 'Kyoto Uji Matcha Latte', 'Ceremonial grade green tea whisked with creamy oat or dairy milk', 160.00, 'https://images.unsplash.com/photo-1536256263959-770b48d82b0a?w=500&auto=format&fit=crop&q=60', 1, 1, 'matcha, matcha latte, kyoto matcha', 6),
+(5, 2, 'Hibiscus Berry Iced Tea', 'Refreshing cold brewed botanical tea infused with wild berries and mint', 125.00, 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=500&auto=format&fit=crop&q=60', 1, 0, 'hibiscus, berry tea, iced tea', 4),
+(6, 3, 'Classic Beef Tapa Rice Bowl', 'Tender marinated beef sirloin slices, garlic fried rice, and sunny-side-up egg', 195.00, 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=500&auto=format&fit=crop&q=60', 1, 1, 'tapa, beef tapa, tapsilog, rice bowl', 15),
+(7, 3, 'Creamy Truffle Bacon Carbonara', 'Fettuccine pasta tossed in rich parmesan truffle cream with crispy bacon bits', 220.00, 'https://images.unsplash.com/photo-1612874742237-6526221588e3?w=500&auto=format&fit=crop&q=60', 1, 1, 'carbonara, pasta, truffle pasta', 15),
+(8, 4, 'Almond Butter Croissant', 'Flaky, buttery French croissant filled with rich almond cream and toasted flakes', 95.00, 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=500&auto=format&fit=crop&q=60', 1, 1, 'croissant, almond croissant', 3),
+(9, 4, 'Dark Chocolate Chunk Cookie', 'Chewy warm cookie loaded with 70% Belgian dark chocolate chunks and sea salt', 75.00, 'https://images.unsplash.com/photo-1499636136210-6f4ee915583e?w=500&auto=format&fit=crop&q=60', 1, 0, 'cookie, chocolate cookie, choco cookie', 2),
+(10, 5, 'Grilled Chicken Pesto Panini', 'Herb-roasted chicken breast, basil pesto, mozzarella on toasted artisan sourdough', 175.00, 'https://images.unsplash.com/photo-1528735602780-2552fd46c7af?w=500&auto=format&fit=crop&q=60', 1, 1, 'panini, chicken panini, pesto panini', 10);
 
 -- 5. Inventory (Stock levels)
 INSERT INTO `inventory` (`id`, `menu_item_id`, `stock_quantity`, `low_stock_threshold`, `unit`, `last_restocked_at`) VALUES

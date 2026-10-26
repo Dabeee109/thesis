@@ -11,7 +11,7 @@ let sqliteDb = null;
 function initSqliteFallback() {
   try {
     const Database = require('better-sqlite3');
-    const dbPath = path.join(__dirname, 'diners_cafe.sqlite');
+    const dbPath = process.env.SQLITE_PATH || path.join(__dirname, 'diners_cafe.sqlite');
     sqliteDb = new Database(dbPath);
     sqliteDb.pragma('journal_mode = WAL');
     sqliteDb.pragma('foreign_keys = ON');
@@ -28,6 +28,7 @@ function initSqliteFallback() {
         distance_km REAL DEFAULT 1.00,
         conversation_state TEXT DEFAULT 'IDLE',
         cart_json TEXT DEFAULT NULL,
+        session_json TEXT DEFAULT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
@@ -63,6 +64,7 @@ function initSqliteFallback() {
         image_url TEXT,
         is_available INTEGER NOT NULL DEFAULT 1,
         is_bestseller INTEGER NOT NULL DEFAULT 0,
+        synonyms TEXT DEFAULT NULL,
         preparation_time_min INTEGER NOT NULL DEFAULT 15,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -101,6 +103,7 @@ function initSqliteFallback() {
         distance_km REAL DEFAULT 1.00,
         customer_notes TEXT,
         cancellation_reason TEXT,
+        feedback_requested_at DATETIME DEFAULT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
@@ -198,10 +201,15 @@ function initSqliteFallback() {
     `);
 
     // Migration: Add void request columns if not present
-    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN void_status TEXT DEFAULT NULL;`); } catch(e){}
-    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN void_requested_by TEXT DEFAULT NULL;`); } catch(e){}
-    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN void_reason TEXT DEFAULT NULL;`); } catch(e){}
-    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN void_requested_at DATETIME DEFAULT NULL;`); } catch(e){}
+    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN void_status TEXT DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN void_requested_by TEXT DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN void_reason TEXT DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN void_requested_at DATETIME DEFAULT NULL;`); } catch (e) { }
+
+    // Conversation Flow v2 migrations
+    try { sqliteDb.exec(`ALTER TABLE customers ADD COLUMN session_json TEXT DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN feedback_requested_at DATETIME DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE menu_items ADD COLUMN synonyms TEXT DEFAULT NULL;`); } catch (e) { }
 
     // Migration: Update deliveries status check constraint to include 'cancelled'
     try {
@@ -236,6 +244,23 @@ function initSqliteFallback() {
       }
     } catch (migErr) {
       console.warn('[Database] Deliveries table migration notice:', migErr.message);
+    }
+
+    // Populate synonyms for existing items if missing
+    try {
+      const updateSyn = sqliteDb.prepare('UPDATE menu_items SET synonyms = ? WHERE id = ? AND (synonyms IS NULL OR synonyms = "")');
+      updateSyn.run('spanish latte, spanish, spanish coffee', 1);
+      updateSyn.run('macchiato, caramel', 2);
+      updateSyn.run('americano, iced americano', 3);
+      updateSyn.run('matcha, matcha latte, kyoto matcha', 4);
+      updateSyn.run('hibiscus, berry tea, iced tea', 5);
+      updateSyn.run('tapa, beef tapa, tapsilog, rice bowl', 6);
+      updateSyn.run('carbonara, pasta, truffle pasta', 7);
+      updateSyn.run('croissant, almond croissant', 8);
+      updateSyn.run('cookie, chocolate cookie, choco cookie', 9);
+      updateSyn.run('panini, chicken panini, pesto panini', 10);
+    } catch (synErr) {
+      // Ignore if table/rows don't exist yet
     }
 
     // Check if seed data exists
@@ -281,19 +306,19 @@ function seedSqliteData() {
   insertCat.run(5, 'Sandwiches & Light Bites', 'snacks', 'Grilled sourdough panini, wraps, and savory cafe sides', 5, 1);
 
   const insertItem = sqliteDb.prepare(`
-    INSERT INTO menu_items (id, category_id, name, description, price, image_url, is_available, is_bestseller, preparation_time_min)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO menu_items (id, category_id, name, description, price, image_url, is_available, is_bestseller, synonyms, preparation_time_min)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  insertItem.run(1, 1, 'Signature Spanish Latte', 'Double espresso shot with creamy condensed milk and velvety textured milk', 145.00, 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=500&auto=format&fit=crop&q=60', 1, 1, 5);
-  insertItem.run(2, 1, 'Caramel Macchiato', 'Freshly steamed milk with vanilla-flavored syrup, marked with espresso and caramel drizzle', 150.00, 'https://images.unsplash.com/photo-1485808191679-5f86510681a2?w=500&auto=format&fit=crop&q=60', 1, 1, 5);
-  insertItem.run(3, 1, 'Iced Americano', 'Bold rich espresso shots topped with cold water and ice for a crisp finish', 110.00, 'https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?w=500&auto=format&fit=crop&q=60', 1, 0, 4);
-  insertItem.run(4, 2, 'Kyoto Uji Matcha Latte', 'Ceremonial grade green tea whisked with creamy oat or dairy milk', 160.00, 'https://images.unsplash.com/photo-1536256263959-770b48d82b0a?w=500&auto=format&fit=crop&q=60', 1, 1, 6);
-  insertItem.run(5, 2, 'Hibiscus Berry Iced Tea', 'Refreshing cold brewed botanical tea infused with wild berries and mint', 125.00, 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=500&auto=format&fit=crop&q=60', 1, 0, 4);
-  insertItem.run(6, 3, 'Classic Beef Tapa Rice Bowl', 'Tender marinated beef sirloin slices, garlic fried rice, and sunny-side-up egg', 195.00, 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=500&auto=format&fit=crop&q=60', 1, 1, 15);
-  insertItem.run(7, 3, 'Creamy Truffle Bacon Carbonara', 'Fettuccine pasta tossed in rich parmesan truffle cream with crispy bacon bits', 220.00, 'https://images.unsplash.com/photo-1612874742237-6526221588e3?w=500&auto=format&fit=crop&q=60', 1, 1, 15);
-  insertItem.run(8, 4, 'Almond Butter Croissant', 'Flaky, buttery French croissant filled with rich almond cream and toasted flakes', 95.00, 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=500&auto=format&fit=crop&q=60', 1, 1, 3);
-  insertItem.run(9, 4, 'Dark Chocolate Chunk Cookie', 'Chewy warm cookie loaded with 70% Belgian dark chocolate chunks and sea salt', 75.00, 'https://images.unsplash.com/photo-1499636136210-6f4ee915583e?w=500&auto=format&fit=crop&q=60', 1, 0, 2);
-  insertItem.run(10, 5, 'Grilled Chicken Pesto Panini', 'Herb-roasted chicken breast, basil pesto, mozzarella on toasted artisan sourdough', 175.00, 'https://images.unsplash.com/photo-1528735602780-2552fd46c7af?w=500&auto=format&fit=crop&q=60', 1, 1, 10);
+  insertItem.run(1, 1, 'Signature Spanish Latte', 'Double espresso shot with creamy condensed milk and velvety textured milk', 145.00, 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=500&auto=format&fit=crop&q=60', 1, 1, 'spanish latte, spanish, spanish coffee', 5);
+  insertItem.run(2, 1, 'Caramel Macchiato', 'Freshly steamed milk with vanilla-flavored syrup, marked with espresso and caramel drizzle', 150.00, 'https://images.unsplash.com/photo-1485808191679-5f86510681a2?w=500&auto=format&fit=crop&q=60', 1, 1, 'macchiato, caramel', 5);
+  insertItem.run(3, 1, 'Iced Americano', 'Bold rich espresso shots topped with cold water and ice for a crisp finish', 110.00, 'https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?w=500&auto=format&fit=crop&q=60', 1, 0, 'americano, iced americano', 4);
+  insertItem.run(4, 2, 'Kyoto Uji Matcha Latte', 'Ceremonial grade green tea whisked with creamy oat or dairy milk', 160.00, 'https://images.unsplash.com/photo-1536256263959-770b48d82b0a?w=500&auto=format&fit=crop&q=60', 1, 1, 'matcha, matcha latte, kyoto matcha', 6);
+  insertItem.run(5, 2, 'Hibiscus Berry Iced Tea', 'Refreshing cold brewed botanical tea infused with wild berries and mint', 125.00, 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=500&auto=format&fit=crop&q=60', 1, 0, 'hibiscus, berry tea, iced tea', 4);
+  insertItem.run(6, 3, 'Classic Beef Tapa Rice Bowl', 'Tender marinated beef sirloin slices, garlic fried rice, and sunny-side-up egg', 195.00, 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=500&auto=format&fit=crop&q=60', 1, 1, 'tapa, beef tapa, tapsilog, rice bowl', 15);
+  insertItem.run(7, 3, 'Creamy Truffle Bacon Carbonara', 'Fettuccine pasta tossed in rich parmesan truffle cream with crispy bacon bits', 220.00, 'https://images.unsplash.com/photo-1612874742237-6526221588e3?w=500&auto=format&fit=crop&q=60', 1, 1, 'carbonara, pasta, truffle pasta', 15);
+  insertItem.run(8, 4, 'Almond Butter Croissant', 'Flaky, buttery French croissant filled with rich almond cream and toasted flakes', 95.00, 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=500&auto=format&fit=crop&q=60', 1, 1, 'croissant, almond croissant', 3);
+  insertItem.run(9, 4, 'Dark Chocolate Chunk Cookie', 'Chewy warm cookie loaded with 70% Belgian dark chocolate chunks and sea salt', 75.00, 'https://images.unsplash.com/photo-1499636136210-6f4ee915583e?w=500&auto=format&fit=crop&q=60', 1, 0, 'cookie, chocolate cookie, choco cookie', 2);
+  insertItem.run(10, 5, 'Grilled Chicken Pesto Panini', 'Herb-roasted chicken breast, basil pesto, mozzarella on toasted artisan sourdough', 175.00, 'https://images.unsplash.com/photo-1528735602780-2552fd46c7af?w=500&auto=format&fit=crop&q=60', 1, 1, 'panini, chicken panini, pesto panini', 10);
 
   const insertInv = sqliteDb.prepare(`
     INSERT INTO inventory (id, menu_item_id, stock_quantity, low_stock_threshold, unit, last_restocked_at)
@@ -364,6 +389,12 @@ function seedSqliteData() {
 
 // Initialize MySQL pool
 async function initDatabase() {
+  if (process.env.DB_FORCE_SQLITE === '1') {
+    console.log('[Database] DB_FORCE_SQLITE is set. Using SQLite database...');
+    useFallback = true;
+    return initSqliteFallback();
+  }
+
   try {
     pool = mysql.createPool({
       host: config.db.host,
@@ -379,6 +410,28 @@ async function initDatabase() {
 
     const conn = await pool.getConnection();
     await conn.ping();
+
+    // MySQL idempotent migrations
+    try {
+      const cols = [
+        { table: 'customers', column: 'session_json', type: 'TEXT NULL' },
+        { table: 'orders', column: 'feedback_requested_at', type: 'DATETIME NULL' },
+        { table: 'menu_items', column: 'synonyms', type: 'VARCHAR(255) NULL' }
+      ];
+      for (const c of cols) {
+        const [rows] = await conn.query(
+          `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+          [config.db.database, c.table, c.column]
+        );
+        if (!rows.length) {
+          await conn.query(`ALTER TABLE ${c.table} ADD COLUMN ${c.column} ${c.type}`);
+          console.log(`[Database] Added column ${c.column} to MySQL table ${c.table}`);
+        }
+      }
+    } catch (migErr) {
+      console.warn('[Database] MySQL migration check warning:', migErr.message);
+    }
+
     conn.release();
     console.log(`[Database] Successfully connected to MySQL at ${config.db.host}:${config.db.port}/${config.db.database}`);
     useFallback = false;

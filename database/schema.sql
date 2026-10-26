@@ -33,6 +33,7 @@ CREATE TABLE `customers` (
   `distance_km` DECIMAL(4,2) DEFAULT 1.00 COMMENT 'Delivery distance from cafe (0 to 3 km limit)',
   `conversation_state` VARCHAR(50) DEFAULT 'IDLE' COMMENT 'Active conversation stage',
   `cart_json` JSON DEFAULT NULL COMMENT 'Temporary active cart items in Messenger',
+  `session_json` TEXT DEFAULT NULL COMMENT 'Extended conversational session state and details',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX `idx_psid` (`psid`)
@@ -74,6 +75,7 @@ CREATE TABLE `menu_items` (
   `image_url` VARCHAR(500) DEFAULT NULL,
   `is_available` TINYINT(1) NOT NULL DEFAULT 1,
   `is_bestseller` TINYINT(1) NOT NULL DEFAULT 0,
+  `synonyms` VARCHAR(255) DEFAULT NULL COMMENT 'Comma-separated lookup synonyms and keywords',
   `preparation_time_min` INT NOT NULL DEFAULT 15,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -122,6 +124,7 @@ CREATE TABLE `orders` (
   `distance_km` DECIMAL(4,2) DEFAULT 1.00,
   `customer_notes` TEXT DEFAULT NULL,
   `cancellation_reason` VARCHAR(255) DEFAULT NULL,
+  `feedback_requested_at` DATETIME DEFAULT NULL COMMENT 'Timestamp when post-delivery feedback prompt was requested',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (`customer_id`) REFERENCES `customers`(`id`) ON DELETE RESTRICT,
