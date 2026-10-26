@@ -921,20 +921,20 @@
 
         <div class="form-group">
           <label class="form-label">Menu Item Picture</label>
-          <div style="background: var(--bg-surface-elevated, #241a12); border: 1px dashed var(--border-subtle, rgba(212, 163, 115, 0.25)); border-radius: var(--radius-md, 12px); padding: 14px; text-align: center;">
-            <div id="menu-img-preview-container" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 110px;">
-              <img id="menu-img-preview" src="" alt="Menu item preview" style="display: none; max-height: 140px; max-width: 100%; border-radius: 8px; object-fit: cover; box-shadow: 0 4px 14px rgba(0,0,0,0.4); margin-bottom: 8px;">
+          <div id="menu-img-dropzone" style="background: var(--bg-surface-elevated, #241a12); border: 1.5px dashed var(--border-subtle, rgba(212, 163, 115, 0.35)); border-radius: var(--radius-md, 12px); padding: 16px; text-align: center; transition: all 0.2s ease;">
+            <div id="menu-img-preview-container" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 110px; cursor: pointer;" onclick="triggerMenuImagePick()">
+              <img id="menu-img-preview" src="" alt="Menu item preview" style="display: none; max-height: 150px; max-width: 100%; border-radius: 8px; object-fit: cover; box-shadow: 0 4px 14px rgba(0,0,0,0.5); margin-bottom: 8px;">
               <div id="menu-img-empty-state" style="color: var(--text-muted, #8c7a6e); font-size: 0.88rem; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 0;">
-                <span style="font-size: 1.8rem;">📷</span>
-                <span>No picture selected. Click below to choose from your device.</span>
+                <span style="font-size: 2rem;">📷</span>
+                <span>Click here or drag a photo to choose from your device</span>
               </div>
             </div>
 
-            <!-- Hidden native file input -->
-            <input type="file" id="menu-img-file" accept="image/*" style="display: none;" onchange="handleMenuImageSelect(event)">
+            <!-- Native file input -->
+            <input type="file" id="menu-img-file" accept="image/*,.png,.jpg,.jpeg,.webp,.gif,.jfif,.avif" style="display: none;" onchange="handleMenuImageSelect(event)">
 
             <div style="display: flex; gap: 8px; justify-content: center; align-items: center; margin-top: 10px; flex-wrap: wrap;">
-              <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('menu-img-file').click()">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="triggerMenuImagePick()">
                 📁 Choose Pic on Device
               </button>
               <button type="button" class="btn btn-outline btn-sm" id="menu-img-remove-btn" style="display: none;" onclick="clearMenuImageSelection()">
@@ -942,7 +942,7 @@
               </button>
             </div>
 
-            <div id="menu-img-status" style="margin-top: 6px; font-size: 0.78rem; color: var(--brand-primary, #d4a373);"></div>
+            <div id="menu-img-status" style="margin-top: 8px; font-size: 0.8rem; color: var(--brand-primary, #d4a373); min-height: 18px;"></div>
 
             <!-- Optional external URL toggle -->
             <div style="margin-top: 10px; border-top: 1px solid var(--border-subtle, rgba(212, 163, 115, 0.15)); padding-top: 8px;">
@@ -1123,7 +1123,7 @@
   </div>
 
   <!-- Scripts -->
-  <script src="js/api.js?v=6"></script>
-  <script src="js/dashboard.js?v=6"></script>
+  <script src="js/api.js?v=20261026_02"></script>
+  <script src="js/dashboard.js?v=20261026_02"></script>
 </body>
 </html>

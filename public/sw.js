@@ -2,7 +2,7 @@
  * Diner's Cafe Mobile Service Worker (Network-First for Dynamic Pages)
  */
 
-const CACHE_NAME = 'diners-cafe-cache-v2';
+const CACHE_NAME = 'diners-cafe-cache-v3';
 
 self.addEventListener('install', (e) => {
   self.skipWaiting();
@@ -24,15 +24,31 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  // Always use Network-First for HTML navigation and APIs
-  if (e.request.mode === 'navigate' || e.request.destination === 'document' || e.request.url.includes('/api/')) {
+  // Always use Network-First for HTML navigation, scripts, styles, and APIs
+  if (
+    e.request.mode === 'navigate' ||
+    e.request.destination === 'document' ||
+    e.request.destination === 'script' ||
+    e.request.destination === 'style' ||
+    e.request.url.includes('/api/') ||
+    e.request.url.includes('.js') ||
+    e.request.url.includes('.css')
+  ) {
     e.respondWith(
-      fetch(e.request).catch(() => caches.match(e.request))
+      fetch(e.request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const resClone = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(e.request, resClone));
+          }
+          return networkResponse;
+        })
+        .catch(() => caches.match(e.request))
     );
     return;
   }
 
-  // Stale-while-revalidate for static assets
+  // Stale-while-revalidate for media assets (images, fonts, icons)
   e.respondWith(
     caches.match(e.request).then((cachedResponse) => {
       const fetchPromise = fetch(e.request).then((networkResponse) => {

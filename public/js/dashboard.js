@@ -38,7 +38,41 @@ document.addEventListener('DOMContentLoaded', async () => {
   API.connectSSE((eventType, eventData) => {
     handleRealtimeEvent(eventType, eventData);
   });
+
+  // 5. Setup Menu Image Dropzone and File Picker
+  setupMenuImagePicker();
 });
+
+function setupMenuImagePicker() {
+  const fileInput = document.getElementById('menu-img-file');
+  if (fileInput) {
+    fileInput.addEventListener('change', (e) => {
+      handleMenuImageSelect(e);
+    });
+  }
+
+  const dropzone = document.getElementById('menu-img-dropzone');
+  if (dropzone) {
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.style.borderColor = 'var(--brand-primary, #d4a373)';
+      dropzone.style.background = 'rgba(212, 163, 115, 0.15)';
+    });
+    dropzone.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      dropzone.style.borderColor = 'var(--border-subtle, rgba(212, 163, 115, 0.35))';
+      dropzone.style.background = 'var(--bg-surface-elevated, #241a12)';
+    });
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.style.borderColor = 'var(--border-subtle, rgba(212, 163, 115, 0.35))';
+      dropzone.style.background = 'var(--bg-surface-elevated, #241a12)';
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        handleMenuImageSelect({ target: { files: e.dataTransfer.files } });
+      }
+    });
+  }
+}
 
 // Setup sidebar tab switching
 function setupNavigation() {
@@ -781,31 +815,57 @@ async function deleteMenuItem(itemId) {
 let stagedMenuImageBase64 = null;
 let stagedMenuImageChanged = false;
 
-function handleMenuImageSelect(event) {
-  const file = event.target.files && event.target.files[0];
-  if (!file) return;
+function triggerMenuImagePick() {
+  const fileInput = document.getElementById('menu-img-file');
+  if (fileInput) {
+    fileInput.value = ''; // Always clear previous value so re-selecting same file triggers change
+    fileInput.click();
+  }
+}
 
-  if (!file.type.startsWith('image/')) {
-    API.toast('Please select a valid image file (JPG, PNG, WEBP, GIF).', 'danger');
+function handleMenuImageSelect(event) {
+  const fileInput = document.getElementById('menu-img-file');
+  const file = (event && event.target && event.target.files && event.target.files[0]) ||
+               (fileInput && fileInput.files && fileInput.files[0]);
+  if (!file) {
     return;
   }
 
-  // Max 8MB
-  if (file.size > 8 * 1024 * 1024) {
-    API.toast('Image exceeds the 8MB limit. Please choose a smaller file.', 'danger');
+  // Validate image by MIME type or file extension
+  const isImageMime = file.type && file.type.startsWith('image/');
+  const isImageExt = file.name && /\.(jpe?g|png|webp|gif|bmp|svg|jfif|avif)$/i.test(file.name);
+  if (!isImageMime && !isImageExt) {
+    API.toast('Please select an image file (JPG, PNG, WEBP, etc.).', 'warning');
     return;
+  }
+
+  // Max 10MB
+  if (file.size > 10 * 1024 * 1024) {
+    API.toast('Image exceeds the 10MB limit. Please choose a smaller file.', 'danger');
+    return;
+  }
+
+  const preview = document.getElementById('menu-img-preview');
+  const emptyState = document.getElementById('menu-img-empty-state');
+  const removeBtn = document.getElementById('menu-img-remove-btn');
+  const status = document.getElementById('menu-img-status');
+  const urlInput = document.getElementById('menu-img-input');
+
+  if (emptyState) emptyState.style.display = 'none';
+  if (status) {
+    status.innerHTML = `<span style="color: var(--brand-gold, #f4a261);">⏳ Reading ${escapeHtml(file.name)}...</span>`;
   }
 
   const reader = new FileReader();
+  reader.onerror = function(err) {
+    console.error('[FileReader Error]', err);
+    if (status) status.innerHTML = `<span style="color: var(--status-danger);">Failed to read file from device.</span>`;
+    API.toast('Failed to read image from device.', 'danger');
+  };
+
   reader.onload = function(e) {
     stagedMenuImageBase64 = e.target.result;
     stagedMenuImageChanged = true;
-
-    const preview = document.getElementById('menu-img-preview');
-    const emptyState = document.getElementById('menu-img-empty-state');
-    const removeBtn = document.getElementById('menu-img-remove-btn');
-    const status = document.getElementById('menu-img-status');
-    const urlInput = document.getElementById('menu-img-input');
 
     if (preview) {
       preview.src = stagedMenuImageBase64;
@@ -813,9 +873,31 @@ function handleMenuImageSelect(event) {
     }
     if (emptyState) emptyState.style.display = 'none';
     if (removeBtn) removeBtn.style.display = 'inline-flex';
-    if (status) status.innerText = `✓ Selected: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
     if (urlInput) urlInput.value = '';
+
+    if (status) {
+      status.innerHTML = `<span style="color: var(--brand-gold, #f4a261);">⏳ Uploading picture from device...</span>`;
+    }
+
+    // Immediately upload to server in background so it's ready when saving
+    API.post('/menu/upload-image', { imageBase64: stagedMenuImageBase64 })
+      .then(res => {
+        if (res && res.imageUrl) {
+          if (urlInput) urlInput.value = res.imageUrl;
+          if (status) {
+            status.innerHTML = `<span style="color: var(--status-success, #2a9d8f); font-weight: 600;">✓ Picture ready: ${escapeHtml(file.name)} (${(file.size / 1024).toFixed(1)} KB)</span>`;
+          }
+          API.toast('Picture chosen! Click "Save Item" to confirm.', 'success');
+        }
+      })
+      .catch(err => {
+        console.warn('[Direct Image Upload Warning, will retry on submit]', err);
+        if (status) {
+          status.innerHTML = `<span style="color: var(--brand-primary, #d4a373);">✓ Picture selected: ${escapeHtml(file.name)}</span>`;
+        }
+      });
   };
+
   reader.readAsDataURL(file);
 }
 
@@ -838,7 +920,7 @@ function clearMenuImageSelection() {
   }
   if (emptyState) emptyState.style.display = 'flex';
   if (removeBtn) removeBtn.style.display = 'none';
-  if (status) status.innerText = 'Picture removed';
+  if (status) status.innerHTML = '';
   if (urlInput) urlInput.value = '';
 }
 
@@ -860,7 +942,7 @@ function handleManualImageUrl(url) {
     }
     if (emptyState) emptyState.style.display = 'none';
     if (removeBtn) removeBtn.style.display = 'inline-flex';
-    if (status) status.innerText = 'External image URL loaded';
+    if (status) status.innerHTML = 'External image URL loaded';
   } else {
     clearMenuImageSelection();
   }
@@ -872,6 +954,13 @@ function toggleImageUrlInput() {
     container.style.display = container.style.display === 'none' ? 'block' : 'none';
   }
 }
+
+// Attach functions to window scope for inline HTML event attributes
+window.triggerMenuImagePick = triggerMenuImagePick;
+window.handleMenuImageSelect = handleMenuImageSelect;
+window.clearMenuImageSelection = clearMenuImageSelection;
+window.handleManualImageUrl = handleManualImageUrl;
+window.toggleImageUrlInput = toggleImageUrlInput;
 
 function openAddMenuItemModal() {
   document.getElementById('menu-item-id').value = '';
@@ -983,8 +1072,8 @@ async function handleMenuItemSubmit(e) {
   }
 
   try {
-    // If a new image file was chosen from the device, upload it first
-    if (stagedMenuImageBase64) {
+    // If a new image file was chosen from device and not yet uploaded, upload it now
+    if (stagedMenuImageBase64 && (!imageUrl || !imageUrl.startsWith('/uploads/'))) {
       if (saveBtn) saveBtn.innerText = 'Uploading pic...';
       const uploadRes = await API.post('/menu/upload-image', {
         imageBase64: stagedMenuImageBase64
