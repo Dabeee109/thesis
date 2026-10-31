@@ -13,6 +13,7 @@ DROP TABLE IF EXISTS `feedback`;
 DROP TABLE IF EXISTS `deliveries`;
 DROP TABLE IF EXISTS `delivery_personnel`;
 DROP TABLE IF EXISTS `payments`;
+DROP TABLE IF EXISTS `admin_gcash_transactions`;
 DROP TABLE IF EXISTS `order_items`;
 DROP TABLE IF EXISTS `orders`;
 DROP TABLE IF EXISTS `inventory_logs`;
@@ -118,7 +119,7 @@ CREATE TABLE `orders` (
   `order_number` VARCHAR(50) NOT NULL UNIQUE COMMENT 'e.g. DNR-20260901-001',
   `customer_id` INT UNSIGNED NOT NULL,
   `order_type` ENUM('delivery', 'pickup') NOT NULL DEFAULT 'delivery',
-  `status` ENUM('pending', 'preparing', 'dispatched', 'delivered', 'cancelled') NOT NULL DEFAULT 'pending',
+  `status` ENUM('pending', 'preparing', 'dispatched', 'delivered', 'cancelled', 'PAID') NOT NULL DEFAULT 'pending',
   `subtotal` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
   `delivery_fee` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
   `total_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
@@ -127,12 +128,15 @@ CREATE TABLE `orders` (
   `customer_notes` TEXT DEFAULT NULL,
   `cancellation_reason` VARCHAR(255) DEFAULT NULL,
   `feedback_requested_at` DATETIME DEFAULT NULL COMMENT 'Timestamp when post-delivery feedback prompt was requested',
+  `gcash_ref` VARCHAR(100) DEFAULT NULL COMMENT 'Verified GCash reference number',
+  `receipt_url` TEXT DEFAULT NULL COMMENT 'Attached receipt image URL or path',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (`customer_id`) REFERENCES `customers`(`id`) ON DELETE RESTRICT,
   INDEX `idx_order_number` (`order_number`),
   INDEX `idx_customer_id` (`customer_id`),
   INDEX `idx_status` (`status`),
+  INDEX `idx_gcash_ref` (`gcash_ref`),
   INDEX `idx_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -151,7 +155,18 @@ CREATE TABLE `order_items` (
   INDEX `idx_order_id` (`order_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 9. Payments Table (Cash vs GCash with validation & mismatch flags)
+-- 9. Admin GCash Transactions Table (Official Admin Transaction Records for Anti-Scam)
+CREATE TABLE `admin_gcash_transactions` (
+  `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `reference_number` VARCHAR(100) NOT NULL UNIQUE,
+  `amount` DECIMAL(10,2) NOT NULL,
+  `status` ENUM('UNCLAIMED', 'MATCHED') NOT NULL DEFAULT 'UNCLAIMED',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_admin_gcash_ref` (`reference_number`),
+  INDEX `idx_admin_gcash_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 10. Payments Table (Cash vs GCash with validation & mismatch flags)
 CREATE TABLE `payments` (
   `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   `order_id` INT UNSIGNED NOT NULL UNIQUE,

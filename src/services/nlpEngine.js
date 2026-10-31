@@ -10,6 +10,7 @@ const config = require('../config/config');
 const { createOrder } = require('./orderService');
 const {
   sendTextMessage,
+  sendImageAttachment,
   sendQuickReplies,
   sendGenericTemplate
 } = require('./messengerService');
@@ -27,6 +28,8 @@ const {
   validateAddress,
   peso
 } = require('./textMatch');
+const maps = require('./maps');
+const { haversineKm } = require('./maps');
 const { quoteForAddress, FALLBACK_KM } = require('./deliveryFeeAdapter');
 const {
   addToCart,
@@ -35,6 +38,9 @@ const {
   calculateCartSubtotal,
   priceCart
 } = require('./cartService');
+const { recognizeReceipt, parseReceiptText, UNREADABLE_REPLY } = require('./receiptOcrService');
+const { verifyPaymentTransaction, resolveOrderTotal, formatAmount } = require('./paymentVerificationService');
+const { generateGeminiResponse } = require('./geminiService');
 
 const MENU_MAX_ITEMS = parseInt(process.env.MENU_MAX_ITEMS, 10) || 50;
 const NLP_STATE_TTL_MIN = parseInt(process.env.NLP_STATE_TTL_MIN, 10) || 30;
@@ -59,6 +65,197 @@ function setChatbotStatus(enabled, user = 'Admin') {
 }
 
 /**
+ * Parse Customer Info (Address, Name, Contact/Landmark) from customer input
+ * @param {string} rawText 
+ * @returns {{ address: string, name: string, contact: string }}
+ */
+function parseCustomerInfo(rawText) {
+  let address = '';
+  let name = '';
+  let contact = '';
+
+  const clean = String(rawText || '').trim();
+
+  // 1. Labeled pattern matching
+  const addressMatch = clean.match(/(?:address|tirahan)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\bname\b|\bpangalan\b|\bcontact\b|\blandmark\b|\bphone\b|\bmobile\b|$))/i);
+  const nameMatch = clean.match(/(?:name|pangalan)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\btirahan\b|\bcontact\b|\blandmark\b|\bphone\b|\bmobile\b|$))/i);
+  const contactMatch = clean.match(/(?:contact(?:\s*number)?(?:\s*or\s*landmark)?|landmark|phone|mobile|cellphone)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\btirahan\b|\bname\b|\bpangalan\b|$))/i);
+
+  if (addressMatch) address = addressMatch[1].trim();
+  if (nameMatch) name = nameMatch[1].trim();
+  if (contactMatch) contact = contactMatch[1].trim();
+
+  // 2. Multiline or delimiter-based fallback
+  if (!address || !name) {
+    const rawLines = clean.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const lines = [...rawLines];
+
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      if (/^(?:address|tirahan)[:=-]?\s*/i.test(line) && !address) {
+        address = line.replace(/^(?:address|tirahan)[:=-]?\s*/i, '').trim();
+        lines.splice(i, 1);
+      } else if (/^(?:name|pangalan)[:=-]?\s*/i.test(line) && !name) {
+        name = line.replace(/^(?:name|pangalan)[:=-]?\s*/i, '').trim();
+        lines.splice(i, 1);
+      } else if (/^(?:contact(?:\s*number)?(?:\s*or\s*landmark)?|landmark|phone|mobile)[:=-]?\s*/i.test(line) && !contact) {
+        contact = line.replace(/^(?:contact(?:\s*number)?(?:\s*or\s*landmark)?|landmark|phone|mobile)[:=-]?\s*/i, '').trim();
+        lines.splice(i, 1);
+      }
+    }
+
+    if (!contact) {
+      const phoneIdx = lines.findIndex(l => /\b09\d{9}\b|\b\+?63\d{10}\b|\blandmark\b/i.test(l));
+      if (phoneIdx !== -1) {
+        contact = lines[phoneIdx];
+        lines.splice(phoneIdx, 1);
+      }
+    }
+
+    if (!address) {
+      const addrIdx = lines.findIndex(l => /\d+|st\b|street|ave\b|avenue|brgy|barangay|city|manila|road|rd\b|blk|lot/i.test(l));
+      if (addrIdx !== -1) {
+        address = lines[addrIdx];
+        lines.splice(addrIdx, 1);
+      }
+    }
+
+    if (!name && lines.length > 0) {
+      name = lines[0];
+      lines.splice(0, 1);
+    }
+
+    if (!address && lines.length > 0) {
+      address = lines[0];
+    }
+  }
+
+  if (!address && clean.length > 5) {
+    address = clean;
+  }
+
+  return {
+    address: address.trim(),
+    name: name.trim(),
+    contact: contact.trim()
+  };
+}
+
+/**
+ * Calculate distance from Diner's Cafe and delivery fee based on distance
+ * Formula: Base fee ₱50 + ₱10 per km beyond 2 km
+ * @param {string} addressText
+ * @returns {Promise<{ distanceKm: number, deliveryFee: number, formattedAddress: string }>}
+ */
+async function calculateDeliveryDistanceAndFee(addressText) {
+  const storeLat = Number.isFinite(config.store?.lat) ? config.store.lat : 14.6042;
+  const storeLng = Number.isFinite(config.store?.lng) ? config.store.lng : 120.9822;
+  const origin = { lat: storeLat, lng: storeLng };
+
+  const geocoded = await maps.geocode(addressText);
+  if (!geocoded || !geocoded.lat || !geocoded.lng) {
+    const err = new Error(`Address '${addressText}' not found.`);
+    err.code = 'GEO_NOT_FOUND';
+    throw err;
+  }
+
+  const dest = { lat: geocoded.lat, lng: geocoded.lng };
+  let distanceKm = 1.0;
+
+  try {
+    const route = await maps.routeDistance(origin, dest);
+    distanceKm = Math.round(route.km * 10) / 10;
+  } catch (routeErr) {
+    const straight = haversineKm(origin.lat, origin.lng, dest.lat, dest.lng);
+    distanceKm = Math.round(straight * 1.25 * 10) / 10;
+  }
+
+  if (distanceKm < 0.1) distanceKm = 0.5;
+
+  // Base fee ₱50 + ₱10 bawat km paglampas ng 2km
+  let deliveryFee = 50.00;
+  if (distanceKm > 2.0) {
+    deliveryFee = 50.00 + (distanceKm - 2.0) * 10.00;
+  }
+  deliveryFee = Math.round(deliveryFee * 100) / 100;
+
+  return {
+    distanceKm,
+    deliveryFee,
+    formattedAddress: geocoded.formattedAddress || addressText
+  };
+}
+
+/**
+ * Generate Complete Summary Receipt
+ * Format:
+ * Resibo ng Transaksyon:
+ * Pangalan: [session.customer_name]
+ * Address: [session.delivery_address]
+ * Contact / Landmark: [session.contact_number]
+ * Mga Inorder:
+ * [Listahan ng items at presyo]
+ * Subtotal: PHP [subtotal]
+ * Distansya: [distance] km
+ * Delivery Fee: PHP [delivery_fee]
+ * Kabuuang Halaga: PHP [grand_total]
+ * GCash Ref No: [reference_number]
+ * 
+ * Salamat! Kumpirmado ang bayad. Inihahanda na ng kusina ang inyong order.
+ */
+function generateSummaryReceipt(session, referenceNumber) {
+  const name = session.customer_name || session.details?.name || 'Customer';
+  const address = session.delivery_address || session.details?.address || 'N/A';
+  const contact = session.contact_number || session.details?.phone || 'N/A';
+
+  const items = (session.ordered_items && session.ordered_items.length > 0)
+    ? session.ordered_items
+    : (session.cart && session.cart.length > 0 ? session.cart : []);
+
+  let itemsListText = '';
+  if (items.length > 0) {
+    itemsListText = items.map(it => {
+      const price = parseFloat(it.price || it.unitPrice || 0);
+      const qty = parseInt(it.quantity, 10) || 1;
+      const total = price * qty;
+      return `- ${it.name} x${qty} - PHP ${formatAmount(total)}`;
+    }).join('\n');
+  } else {
+    itemsListText = '- Order Items';
+  }
+
+  const subtotal = (session.order_subtotal !== null && session.order_subtotal !== undefined)
+    ? parseFloat(session.order_subtotal)
+    : calculateCartSubtotal(items);
+
+  const distance = (session.distance_km !== null && session.distance_km !== undefined)
+    ? session.distance_km
+    : 1.0;
+
+  const deliveryFee = (session.delivery_fee !== null && session.delivery_fee !== undefined)
+    ? parseFloat(session.delivery_fee)
+    : (distance <= 2.0 ? 50.00 : 50.00 + (distance - 2.0) * 10.00);
+
+  const grandTotal = (session.order_total !== null && session.order_total !== undefined)
+    ? parseFloat(session.order_total)
+    : Math.round((subtotal + deliveryFee) * 100) / 100;
+
+  return `Resibo ng Transaksyon:
+Pangalan: ${name}
+Address: ${address}
+Contact / Landmark: ${contact}
+Mga Inorder:
+${itemsListText}
+Subtotal: PHP ${formatAmount(subtotal)}
+Distansya: ${distance} km
+Delivery Fee: PHP ${formatAmount(deliveryFee)}
+Kabuuang Halaga: PHP ${formatAmount(grandTotal)}
+GCash Ref No: ${referenceNumber}
+
+Salamat! Kumpirmado ang bayad. Inihahanda na ng kusina ang inyong order.`;
+}
+
+/**
  * Report macro lifecycle state (idle | ordering | awaiting_checkout | order_placed | awaiting_feedback)
  * @param {Object} session 
  * @returns {string}
@@ -73,6 +270,10 @@ function macroState(session) {
   if ([
     'AWAITING_CHECKOUT_CONFIRM',
     'AWAITING_ORDER_TYPE',
+    'AWAITING_CUSTOMER_INFO',
+    'AWAITING_PAYMENT_VERIFICATION',
+    'AWAITING_DELIVERY_DETAILS',
+    'AWAITING_CANCEL_CONFIRMATION',
     'AWAITING_DETAILS_REUSE',
     'AWAITING_NAME',
     'AWAITING_ADDRESS',
@@ -88,7 +289,8 @@ function macroState(session) {
     'BROWSING',
     'ADDING_ITEM',
     'AWAITING_REMOVE_ITEM',
-    'AWAITING_CLEAR_CONFIRM'
+    'AWAITING_CLEAR_CONFIRM',
+    'ordering'
   ].includes(state) || (session.cart && session.cart.length > 0)) {
     return 'ordering';
   }
@@ -119,7 +321,7 @@ function expireStaleState(session) {
 /**
  * Main Message & Event Handler for Facebook Messenger Webhook & Simulator
  */
-async function handleMessageEvent(psid, incomingText = '', payload = null, location = null) {
+async function handleMessageEvent(psid, incomingText = '', payload = null, location = null, attachments = null) {
   const session = await getSession(psid);
   const text = (incomingText || '').trim();
   const eventPayload = (payload || '').trim();
@@ -133,7 +335,54 @@ async function handleMessageEvent(psid, incomingText = '', payload = null, locat
   let botReplyLog = '';
 
   try {
-    // 0. Handle Location Pin if shared
+    // 0a. Handle Attachments (Receipt images for OCR)
+    if (attachments && attachments.length > 0) {
+      const imgAttachment = attachments.find(a => a.type === 'image');
+      if (imgAttachment) {
+        detectedIntent = 'RECEIPT_IMAGE_ATTACHMENT';
+        const imgInput = imgAttachment.payload?.url || imgAttachment.payload || imgAttachment;
+
+        // Process image URL using OCR library
+        const ocrResult = await recognizeReceipt(imgInput);
+        if (!ocrResult.success) {
+          botReplyLog = ocrResult.botReply || UNREADABLE_REPLY;
+          await sendTextMessage(psid, botReplyLog);
+          return;
+        }
+
+        const verifyResult = await verifyPaymentTransaction({
+          referenceNumber: ocrResult.referenceNumber,
+          session,
+          psid,
+          receiptUrl: typeof imgInput === 'string' ? imgInput : null,
+          parsedAmount: ocrResult.amount
+        });
+
+        const isAwaitingPaymentVerification = (
+          session.state === 'AWAITING_PAYMENT_VERIFICATION' ||
+          session.current_step === 'AWAITING_PAYMENT_VERIFICATION' ||
+          Boolean(session.customer_name)
+        );
+
+        if (verifyResult.success && isAwaitingPaymentVerification) {
+          session.current_step = 'order_placed';
+          session.state = 'order_placed';
+          session.gcash_ref = ocrResult.referenceNumber;
+          await saveSession(session);
+
+          const receiptMsg = generateSummaryReceipt(session, ocrResult.referenceNumber);
+          botReplyLog = receiptMsg;
+          await sendTextMessage(psid, receiptMsg);
+          return;
+        }
+
+        botReplyLog = verifyResult.botReply;
+        await sendTextMessage(psid, verifyResult.botReply);
+        return;
+      }
+    }
+
+    // 0b. Handle Location Pin if shared
     if (location && location.lat !== undefined && location.lng !== undefined) {
       detectedIntent = 'LOCATION_INPUT';
       await handleLocationPin(psid, session, location);
@@ -194,6 +443,7 @@ async function handlePayload(psid, session, payload) {
     session.cart = [];
     session.state = 'IDLE';
     session.pendingItem = null;
+    session.pending_suggestion = null;
     session.pendingAction = null;
     session.details = null;
     session.quote = null;
@@ -202,6 +452,8 @@ async function handlePayload(psid, session, payload) {
     session.pendingRating = null;
     session.pendingFeedbackOrderId = null;
     session.pendingFeedbackOrderNumber = null;
+    session.geminiInteractionId = null;
+    session.chatHistory = [];
     session.failedAttempts = 0;
     await saveSession(session);
     const msg = botMessages.cleared();
@@ -231,6 +483,19 @@ async function handlePayload(psid, session, payload) {
   if (payload === 'CONFIRM_CHECKOUT') {
     await startCheckoutFlow(psid, session);
     return;
+  }
+
+  // Suggestion confirmation quick replies
+  if (payload === 'CONFIRM_YES') {
+    if (session.state === 'AWAITING_SUGGESTION_CONFIRMATION' || session.current_step === 'AWAITING_SUGGESTION_CONFIRMATION') {
+      return handleTextInput(psid, session, 'yes');
+    }
+  }
+
+  if (payload === 'CONFIRM_NO') {
+    if (session.state === 'AWAITING_SUGGESTION_CONFIRMATION' || session.current_step === 'AWAITING_SUGGESTION_CONFIRMATION') {
+      return handleTextInput(psid, session, 'no');
+    }
   }
 
   // Keep Shopping
@@ -415,6 +680,12 @@ async function handlePayload(psid, session, payload) {
     return;
   }
 
+  // Natural-language quick-reply suggestions delegate to free-text handler
+  if (!/^[A-Z0-9_]+$/.test(payload)) {
+    await handleTextInput(psid, session, payload);
+    return;
+  }
+
   // Fallback for unknown / stale buttons
   const stale = botMessages.staleButton();
   await sendQuickReplies(psid, stale.text, stale.quickReplies);
@@ -425,6 +696,365 @@ async function handlePayload(psid, session, payload) {
  */
 async function handleTextInput(psid, session, rawText) {
   const norm = normalize(rawText);
+
+  // 0. State: AWAITING_CANCEL_CONFIRMATION (Intercept before any other logic or NLP)
+  if (session.state === 'AWAITING_CANCEL_CONFIRMATION' || session.current_step === 'AWAITING_CANCEL_CONFIRMATION') {
+    const words = norm.split(/\s+/).filter(Boolean);
+    const affirmativeWords = ['yes', 'oo', 'sige', 'yep', 'opo'];
+    const negativeWords = ['no', 'hindi', 'wag', 'huwag', 'wait'];
+
+    const hasAffirmative = affirmativeWords.some(w => words.includes(w) || norm === w) ||
+      classifyShort(rawText) === 'YES';
+    const hasNegative = negativeWords.some(w => words.includes(w) || norm === w) ||
+      norm.includes('hindi pa') ||
+      norm.includes('wag muna') ||
+      norm.includes('huwag muna') ||
+      classifyShort(rawText) === 'NO';
+
+    if (hasAffirmative && !hasNegative) {
+      session.cart = [];
+      session.order_type = null;
+      session.orderType = null;
+      session.delivery_address = null;
+      session.address = '';
+      session.gcash_ref = null;
+      session.partial_paid = null;
+      session.order_total = null;
+      session.receipt_url = null;
+      session.details = null;
+      session.quote = null;
+      session.checkout = null;
+      session.pendingItem = null;
+      session.pending_suggestion = null;
+      session.pendingAction = null;
+      if (session.activeOrderNumber) {
+        try {
+          await db.query(
+            `UPDATE orders SET status = 'cancelled', cancellation_reason = 'Cancelled by customer' WHERE order_number = ?`,
+            [session.activeOrderNumber]
+          );
+        } catch (e) {
+          console.error('[Cancel Order DB Error]', e.message);
+        }
+        session.activeOrderNumber = null;
+      }
+      session.current_step = 'idle';
+      session.state = 'idle';
+      await saveSession(session);
+
+      const reply = 'Order has been cancelled.';
+      await sendTextMessage(psid, reply);
+      return { intent: 'CANCEL_ORDER_CONFIRMED', confidence: 1.0, replyLog: reply };
+    }
+
+    if (hasNegative && !hasAffirmative) {
+      const targetState = (session.previous_step && session.previous_step !== 'AWAITING_CANCEL_CONFIRMATION' && session.previous_step !== 'idle')
+        ? session.previous_step
+        : 'ordering';
+      session.current_step = targetState;
+      session.state = targetState;
+      await saveSession(session);
+
+      const reply = 'Anything else?';
+      await sendTextMessage(psid, reply);
+      return { intent: 'CANCEL_ORDER_DECLINED', confidence: 1.0, replyLog: reply };
+    }
+
+    // Other / Ambiguous answer
+    await saveSession(session);
+    const reply = 'Pakisagot lamang ng yes o no kung nais mong i-cancel ang iyong order.';
+    await sendTextMessage(psid, reply);
+    return { intent: 'AWAITING_CANCEL_CONFIRMATION_RETRY', confidence: 1.0, replyLog: reply };
+  }
+
+  // 0b. State: 'AWAITING_SUGGESTION_CONFIRMATION' (Bago dumaan sa ibang intent parser)
+  if (session.state === 'AWAITING_SUGGESTION_CONFIRMATION' || session.current_step === 'AWAITING_SUGGESTION_CONFIRMATION') {
+    const affirmativeWords = ['yes', 'oo', 'opo', 'yep', 'sige'];
+    const negativeWords = ['no', 'hindi', 'ayaw'];
+
+    const words = norm.split(/\s+/).filter(Boolean);
+    const hasAffirmative = affirmativeWords.some(w => words.includes(w) || norm === w || norm.startsWith(w)) ||
+      classifyShort(rawText) === 'YES';
+    const hasNegative = negativeWords.some(w => words.includes(w) || norm === w || norm.startsWith(w)) ||
+      classifyShort(rawText) === 'NO';
+
+    if (hasAffirmative && !hasNegative) {
+      const pending = session.pending_suggestion || session.pendingItem;
+      const addedName = pending?.name || 'item';
+      const addedQty = parseInt(pending?.quantity || 1, 10) || 1;
+      const price = parseFloat(pending?.price) || 0;
+
+      if (pending) {
+        if (!session.cart) session.cart = [];
+        const itemToAdd = {
+          menuItemId: pending.id || pending.menuItemId || 1,
+          id: pending.id || pending.menuItemId || 1,
+          name: addedName,
+          quantity: addedQty,
+          price: price
+        };
+        const existingIdx = session.cart.findIndex(c => 
+          (c.name && c.name.toLowerCase() === addedName.toLowerCase()) ||
+          (c.menuItemId && c.menuItemId === itemToAdd.menuItemId)
+        );
+        if (existingIdx >= 0) {
+          session.cart[existingIdx].quantity += addedQty;
+        } else {
+          session.cart.push(itemToAdd);
+        }
+      }
+
+      session.pending_suggestion = null;
+      session.pendingItem = null;
+      session.current_step = 'ordering';
+      session.state = 'ordering';
+      await saveSession(session);
+
+      const reply = `Naidagdag sa iyong cart ang ${addedQty} ${addedName}. Nais mo pa bang magdagdag ng iba o mag-checkout na?`;
+      await sendTextMessage(psid, reply);
+      return { intent: 'SUGGESTION_CONFIRMED', confidence: 1.0, replyLog: reply };
+    }
+
+    if (hasNegative && !hasAffirmative) {
+      session.pending_suggestion = null;
+      session.pendingItem = null;
+      session.current_step = 'ordering';
+      session.state = 'ordering';
+      await saveSession(session);
+
+      const reply = 'Pakiulit ng order.';
+      await sendTextMessage(psid, reply);
+      return { intent: 'SUGGESTION_DECLINED', confidence: 1.0, replyLog: reply };
+    }
+
+    // Kung hindi yes o no ang sagot:
+    await saveSession(session);
+    const reply = 'Pakisagot po ng yes kung ito ang iyong ibig sabihin, o no para ulitin ang order.';
+    await sendTextMessage(psid, reply);
+    return { intent: 'AWAITING_SUGGESTION_CONFIRMATION_RETRY', confidence: 1.0, replyLog: reply };
+  }
+
+  // 1. Trigger Order Cancellation Flow
+  const cancelTriggerPhrases = [
+    'cancel order',
+    'cancel my order',
+    'i cancel ang order',
+    'icancel ang order',
+    'kanselahin'
+  ];
+  const isCancelTrigger = cancelTriggerPhrases.some(p => norm === p || norm.includes(p)) ||
+    /\b(i[-\s]?cancel\s+(ang\s+)?order|cancel\s+(my\s+)?order|kanselahin)\b/i.test(rawText);
+
+  if (isCancelTrigger) {
+    session.previous_step = (session.current_step && session.current_step !== 'idle') ? session.current_step : 'ordering';
+    session.current_step = 'AWAITING_CANCEL_CONFIRMATION';
+    session.state = 'AWAITING_CANCEL_CONFIRMATION';
+    await saveSession(session);
+
+    const reply = 'Sigurado ka ba na nais mong i-cancel ang iyong order? I-type ang yes o no.';
+    await sendTextMessage(psid, reply);
+    return { intent: 'CANCEL_ORDER_REQUESTED', confidence: 1.0, replyLog: reply };
+  }
+
+  const isDetailsStateCheck = [
+    'AWAITING_NAME',
+    'AWAITING_ADDRESS',
+    'AWAITING_PHONE',
+    'AWAITING_EDIT_FIELD',
+    'AWAITING_PAYMENT'
+  ].includes(session.state);
+
+  // Global Reset / Cancel Intercept
+  const isResetCmd = ['reset', 'start over', 'umulit', 'reset session'].includes(norm) ||
+    (norm === 'cancel' && !isDetailsStateCheck);
+
+  if (isResetCmd) {
+    session.cart = [];
+    session.current_step = 'idle';
+    session.state = 'idle';
+    session.order_type = null;
+    session.orderType = null;
+    session.delivery_address = null;
+    session.gcash_ref = null;
+    session.partial_paid = null;
+    session.details = null;
+    session.pendingItem = null;
+    session.pending_suggestion = null;
+    session.pendingAction = null;
+    session.quote = null;
+    session.checkout = null;
+    const resetMsg = 'Na-reset na ang iyong session. Paano kita matutulungan ngayon?';
+    await sendTextMessage(psid, resetMsg);
+    return { intent: 'RESET_SESSION', confidence: 1.0, replyLog: resetMsg };
+  }
+
+  // 1. Delivery trigger keywords: 'delivery', 'deliver', 'padeliver'
+  const isDeliveryChoice = ['delivery', 'deliver', 'padeliver'].includes(norm) ||
+    (/\b(delivery|deliver|padeliver)\b/i.test(norm) && (session.state === 'AWAITING_ORDER_TYPE' || session.current_step === 'AWAITING_ORDER_TYPE'));
+
+  if (isDeliveryChoice && (session.state === 'AWAITING_ORDER_TYPE' || session.current_step === 'AWAITING_ORDER_TYPE' || (session.cart && session.cart.length > 0 && !isDetailsStateCheck))) {
+    session.orderType = 'delivery';
+    session.order_type = 'delivery';
+    if (session.cart && session.cart.length > 0) {
+      session.ordered_items = [...session.cart];
+    }
+    session.current_step = 'AWAITING_CUSTOMER_INFO';
+    session.state = 'AWAITING_CUSTOMER_INFO';
+    await saveSession(session);
+
+    const reply = `Please provide the following:
+Address:
+Name:
+Contact number or landmark:`;
+
+    await sendTextMessage(psid, reply);
+    return { intent: 'ORDER_TYPE_DELIVERY', confidence: 1.0, replyLog: reply };
+  }
+
+  // 2. State: 'AWAITING_CUSTOMER_INFO'
+  if (session.state === 'AWAITING_CUSTOMER_INFO' || session.current_step === 'AWAITING_CUSTOMER_INFO') {
+    const parsed = parseCustomerInfo(rawText);
+
+    if (!parsed.address || parsed.address.length < 5) {
+      const askInfoMsg = 'Pakibigay ang inyong kumpletong address, pangalan, at contact number o landmark.';
+      await sendTextMessage(psid, askInfoMsg);
+      return { intent: 'AWAITING_CUSTOMER_INFO_RETRY', confidence: 1.0, replyLog: askInfoMsg };
+    }
+
+    let deliveryDetails;
+    try {
+      deliveryDetails = await calculateDeliveryDistanceAndFee(parsed.address);
+    } catch (err) {
+      const geoFailMsg = 'Paumanhin, hindi mahanap ang address na inyong ibinigay. Pakisend muli ang inyong kumpletong address kasama ang kilalang landmark upang matukoy ang distansya.';
+      await sendTextMessage(psid, geoFailMsg);
+      return { intent: 'GEO_ADDRESS_NOT_FOUND', confidence: 1.0, replyLog: geoFailMsg };
+    }
+
+    const customerName = parsed.name || session.customer_name || session.details?.name || 'Customer';
+    const contactNumber = parsed.contact || session.contact_number || session.details?.phone || 'N/A';
+    const subtotal = (session.cart && session.cart.length > 0)
+      ? calculateCartSubtotal(session.cart)
+      : (session.order_subtotal || 150.00);
+
+    const distanceKm = deliveryDetails.distanceKm;
+    const deliveryFee = deliveryDetails.deliveryFee;
+    const grandTotal = Math.round((subtotal + deliveryFee) * 100) / 100;
+
+    session.customer_name = customerName;
+    session.contact_number = contactNumber;
+    session.delivery_address = deliveryDetails.formattedAddress;
+    session.distance_km = distanceKm;
+    session.delivery_fee = deliveryFee;
+    session.order_subtotal = subtotal;
+    session.order_total = grandTotal;
+    if (session.cart && session.cart.length > 0) {
+      session.ordered_items = [...session.cart];
+    }
+    if (!session.details) session.details = {};
+    session.details.name = customerName;
+    session.details.address = deliveryDetails.formattedAddress;
+    session.details.phone = contactNumber;
+
+    session.current_step = 'AWAITING_PAYMENT_VERIFICATION';
+    session.state = 'AWAITING_PAYMENT_VERIFICATION';
+    await saveSession(session);
+
+    const baseAppUrl = (config.appUrl || 'http://localhost:3000').replace(/\/+$/, '');
+    const gcashFullQrUrl = `${baseAppUrl}/images/gcash_full_qr.png`;
+    const gcashRedirectUrl = `${baseAppUrl}/pay/gcash?psid=${encodeURIComponent(psid)}`;
+    const gcashNo = '0928 176 2895';
+    const gcashName = 'FR****S DA*E F.';
+
+    // 1. Message 1: Generic Template Card (GCash Card with square image aspect ratio)
+    await sendGenericTemplate(psid, [
+      {
+        title: 'GCash',
+        subtitle: gcashNo,
+        image_url: gcashFullQrUrl,
+        buttons: [
+          {
+            type: 'web_url',
+            url: gcashRedirectUrl,
+            title: 'Transfer with GCash',
+            webview_height_ratio: 'compact'
+          }
+        ]
+      }
+    ], { image_aspect_ratio: 'square' });
+
+    // 2. Message 2: 3-step text instructions
+    const paymentInstructions = `1. Tap "Transfer with GCash".
+2. GCash will open with the recipient's account details prefilled.
+3. After you complete the transfer, your receipt will be uploaded into this chat.`;
+
+    await sendTextMessage(psid, paymentInstructions);
+
+    return { intent: 'CUSTOMER_INFO_RECEIVED_AWAITING_PAYMENT', confidence: 1.0, replyLog: paymentInstructions };
+  }
+
+  // 3. State: 'AWAITING_PAYMENT_VERIFICATION' & legacy 'AWAITING_DELIVERY_DETAILS'
+  if (
+    session.state === 'AWAITING_PAYMENT_VERIFICATION' ||
+    session.current_step === 'AWAITING_PAYMENT_VERIFICATION' ||
+    session.state === 'AWAITING_DELIVERY_DETAILS' ||
+    session.current_step === 'AWAITING_DELIVERY_DETAILS'
+  ) {
+    // Check if 13-digit Reference Number is present in text
+    const refMatch = rawText.match(/\b\d{4}\s?\d{3}\s?\d{6}\b/) || rawText.match(/\b\d{13}\b/) || rawText.match(/(?:ref(?:erence)?(?:\s*no\.?)?)\s*[:#]?\s*([0-9\s]{13,16})/i);
+    if (refMatch) {
+      const cleanRef = (refMatch[1] || refMatch[0]).replace(/\s+/g, '');
+      if (cleanRef.length === 13) {
+        // Save address if also present
+        const textWithoutRef = rawText.replace(refMatch[0], '').trim();
+        if (textWithoutRef.length > 5 && !session.delivery_address) {
+          session.delivery_address = textWithoutRef;
+          if (!session.details) session.details = {};
+          session.details.address = textWithoutRef;
+        }
+
+        const verifyResult = await verifyPaymentTransaction({
+          referenceNumber: cleanRef,
+          session,
+          psid,
+          parsedAmount: null
+        });
+
+        const isAwaitingPaymentVerification = (
+          session.state === 'AWAITING_PAYMENT_VERIFICATION' ||
+          session.current_step === 'AWAITING_PAYMENT_VERIFICATION' ||
+          Boolean(session.customer_name)
+        );
+
+        if (verifyResult.success && isAwaitingPaymentVerification) {
+          session.current_step = 'order_placed';
+          session.state = 'order_placed';
+          session.gcash_ref = cleanRef;
+          await saveSession(session);
+
+          const receiptMsg = generateSummaryReceipt(session, cleanRef);
+          await sendTextMessage(psid, receiptMsg);
+          return { intent: 'GCASH_TYPED_REF_VERIFIED', confidence: 1.0, replyLog: receiptMsg };
+        } else {
+          await sendTextMessage(psid, verifyResult.botReply);
+          return { intent: verifyResult.success ? 'GCASH_TYPED_REF_VERIFIED' : 'GCASH_REF_VERIFICATION_FAILED', confidence: 1.0, replyLog: verifyResult.botReply };
+        }
+      }
+    }
+
+    // In AWAITING_PAYMENT_VERIFICATION state: customer typed something without 13-digit reference number
+    // Manatiling tahimik ang bot sa state na 'AWAITING_PAYMENT_VERIFICATION' at maghintay lamang sa awtomatikong upload ng resibo o ref number
+    if (session.state === 'AWAITING_PAYMENT_VERIFICATION' || session.current_step === 'AWAITING_PAYMENT_VERIFICATION') {
+      return { intent: 'AWAITING_PAYMENT_VERIFICATION_SILENT', confidence: 1.0 };
+    }
+
+    // Legacy fallback for AWAITING_DELIVERY_DETAILS: if text only contains address without reference number
+    if (rawText.length > 5 && !['hi', 'hello', 'menu', 'cart'].includes(norm)) {
+      session.delivery_address = rawText;
+      if (!session.details) session.details = {};
+      session.details.address = rawText;
+      return { intent: 'SET_DELIVERY_ADDRESS_AWAITING_REF', confidence: 1.0 };
+    }
+  }
 
   // 1. States expecting free text (Decision 1b)
   if (session.state === 'AWAITING_FEEDBACK_COMMENT') {
@@ -490,6 +1120,7 @@ async function handleTextInput(psid, session, rawText) {
 
   // 2. Open Yes/No question states (Decision 1c)
   const openQuestionStates = [
+    'AWAITING_SUGGESTION_CONFIRMATION',
     'AWAITING_CHECKOUT_CONFIRM',
     'AWAITING_CLEAR_CONFIRM',
     'AWAITING_DETAILS_REUSE',
@@ -582,19 +1213,36 @@ async function handleTextInput(psid, session, rawText) {
     return { intent: 'CANCEL_EMPTY', confidence: 1.0 };
   }
 
-  // 5. Query Wit.ai NLU for what remains
+  // 5a. Bilingual / Taglish Conversational Assistant (Google Gemini AI) for inquiries, FAQs, small talk & support
+  if (process.env.NODE_ENV !== 'test' && isConversationalInquiry(rawText, session)) {
+    const geminiTurn = await tryGeminiConversationalTurn(psid, session, rawText);
+    if (geminiTurn) {
+      return geminiTurn;
+    }
+  }
+
+  // 5b. Query Wit.ai NLU for what remains
   const nlu = await queryWitAi(rawText);
   const intent = nlu.intent;
   const conf = nlu.confidence || 0;
 
   // Thresholds: act >= 0.80, confirm 0.55-0.80, fallback < 0.55 (Decision 8)
   if (conf < 0.55 && intent !== 'ORDER_ITEM' && intent !== 'REMOVE_ITEM') {
+    // Check if the user is trying to order a menu item with typo / spelling variation
+    const orderTry = await handleOrderItemText(psid, session, rawText, nlu);
+    if (orderTry && orderTry.intent !== 'FALLBACK') {
+      return orderTry;
+    }
     const fb = botMessages.fallback();
     await sendQuickReplies(psid, fb.text, fb.quickReplies);
     return { intent: 'FALLBACK', confidence: conf };
   }
 
   if (intent === 'OUT_OF_SCOPE') {
+    if (process.env.NODE_ENV !== 'test') {
+      const geminiTurn = await tryGeminiConversationalTurn(psid, session, rawText);
+      if (geminiTurn) return geminiTurn;
+    }
     const oos = botMessages.outOfScope();
     await sendQuickReplies(psid, oos.text, oos.quickReplies);
     return { intent: 'OUT_OF_SCOPE', confidence: conf };
@@ -659,6 +1307,10 @@ async function handleTextInput(psid, session, rawText) {
 async function handleYesAnswer(psid, session) {
   const currentState = session.state;
 
+  if (currentState === 'AWAITING_SUGGESTION_CONFIRMATION' || session.current_step === 'AWAITING_SUGGESTION_CONFIRMATION') {
+    return handleTextInput(psid, session, 'yes');
+  }
+
   if (currentState === 'AWAITING_CHECKOUT_CONFIRM') {
     await startCheckoutFlow(psid, session);
     return { intent: 'CONFIRM_CHECKOUT_YES', confidence: 1.0 };
@@ -689,7 +1341,15 @@ async function handleYesAnswer(psid, session) {
 
   if (currentState === 'AWAITING_ORDER_TYPE') {
     session.orderType = 'delivery';
-    await proceedAfterOrderType(psid, session);
+    session.order_type = 'delivery';
+    if (session.cart && session.cart.length > 0) {
+      session.ordered_items = [...session.cart];
+    }
+    session.current_step = 'AWAITING_CUSTOMER_INFO';
+    session.state = 'AWAITING_CUSTOMER_INFO';
+    await saveSession(session);
+    const msg = `Please provide the following:\nAddress:\nName:\nContact number or landmark:`;
+    await sendTextMessage(psid, msg);
     return { intent: 'ORDER_TYPE_YES', confidence: 1.0 };
   }
 
@@ -701,6 +1361,10 @@ async function handleYesAnswer(psid, session) {
  */
 async function handleNoAnswer(psid, session) {
   const currentState = session.state;
+
+  if (currentState === 'AWAITING_SUGGESTION_CONFIRMATION' || session.current_step === 'AWAITING_SUGGESTION_CONFIRMATION') {
+    return handleTextInput(psid, session, 'no');
+  }
 
   if (currentState === 'AWAITING_CHECKOUT_CONFIRM') {
     session.state = 'BROWSING';
@@ -908,7 +1572,34 @@ async function handleQuantitySelection(psid, session, qty) {
 /**
  * Handle free text item ordering
  */
+function isConversationalInquiry(rawText, session = null) {
+  const trimmed = String(rawText || '').trim();
+  if (!trimmed) return false;
+
+  // Let deterministic cart/order handlers process explicit item additions & active-cart removals
+  const hasExplicitOrderVerb = /\b(?:can\s+i\s+(?:get|order|have)|may\s+i\s+(?:get|order|have)|i\s*(?:want|would\s+like|'d\s+like)\s+(?:to\s+order|a\b|an\b|\d+)|pa-?order|pabili|gusto\s+ko\s+(?:ng|umorder)|add\s+\d+|order\s+\d+)\b/i.test(trimmed);
+  if (hasExplicitOrderVerb) return false;
+
+  const hasCartItems = Array.isArray(session?.cart) && session.cart.length > 0;
+  if (hasCartItems && /\b(?:remove|delete|take\s*out|alisin|tanggalin|pa-?cancel)\b/i.test(trimmed)) {
+    return false;
+  }
+
+  return (
+    /\?$/.test(trimmed) ||
+    /^(?:what|which|how|why|who|where|when|is\s+(?:the|your|this|there|cash)|are\s+(?:the|your|you|there)|do\s+you|can\s+(?:you|i\s+(?:customize|place|pre-?order|request|change|see))|recommend|suggest|pair|tell\s+me|pa-?reco|hm\b|pde\b|pwde\b|pwede\b|pano\b|paano\b|ano\b|ano-?ano\b|anong\b|alin\b|magkano\b|magkno\b|masarap\b|matamis\b|mainit\b|malamig\b|maingay\b|mabilis\b|meron\b|may\b|san\b|saan\b|bat\b|bakit\b|gaano\b|nasaan\b|asan\b|kumusta\b|kamusta\b|hello\s*[!,]?\s*(?:po|pwede)|hi\s*,\s*(?:bot|quick)|hey\s+there|uy\b|yo\b|g\s*,\s*goods|goods\s+na|good\s+(?:morning|afternoon|evening)|magandang\s+(?:umaga|tanghali|hapon|gabi)|salamat\b|matsala\b|bye\b|busy\s+ba|open\s+po\s+ba|legit\s+ba|libre\s+ba|original\b|safe\s+ba|tumatawag\b|weekend\s+ba|compatible\b|sira\s+po|mali\s+po|nawawala\b|kulang\b|sinisingil\b|ang\s+(?:tagal|bastos)|nag-?(?:doble|hang|o-?offer)|laging\s+nag-?e-?error|di\s+ko\b|'di\s+ko\b|nakalimutan\b|biglang\s+nawala|sabi\s+sa\s+gcash|na-?(?:place|charge|process)|hindi\s+(?:gumagana|dumarating|kasya|pa\s+dumarating)|bka\s+nmn|baka\s+naman|pa-?pack\s+po)/i.test(trimmed) ||
+    /\blods\b|\bmatsala\b/i.test(trimmed)
+  );
+}
+
 async function handleOrderItemText(psid, session, rawText, nlu) {
+  // Route open-ended menu/pairing/recommendation questions to Gemini Barista AI before fuzzy item matching
+  if (process.env.NODE_ENV !== 'test' && isConversationalInquiry(rawText, session)) {
+    const geminiInquiry = await tryGeminiConversationalTurn(psid, session, rawText);
+    if (geminiInquiry) {
+      return geminiInquiry;
+    }
+  }
   // Extract candidate query string
   const [candidates] = await db.query(`
     SELECT m.id, m.name, m.price, m.synonyms, m.is_available, i.stock_quantity
@@ -950,11 +1641,26 @@ async function handleOrderItemText(psid, session, rawText, nlu) {
 
   if (matchResult.status === 'confirm') {
     const topCand = matchResult.matches[0];
-    session.pendingItem = { id: topCand.id, name: topCand.name, price: topCand.price };
-    session.state = 'ADDING_ITEM';
-    const didYou = botMessages.didYouMean(topCand.name);
-    await sendQuickReplies(psid, didYou.text, didYou.quickReplies);
-    return { intent: 'ORDER_ITEM_CONFIRM', confidence: 0.7 };
+    const extractedQuantity = (nlu && nlu.quantity) || parseQuantity(rawText) || 1;
+
+    session.pending_suggestion = {
+      name: topCand.name,
+      quantity: extractedQuantity,
+      price: topCand.price,
+      id: topCand.id,
+      menuItemId: topCand.id
+    };
+    session.pendingItem = { id: topCand.id, name: topCand.name, price: topCand.price, quantity: extractedQuantity };
+    session.current_step = 'AWAITING_SUGGESTION_CONFIRMATION';
+    session.state = 'AWAITING_SUGGESTION_CONFIRMATION';
+    await saveSession(session);
+
+    const replyMsg = `Did you mean: ${topCand.name}?`;
+    await sendQuickReplies(psid, replyMsg, [
+      { title: 'Yes', payload: 'CONFIRM_YES' },
+      { title: 'No', payload: 'CONFIRM_NO' }
+    ]);
+    return { intent: 'ORDER_ITEM_CONFIRM', confidence: 0.7, replyLog: replyMsg };
   }
 
   if (matchResult.status === 'ambiguous') {
@@ -965,6 +1671,14 @@ async function handleOrderItemText(psid, session, rawText, nlu) {
     buttons.push({ title: 'Cancel', payload: 'MENU_HOME' });
     await sendQuickReplies(psid, 'Which item did you mean?', buttons);
     return { intent: 'ORDER_ITEM_AMBIGUOUS', confidence: 0.6 };
+  }
+
+  // Generative AI Conversational Barista fallback (Google Gemini via @google/genai)
+  if (process.env.NODE_ENV !== 'test') {
+    const geminiTurn = await tryGeminiConversationalTurn(psid, session, rawText);
+    if (geminiTurn) {
+      return geminiTurn;
+    }
   }
 
   // Fallback
@@ -1643,6 +2357,89 @@ async function handleTrackOrder(psid, session) {
   );
 }
 
+/**
+ * Invoke Google Gemini Conversational AI for open-ended dialogue, recommendations,
+ * menu questions, and natural-language multi-item extraction.
+ */
+async function tryGeminiConversationalTurn(psid, session, rawText) {
+  try {
+    const [menuItems] = await db.query(`
+      SELECT m.id, m.name, m.description, m.price, c.name AS category_name, i.stock_quantity
+      FROM menu_items m
+      JOIN categories c ON c.id = m.category_id AND c.is_active = 1
+      JOIN inventory i ON i.menu_item_id = m.id
+      WHERE m.is_available = 1 AND i.stock_quantity > 0 AND COALESCE(m.is_deleted, 0) = 0
+      ORDER BY c.display_order ASC, m.is_bestseller DESC, m.name ASC
+    `);
+
+    const geminiRes = await generateGeminiResponse(rawText, session, menuItems || []);
+    if (!geminiRes || !geminiRes.replyText) {
+      return null;
+    }
+
+    // If Gemini extracted explicit menu items to add to cart, validate against in-stock DB items
+    if (geminiRes.intent === 'ADD_TO_CART' && Array.isArray(geminiRes.extractedItems) && geminiRes.extractedItems.length > 0) {
+      let addedCount = 0;
+      if (!session.cart) session.cart = [];
+
+      for (const ext of geminiRes.extractedItems) {
+        const dbItem = (menuItems || []).find(m =>
+          m.id === Number(ext.menuItemId) ||
+          (ext.name && m.name.toLowerCase() === String(ext.name).toLowerCase())
+        );
+        if (dbItem) {
+          const qty = Math.max(1, parseInt(ext.quantity, 10) || 1);
+          addToCart(session.cart, dbItem, qty);
+          addedCount += qty;
+        }
+      }
+
+      if (addedCount > 0) {
+        session.state = 'AWAITING_CHECKOUT_CONFIRM';
+        const subtotal = calculateCartSubtotal(session.cart);
+        const replyWithTotal = `${geminiRes.replyText}\n\nCart subtotal: ${peso(subtotal)}. Check out?`;
+        await sendQuickReplies(psid, replyWithTotal, [
+          { title: 'Yes, checkout', payload: 'CONFIRM_CHECKOUT' },
+          { title: 'Add more', payload: 'KEEP_SHOPPING' },
+          { title: 'View cart', payload: 'VIEW_CART' }
+        ]);
+        return {
+          intent: 'GEMINI_ADD_TO_CART',
+          confidence: 0.95,
+          replyLog: replyWithTotal
+        };
+      }
+    }
+
+    // Map suggestedReplies cleanly to structured payloads where applicable
+    const mappedReplies = (geminiRes.suggestedReplies || []).slice(0, 4).map(label => {
+      const lower = label.toLowerCase();
+      if (lower.includes('menu')) return { title: '☕ Menu', payload: 'MENU_HOME' };
+      if (lower.includes('cart')) return { title: '🛒 Cart', payload: 'VIEW_CART' };
+      if (lower.includes('checkout') || lower.includes('check out')) return { title: 'Checkout', payload: 'CONFIRM_CHECKOUT' };
+      if (lower.includes('track')) return { title: 'Track order', payload: 'TRACK_LATEST_ORDER' };
+      return { title: label.slice(0, 20), payload: '' };
+    }).filter(qr => qr.title);
+
+    const quickReplies = mappedReplies.length > 0
+      ? mappedReplies.map(qr => qr.payload ? qr : qr.title)
+      : [
+          { title: '☕ Menu', payload: 'MENU_HOME' },
+          { title: '🛒 Cart', payload: 'VIEW_CART' }
+        ];
+
+    await sendQuickReplies(psid, geminiRes.replyText, quickReplies);
+    return {
+      intent: `GEMINI_${geminiRes.intent || 'CHAT'}`,
+      confidence: 0.95,
+      replyLog: geminiRes.replyText
+    };
+  } catch (err) {
+    console.warn('[Gemini Turn Fallback Warning]', err.message);
+    return null;
+  }
+}
+
 module.exports = {
   handleMessageEvent,
   macroState,
@@ -1652,5 +2449,9 @@ module.exports = {
   saveSession,
   clearSessionCart,
   getChatbotStatus,
-  setChatbotStatus
+  setChatbotStatus,
+  verifyPaymentTransaction,
+  recognizeReceipt,
+  parseReceiptText,
+  generateSummaryReceipt
 };

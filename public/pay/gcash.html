@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Redirecting to GCash...</title>
+  <script>
+    window.onload = function() {
+      // Subukang buksan agad ang Android app via intent
+      window.location.href = "intent://#Intent;scheme=gcash;package=com.globe.gcash.android;end";
+      
+      // Fallback deep link
+      setTimeout(function() {
+        window.location.href = "gcash://";
+      }, 1000);
+    };
+  </script>
+</head>
+<body style="font-family: Arial, sans-serif; text-align: center; padding-top: 50px;">
+  <p>Binubuksan ang GCash app...</p>
+  <p>Kung hindi ito nagbukas, pindutin ang button sa ibaba:</p>
+  <a href="intent://#Intent;scheme=gcash;package=com.globe.gcash.android;end" 
+     style="display:inline-block; padding:12px 24px; background:#007dfe; color:#fff; text-decoration:none; border-radius:8px; font-weight:bold;">
+     Buksan ang GCash
+  </a>
+</body>
+</html>

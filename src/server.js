@@ -18,7 +18,12 @@ const app = express();
 
 // Middleware
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({
+  limit: '10mb',
+  verify: (req, _res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Serve static frontend assets
@@ -57,7 +62,7 @@ app.use('/api', apiRoutes);
 
 // Catch-all route to serve portal
 app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api') || req.path === '/webhook') {
+  if (req.path.startsWith('/api') || req.path === '/webhook' || req.path.startsWith('/pay')) {
     return next();
   }
   res.sendFile(path.join(__dirname, '../public/index.html'));

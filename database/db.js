@@ -96,7 +96,7 @@ function initSqliteFallback() {
         order_number TEXT UNIQUE NOT NULL,
         customer_id INTEGER NOT NULL REFERENCES customers(id),
         order_type TEXT CHECK(order_type IN ('delivery', 'pickup')) NOT NULL DEFAULT 'delivery',
-        status TEXT CHECK(status IN ('pending', 'preparing', 'dispatched', 'delivered', 'cancelled')) NOT NULL DEFAULT 'pending',
+        status TEXT CHECK(status IN ('pending', 'preparing', 'dispatched', 'delivered', 'cancelled', 'PAID', 'FOR_CONFIRMATION', 'paid', 'for_confirmation')) NOT NULL DEFAULT 'pending',
         subtotal REAL NOT NULL DEFAULT 0.00,
         delivery_fee REAL NOT NULL DEFAULT 0.00,
         total_amount REAL NOT NULL DEFAULT 0.00,
@@ -105,8 +105,18 @@ function initSqliteFallback() {
         customer_notes TEXT,
         cancellation_reason TEXT,
         feedback_requested_at DATETIME DEFAULT NULL,
+        gcash_ref TEXT DEFAULT NULL,
+        receipt_url TEXT DEFAULT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS admin_gcash_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        reference_number TEXT UNIQUE NOT NULL,
+        amount REAL NOT NULL,
+        status TEXT CHECK(status IN ('UNCLAIMED', 'MATCHED')) NOT NULL DEFAULT 'UNCLAIMED',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE TABLE IF NOT EXISTS order_items (
@@ -210,8 +220,24 @@ function initSqliteFallback() {
     // Conversation Flow v2 migrations
     try { sqliteDb.exec(`ALTER TABLE customers ADD COLUMN session_json TEXT DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN feedback_requested_at DATETIME DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN gcash_ref TEXT DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN receipt_url TEXT DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE menu_items ADD COLUMN synonyms TEXT DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE menu_items ADD COLUMN is_deleted INTEGER DEFAULT 0;`); } catch (e) { }
+
+    // Seed admin_gcash_transactions if empty
+    try {
+      const insertAdminGcash = sqliteDb.prepare(`
+        INSERT OR IGNORE INTO admin_gcash_transactions (reference_number, amount, status)
+        VALUES (?, ?, ?)
+      `);
+      insertAdminGcash.run('1009876543210', 145.00, 'UNCLAIMED');
+      insertAdminGcash.run('9876543210123', 200.00, 'UNCLAIMED');
+      insertAdminGcash.run('1122334455667', 100.00, 'UNCLAIMED');
+      insertAdminGcash.run('9988776655443', 250.00, 'UNCLAIMED');
+    } catch (seedErr) {
+      // Ignore if error
+    }
 
     // Migration: Update deliveries status check constraint to include 'cancelled'
     try {
@@ -418,6 +444,8 @@ async function initDatabase() {
       const cols = [
         { table: 'customers', column: 'session_json', type: 'TEXT NULL' },
         { table: 'orders', column: 'feedback_requested_at', type: 'DATETIME NULL' },
+        { table: 'orders', column: 'gcash_ref', type: 'VARCHAR(100) NULL' },
+        { table: 'orders', column: 'receipt_url', type: 'TEXT NULL' },
         { table: 'menu_items', column: 'synonyms', type: 'VARCHAR(255) NULL' },
         { table: 'menu_items', column: 'is_deleted', type: 'TINYINT(1) NOT NULL DEFAULT 0' }
       ];
@@ -431,6 +459,18 @@ async function initDatabase() {
           console.log(`[Database] Added column ${c.column} to MySQL table ${c.table}`);
         }
       }
+
+      await conn.query(`
+        CREATE TABLE IF NOT EXISTS admin_gcash_transactions (
+          id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          reference_number VARCHAR(100) NOT NULL UNIQUE,
+          amount DECIMAL(10,2) NOT NULL,
+          status ENUM('UNCLAIMED', 'MATCHED') NOT NULL DEFAULT 'UNCLAIMED',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_admin_gcash_ref (reference_number),
+          INDEX idx_admin_gcash_status (status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
     } catch (migErr) {
       console.warn('[Database] MySQL migration check warning:', migErr.message);
     }

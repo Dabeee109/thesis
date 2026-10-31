@@ -123,10 +123,23 @@ async function getSession(psid) {
     quote: extras.quote || null,
     checkout: extras.checkout || null,
     details: extras.details || savedDetails,
-    orderType: extras.orderType || 'delivery',
-    state: customer?.conversation_state || 'IDLE',
+    orderType: extras.orderType !== undefined ? extras.orderType : (extras.order_type !== undefined ? extras.order_type : null),
+    order_type: extras.order_type !== undefined ? extras.order_type : (extras.orderType !== undefined ? extras.orderType : null),
+    customer_name: extras.customer_name || null,
+    contact_number: extras.contact_number || null,
+    delivery_address: extras.delivery_address !== undefined ? extras.delivery_address : (customer?.delivery_address || null),
+    distance_km: extras.distance_km !== undefined ? extras.distance_km : null,
+    delivery_fee: extras.delivery_fee !== undefined ? extras.delivery_fee : null,
+    order_subtotal: extras.order_subtotal !== undefined ? extras.order_subtotal : null,
+    ordered_items: extras.ordered_items || null,
+    previous_step: extras.previous_step || null,
+    order_total: extras.order_total || extras.checkout?.total || null,
+    partial_paid: extras.partial_paid || null,
+    gcash_ref: extras.gcash_ref || null,
+    receipt_url: extras.receipt_url || null,
     cart,
     pendingItem: extras.pendingItem || null,
+    pending_suggestion: extras.pending_suggestion || null,
     pendingQuantity: null,
     pendingAction: null,
     pendingIntent: null,
@@ -135,9 +148,25 @@ async function getSession(psid) {
     pendingRating: extras.pendingRating || null,
     pendingFeedbackOrderId: null,
     pendingFeedbackOrderNumber: extras.pendingFeedbackOrderNumber || null,
+    geminiInteractionId: extras.geminiInteractionId || null,
+    chatHistory: Array.isArray(extras.chatHistory) ? extras.chatHistory.slice(-10) : [],
     failedAttempts: extras.failedAttempts || 0,
     lastInteraction: extras.lastInteraction || Date.now()
   };
+
+  let _step = extras.current_step || customer?.conversation_state || 'IDLE';
+  Object.defineProperty(session, 'state', {
+    get() { return _step; },
+    set(v) { _step = v; },
+    enumerable: true,
+    configurable: true
+  });
+  Object.defineProperty(session, 'current_step', {
+    get() { return _step; },
+    set(v) { _step = v; },
+    enumerable: true,
+    configurable: true
+  });
 
   userSessions.set(psidStr, session);
   return session;
@@ -162,7 +191,21 @@ async function saveSession(session) {
     const cartJson = JSON.stringify(session.cart || []);
     const sessionJson = JSON.stringify({
       details: session.details || null,
-      orderType: session.orderType || 'delivery',
+      orderType: session.order_type !== undefined ? session.order_type : (session.orderType !== undefined ? session.orderType : null),
+      order_type: session.order_type !== undefined ? session.order_type : (session.orderType !== undefined ? session.orderType : null),
+      customer_name: session.customer_name || session.details?.name || null,
+      contact_number: session.contact_number || session.details?.phone || null,
+      delivery_address: session.delivery_address !== undefined ? session.delivery_address : null,
+      distance_km: session.distance_km !== undefined ? session.distance_km : null,
+      delivery_fee: session.delivery_fee !== undefined ? session.delivery_fee : null,
+      order_subtotal: session.order_subtotal !== undefined ? session.order_subtotal : null,
+      ordered_items: session.ordered_items || null,
+      previous_step: session.previous_step || null,
+      order_total: session.order_total || null,
+      partial_paid: session.partial_paid || null,
+      gcash_ref: session.gcash_ref || null,
+      receipt_url: session.receipt_url || null,
+      current_step: session.current_step || session.state || 'IDLE',
       quote: session.quote || null,
       checkout: session.checkout || null,
       pendingRating: session.pendingRating || null,
@@ -170,9 +213,12 @@ async function saveSession(session) {
       lastInteraction: session.lastInteraction,
       failedAttempts: session.failedAttempts || 0,
       pendingFeedbackOrderNumber: session.pendingFeedbackOrderNumber || null,
-      pendingItem: session.pendingItem || null
+      pendingItem: session.pendingItem || null,
+      pending_suggestion: session.pending_suggestion || null,
+      geminiInteractionId: session.geminiInteractionId || null,
+      chatHistory: Array.isArray(session.chatHistory) ? session.chatHistory.slice(-10) : []
     });
-    const state = session.state || 'IDLE';
+    const state = session.state || session.current_step || 'IDLE';
 
     // Ensure customer row exists before update
     if (!session.customerId) {
@@ -237,6 +283,7 @@ async function saveSession(session) {
 async function clearSessionCart(session) {
   session.cart = [];
   session.pendingItem = null;
+  session.pending_suggestion = null;
   session.pendingQuantity = null;
   session.pendingAction = null;
   session.pendingIntent = null;

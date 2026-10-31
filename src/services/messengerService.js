@@ -124,13 +124,23 @@ async function sendGenericTemplate(psid, elements = [], options = {}) {
     }))
   }));
 
+  const payload = {
+    template_type: 'generic',
+    elements: cleanedElements
+  };
+
+  const imageAspectRatio = typeof options === 'string'
+    ? options
+    : (options?.image_aspect_ratio || options?.imageAspectRatio);
+
+  if (imageAspectRatio) {
+    payload.image_aspect_ratio = imageAspectRatio;
+  }
+
   return module.exports.callSendAPI(psid, {
     attachment: {
       type: 'template',
-      payload: {
-        template_type: 'generic',
-        elements: cleanedElements
-      }
+      payload
     }
   }, options);
 }
@@ -179,9 +189,25 @@ async function sendFeedbackPrompt(psid, orderNumber, orderType = 'delivery') {
   });
 }
 
+/**
+ * Send an image attachment
+ */
+async function sendImageAttachment(psid, imageUrl, options = {}) {
+  return module.exports.callSendAPI(psid, {
+    attachment: {
+      type: 'image',
+      payload: {
+        url: imageUrl,
+        is_reusable: true
+      }
+    }
+  }, options);
+}
+
 module.exports = {
   callSendAPI,
   sendTextMessage,
+  sendImageAttachment,
   sendQuickReplies,
   sendGenericTemplate,
   sendButtonTemplate,

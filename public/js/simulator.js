@@ -107,6 +107,15 @@ function renderBotPayload(message) {
     container.appendChild(div);
   }
 
+  // 1b. Image Attachment
+  if (message.attachment && message.attachment.type === 'image') {
+    const imgUrl = message.attachment.payload?.url || message.attachment.payload;
+    const div = document.createElement('div');
+    div.className = 'chat-msg bot';
+    div.innerHTML = `<div class="bubble bubble-img" style="padding: 4px; background: transparent;"><img src="${escapeHtml(imgUrl)}" alt="GCash QR Code" style="max-width: 220px; border-radius: 8px; display: block; box-shadow: 0 4px 12px rgba(0,0,0,0.15);" /></div>`;
+    container.appendChild(div);
+  }
+
   // 2. Generic Template Carousel
   if (message.attachment && message.attachment.type === 'template') {
     const payload = message.attachment.payload;
@@ -117,20 +126,23 @@ function renderBotPayload(message) {
       const carouselContainer = document.createElement('div');
       carouselContainer.className = 'carousel-container';
 
+      const isSquare = payload.image_aspect_ratio === 'square';
       payload.elements.forEach(el => {
         const card = document.createElement('div');
         card.className = 'carousel-card';
+        const imgStyle = isSquare ? 'style="height: 220px; object-fit: contain; background: #0066f6;"' : '';
         card.innerHTML = `
-          <img src="${el.image_url || 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=500'}" alt="${el.title}">
+          <img src="${el.image_url || 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=500'}" alt="${el.title}" ${imgStyle}>
           <div class="carousel-card-body">
             <div class="carousel-title">${el.title}</div>
             <div class="carousel-subtitle">${el.subtitle || ''}</div>
           </div>
-          ${(el.buttons || []).map(btn => `
-            <button class="carousel-btn" onclick="sendSimulatedPayload('${btn.payload}')">
-              ${btn.title}
-            </button>
-          `).join('')}
+          ${(el.buttons || []).map(btn => {
+            if (btn.type === 'web_url') {
+              return `<a href="${escapeHtml(btn.url)}" target="_blank" class="carousel-btn" style="text-align:center; text-decoration:none; display:block;">${escapeHtml(btn.title)}</a>`;
+            }
+            return `<button class="carousel-btn" onclick="sendSimulatedPayload('${btn.payload}')">${escapeHtml(btn.title)}</button>`;
+          }).join('')}
         `;
         carouselContainer.appendChild(card);
       });
