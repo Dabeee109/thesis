@@ -13,13 +13,12 @@ const {
   buildFewShotPromptBlock
 } = require('./baristaTrainingData');
 
-// Default to gemini-3.7-flash (replaces deprecated gemini-2.5-flash), with multi-tier failover
-const PRIMARY_MODEL = 'gemini-3.7-flash';
-const FALLBACK_MODEL = 'gemini-3.5-flash-lite';
-const TERTIARY_MODEL = 'gemini-3.1-flash-lite';
-const LEGACY_MODEL_PATTERN = /^gemini-(?:1\.5|2\.0|2\.5)/i;
+// Default to gemini-2.5-flash for fast sub-2-second inference latency (Feature 3)
+const PRIMARY_MODEL = 'gemini-2.5-flash';
+const FALLBACK_MODEL = 'gemini-2.5-flash-lite';
+const TERTIARY_MODEL = 'gemini-2.0-flash';
 
-// Structured JSON Schema enforced by Gemini Interactions API response_format
+// Structured JSON Schema enforced by Gemini API response_format (Feature 4 Multi-Item Array)
 const BARISTA_RESPONSE_SCHEMA = {
   type: 'object',
   properties: {
@@ -40,6 +39,30 @@ const BARISTA_RESPONSE_SCHEMA = {
         'GENERAL_CHAT'
       ]
     },
+    items: {
+      type: 'array',
+      description: 'Extracted array of order items with quantities and customizations (Feature 4)',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          qty: { type: 'integer' },
+          size: { type: 'string' },
+          menuItemId: { type: 'integer' },
+          customizations: {
+            type: 'object',
+            properties: {
+              milk: { type: 'string' },
+              sugar_level: { type: 'string' },
+              temperature: { type: 'string' },
+              egg: { type: 'string' },
+              specialInstructions: { type: 'string' }
+            }
+          }
+        },
+        required: ['name', 'qty']
+      }
+    },
     extractedItems: {
       type: 'array',
       items: {
@@ -50,7 +73,7 @@ const BARISTA_RESPONSE_SCHEMA = {
           quantity: { type: 'integer' },
           specialInstructions: { type: 'string' }
         },
-        required: ['menuItemId', 'name', 'quantity']
+        required: ['name', 'quantity']
       }
     },
     suggestedReplies: {
@@ -58,7 +81,7 @@ const BARISTA_RESPONSE_SCHEMA = {
       items: { type: 'string' }
     }
   },
-  required: ['replyText', 'intent', 'extractedItems', 'suggestedReplies']
+  required: ['replyText', 'intent', 'items', 'suggestedReplies']
 };
 
 // Cached SDK client instance keyed by API key so hot key updates work seamlessly
@@ -84,12 +107,12 @@ function resolveApiKey() {
 }
 
 /**
- * Normalize model string, upgrading deprecated legacy models (e.g. gemini-2.5-flash) to gemini-3.7-flash
+ * Resolve model chain with automatic circuit breaker and failover (Feature 3)
  */
 function resolveModelChain(preferredModel) {
   const raw = String(preferredModel || process.env.GEMINI_MODEL || config.geminiModel || PRIMARY_MODEL).trim();
-  const normalized = (!raw || LEGACY_MODEL_PATTERN.test(raw)) ? PRIMARY_MODEL : raw;
-  const candidates = Array.from(new Set([normalized, PRIMARY_MODEL, FALLBACK_MODEL, TERTIARY_MODEL]));
+  const normalized = raw || PRIMARY_MODEL;
+  const candidates = Array.from(new Set([normalized, PRIMARY_MODEL, FALLBACK_MODEL, TERTIARY_MODEL, 'gemini-3.7-flash']));
   const now = Date.now();
   const healthy = candidates.filter(m => (modelCooldownUntil.get(m) || 0) <= now);
   return healthy.length > 0 ? healthy : candidates;
@@ -124,7 +147,8 @@ function buildBaristaSystemInstruction(session = {}, menuItems = [], userMessage
     ? session.cart.map(c => `${c.quantity}x ${c.name} (₱${(parseFloat(c.price || 0) * c.quantity).toFixed(2)})`).join(', ')
     : 'Empty';
 
-  const fewShotBlock = buildFewShotPromptBlock(userMessage, 18);
+  // Token-trimmed few-shot block (Feature 3: 4 high-relevance examples instead of 18)
+  const fewShotBlock = buildFewShotPromptBlock(userMessage, 4);
 
   return `${ROLE_AND_LINGUISTIC_GUIDELINES}
 
@@ -167,16 +191,28 @@ Total: [Total breakdown]
 Tama po ba lahat ng details? Reply **YES** to confirm and proceed, o sabihin lang po kung may gustong palitan!
 NOTE: Never squash these onto a single line. Separate each field with a newline (\n).
 
-ORDER EXTRACTION RULES:
-- Only set intent to "ADD_TO_CART" and populate "extractedItems" when the customer is explicitly asking to order/add available items from CURRENT LIVE MENU CATALOG.
-- If the customer asks a question, greeting, customization query, ambiance query, complaint, or recommendation without an explicit order command, DO NOT add items prematurely—leave "extractedItems" empty ([]).
+MULTI-ITEM BATCH EXTRACTION RULES (Feature 4):
+- When the customer specifies multiple items (separated by commas, bullets, line breaks, 'tsaka', 'tapos', 'and', 'plus', 'pati', 'at'), extract ALL items into the "items" array.
+- For each item, capture:
+  - "name": Clean item name matching menu catalog
+  - "qty": Integer quantity (e.g. 1, 2)
+  - "size": Cup size if specified (e.g. "16oz", "22oz")
+  - "customizations": {
+      "milk": string (e.g. "Oat Milk", "Regular dairy"),
+      "sugar_level": string (e.g. "100%", "50%", "0%", "Regular"),
+      "temperature": string (e.g. "Hot", "Iced"),
+      "egg": string (e.g. "Sunny-side up", "Scrambled"),
+      "specialInstructions": string
+    }
+- Populate both "items" and "extractedItems" with all extracted items. Set intent to "ADD_TO_CART" whenever items are requested.
+- If the customer asks a question, greeting, or complaint without ordering items, leave "items" and "extractedItems" empty ([]).
 
 FEW-SHOT TRAINING EXAMPLES (Follow this exact tone, language mirroring, natural Taglish flow, "po"/"opo" warmth, and brevity):
 ${fewShotBlock}`;
 }
 
 /**
- * Append turn to bounded local rolling history (fallback when server-side interaction ID expires)
+ * Append turn to bounded local rolling history (Feature 3: sliding window of last 6 to 8 turns)
  */
 function appendRollingHistory(session, userText, modelText) {
   if (!session) return;
@@ -184,26 +220,27 @@ function appendRollingHistory(session, userText, modelText) {
     session.chatHistory = [];
   }
   session.chatHistory.push(
-    { role: 'user', text: String(userText || '').slice(0, 400) },
-    { role: 'model', text: String(modelText || '').slice(0, 500) }
+    { role: 'user', text: String(userText || '').slice(0, 300) },
+    { role: 'model', text: String(modelText || '').slice(0, 400) }
   );
-  if (session.chatHistory.length > 10) {
-    session.chatHistory = session.chatHistory.slice(-10);
+  // Feature 3: Strict sliding window (last 6 to 8 conversation turns)
+  if (session.chatHistory.length > 8) {
+    session.chatHistory = session.chatHistory.slice(-8);
   }
 }
 
 /**
- * Format input with local history context when starting a fresh server interaction
+ * Format input with local history context (Feature 3: sliding window of 6 turns)
  */
 function buildContextualInput(userMessage, history = []) {
   if (!Array.isArray(history) || history.length === 0) {
     return userMessage;
   }
   const transcript = history
-    .slice(-8)
+    .slice(-6)
     .map(turn => `${turn.role === 'model' ? 'Assistant' : 'Customer'}: ${turn.text}`)
     .join('\n');
-  return `Recent conversation context:\n${transcript}\n\nCurrent customer message: ${userMessage}`;
+  return `Recent context (last ${Math.min(6, history.length)} turns):\n${transcript}\n\nCustomer: ${userMessage}`;
 }
 
 /**
@@ -387,7 +424,38 @@ async function generateGeminiResponse(userMessage, session = {}, menuItems = [])
     parsed.suggestedReplies = Array.isArray(parsed.suggestedReplies)
       ? parsed.suggestedReplies.map(r => String(r).replace(/\$/g, 'PHP ').trim().slice(0, 20)).filter(Boolean).slice(0, 4)
       : [];
+    
+    // Feature 4: Synchronize Multi-Item Batch Arrays (items & extractedItems)
+    parsed.items = Array.isArray(parsed.items) ? parsed.items : [];
     parsed.extractedItems = Array.isArray(parsed.extractedItems) ? parsed.extractedItems : [];
+
+    if (parsed.items.length > 0 && parsed.extractedItems.length === 0) {
+      parsed.extractedItems = parsed.items.map(it => {
+        const customParts = [];
+        if (it.size) customParts.push(`Size: ${it.size}`);
+        if (it.customizations?.milk) customParts.push(`Milk: ${it.customizations.milk}`);
+        if (it.customizations?.sugar_level) customParts.push(`Sugar: ${it.customizations.sugar_level}`);
+        if (it.customizations?.temperature) customParts.push(`Temp: ${it.customizations.temperature}`);
+        if (it.customizations?.egg) customParts.push(`Egg: ${it.customizations.egg}`);
+        if (it.customizations?.specialInstructions) customParts.push(it.customizations.specialInstructions);
+
+        return {
+          menuItemId: it.menuItemId,
+          name: it.name,
+          quantity: Math.max(1, parseInt(it.qty || it.quantity, 10) || 1),
+          specialInstructions: customParts.join(', ')
+        };
+      });
+    } else if (parsed.extractedItems.length > 0 && parsed.items.length === 0) {
+      parsed.items = parsed.extractedItems.map(it => ({
+        name: it.name,
+        qty: Math.max(1, parseInt(it.quantity || it.qty, 10) || 1),
+        menuItemId: it.menuItemId,
+        customizations: {
+          specialInstructions: it.specialInstructions || ''
+        }
+      }));
+    }
 
     // Persist stateful multi-turn interaction ID & rolling history on customer session
     if (session && typeof session === 'object') {

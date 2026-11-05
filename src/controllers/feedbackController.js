@@ -74,12 +74,41 @@ async function submitFeedback(req, res) {
       return res.status(400).json({ success: false, message: 'orderId and rating are required.' });
     }
 
-    const [orders] = await db.query(`SELECT id, customer_id, order_number FROM orders WHERE id = ?`, [orderId]);
+    const [orders] = await db.query(`SELECT id, customer_id, order_number, status FROM orders WHERE id = ?`, [orderId]);
     if (orders.length === 0) {
       return res.status(404).json({ success: false, message: 'Order not found.' });
     }
 
     const order = orders[0];
+    const orderStatus = String(order.status || '').toLowerCase();
+
+    // Feature 2: Eligibility Guardrails (Prevent premature review entry)
+    if (['pending', 'preparing', 'dispatched'].includes(orderStatus)) {
+      return res.status(400).json({
+        success: false,
+        eligible: false,
+        orderStatus,
+        message: 'Maaari lamang po kayong mag-iwan ng feedback kapag natanggap na ang inyong order. Salamat po sa paghihintay!'
+      });
+    }
+
+    if (['cancelled', 'voided'].includes(orderStatus)) {
+      return res.status(400).json({
+        success: false,
+        eligible: false,
+        orderStatus,
+        message: 'Paumanhin po, hindi maaaring mag-iwan ng review para sa na-cancel na order. Kung kailangan niyo po ng tulong, narito po ang aming customer support.'
+      });
+    }
+
+    if (orderStatus !== 'delivered') {
+      return res.status(400).json({
+        success: false,
+        eligible: false,
+        orderStatus,
+        message: 'Maaari lamang po kayong mag-iwan ng feedback kapag natanggap na ang inyong order. Salamat po sa paghihintay!'
+      });
+    }
     const starRating = parseInt(rating, 10);
     const sentiment = starRating >= 4 ? 'positive' : starRating === 3 ? 'neutral' : 'negative';
 

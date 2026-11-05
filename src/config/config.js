@@ -23,8 +23,8 @@ module.exports = {
   },
 
   geminiApiKey: process.env.GEMINI_API_KEY || '',
-  geminiModel: process.env.GEMINI_MODEL || 'gemini-3.7-flash',
-  geminiTimeoutMs: parseInt(process.env.GEMINI_TIMEOUT_MS, 10) || 45000,
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+  geminiTimeoutMs: parseInt(process.env.GEMINI_TIMEOUT_MS, 10) || 15000,
 
   webhookSecret: process.env.WEBHOOK_SECRET || '',
 

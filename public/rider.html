@@ -66,8 +66,11 @@
       </div>
     </div>
 
-    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">
-      <h3 style="font-size: 1.1rem;">Assigned Deliveries</h3>
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+      <div style="display: flex; gap: 8px;">
+        <button id="tab-active" class="btn btn-primary btn-sm" onclick="setRiderView('active')">🛵 Active Queue</button>
+        <button id="tab-history" class="btn btn-secondary btn-sm" onclick="setRiderView('history')">📜 Delivered History</button>
+      </div>
       <button class="btn btn-secondary btn-sm" onclick="loadRiderDeliveries()">🔄 Refresh</button>
     </div>
 
@@ -78,6 +81,8 @@
 
   <script src="js/api.js"></script>
   <script>
+    let currentRiderView = 'active';
+
     document.addEventListener('DOMContentLoaded', () => {
       loadRiderDeliveries();
       API.connectSSE((eventType) => {
@@ -87,52 +92,63 @@
       });
     });
 
+    function setRiderView(view) {
+      currentRiderView = view;
+      document.getElementById('tab-active').className = view === 'active' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm';
+      document.getElementById('tab-history').className = view === 'history' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm';
+      loadRiderDeliveries();
+    }
+
     async function loadRiderDeliveries() {
       try {
-        const res = await API.get('/deliveries');
+        const endpoint = currentRiderView === 'active' ? '/rider/active-orders' : '/rider/history';
+        const res = await API.get(endpoint);
         const container = document.getElementById('rider-trips-container');
         container.innerHTML = '';
 
-        if (res && res.deliveries) {
-          if (res.deliveries.length === 0) {
-            container.innerHTML = `<div class="card" style="text-align: center; color: var(--text-muted);">No active delivery trips assigned right now.</div>`;
-            return;
-          }
+        const trips = res.orders || res.history || res.deliveries || [];
 
-          res.deliveries.forEach(del => {
-            const isDelivered = del.status === 'delivered';
-            const card = document.createElement('div');
-            card.className = `trip-card ${isDelivered ? 'delivered' : ''}`;
-            card.innerHTML = `
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <span style="font-weight: 700; font-size: 1.1rem; color: var(--brand-primary);">#${del.order_number}</span>
-                <span class="badge badge-${del.status}">${del.status}</span>
-              </div>
-              <div style="font-weight: 700; font-size: 1rem; margin-bottom: 4px;">👤 ${del.customer_name || 'Customer'}</div>
-              <div style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 6px;">📍 ${del.delivery_address || 'Store vicinity'}</div>
-              <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 10px;">
-                📏 Distance: <strong>${parseFloat(del.distance_km).toFixed(1)} km</strong> &bull; Fare: <strong style="color: var(--brand-gold);">₱${parseFloat(del.final_fare).toFixed(2)}</strong>
-              </div>
-              ${del.customer_notes ? `<div style="font-size: 0.82rem; padding: 6px 10px; background: var(--bg-surface-elevated); border-radius: 4px; color: var(--brand-crema);">Note: "${del.customer_notes}"</div>` : ''}
-
-              ${!isDelivered ? `
-                <div class="action-row">
-                  <a href="tel:${del.customer_phone || ''}" class="btn btn-secondary btn-sm" style="text-align: center;">
-                    📞 Call Customer
-                  </a>
-                  <button class="btn btn-success btn-sm" onclick="markDelivered(${del.order_id})">
-                    ✅ Complete Delivery
-                  </button>
-                </div>
-              ` : `
-                <div style="margin-top: 10px; font-size: 0.82rem; color: var(--status-success); font-weight: 600;">
-                  🎉 Completed & Feedback Requested
-                </div>
-              `}
-            `;
-            container.appendChild(card);
-          });
+        if (trips.length === 0) {
+          const emptyMsg = currentRiderView === 'active' 
+            ? 'No active dispatched orders for delivery right now.' 
+            : 'No delivered history found.';
+          container.innerHTML = `<div class="card" style="text-align: center; color: var(--text-muted); padding: 28px;">${emptyMsg}</div>`;
+          return;
         }
+
+        trips.forEach(del => {
+          const isDelivered = del.order_status === 'delivered' || del.status === 'delivered';
+          const card = document.createElement('div');
+          card.className = `trip-card ${isDelivered ? 'delivered' : ''}`;
+          card.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+              <span style="font-weight: 700; font-size: 1.1rem; color: var(--brand-primary);">#${del.order_number}</span>
+              <span class="badge badge-${del.order_status || del.status}">${del.order_status || del.status}</span>
+            </div>
+            <div style="font-weight: 700; font-size: 1rem; margin-bottom: 4px;">👤 ${del.customer_name || 'Customer'}</div>
+            <div style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 6px;">📍 ${del.delivery_address || 'Store vicinity'}</div>
+            <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 10px;">
+              📏 Distance: <strong>${parseFloat(del.distance_km || 1).toFixed(1)} km</strong> &bull; Fare: <strong style="color: var(--brand-gold);">₱${parseFloat(del.final_fare || 0).toFixed(2)}</strong>
+            </div>
+            ${del.customer_notes ? `<div style="font-size: 0.82rem; padding: 6px 10px; background: var(--bg-surface-elevated); border-radius: 4px; color: var(--brand-crema); margin-bottom: 8px;">Note: "${del.customer_notes}"</div>` : ''}
+
+            ${!isDelivered ? `
+              <div class="action-row">
+                <a href="tel:${del.customer_phone || ''}" class="btn btn-secondary btn-sm" style="text-align: center;">
+                  📞 Call Customer
+                </a>
+                <button class="btn btn-success btn-sm" onclick="markDelivered(${del.order_id})">
+                  ✅ Complete Delivery
+                </button>
+              </div>
+            ` : `
+              <div style="margin-top: 10px; font-size: 0.82rem; color: var(--status-success); font-weight: 600;">
+                🎉 Delivered &bull; Customer feedback unlocked
+              </div>
+            `}
+          `;
+          container.appendChild(card);
+        });
       } catch (err) {
         console.error('Rider trips load error:', err);
       }

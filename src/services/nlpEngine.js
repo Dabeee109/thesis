@@ -962,16 +962,28 @@ async function handleTextInput(psid, session, rawText) {
     return { intent: 'CANCEL_ORDER_REQUESTED', confidence: 1.0, replyLog: reply };
   }
 
-  // 2. Multilingual Feedback & Star Rating Parser (Module 1)
-  const feedbackParsed = parseCustomerFeedback(rawText);
-  if (feedbackParsed.isFeedback) {
-    const feedbackResult = await processFeedbackSubmission({
-      psid,
-      session,
-      rating: feedbackParsed.rating,
-      comment: feedbackParsed.comment
-    });
-    return { intent: 'FEEDBACK_SUBMITTED', confidence: 1.0, replyLog: feedbackResult.botReply };
+  // 2. Multilingual Feedback & Star Rating Parser (Module 1 & Feature 5 Disambiguation)
+  // Contextual Priority: in active order sessions (Stages 1-5), number words strictly default to item_quantity.
+  const isInActiveOrderingPipeline = Boolean(
+    (session.cart && session.cart.length > 0) ||
+    session.pendingStage5 ||
+    ['ordering', 'AWAITING_ORDER_TYPE', 'AWAITING_STAGE5_CONFIRM', 'AWAITING_NAME', 'AWAITING_ADDRESS', 'AWAITING_PHONE', 'AWAITING_PAYMENT', 'AWAITING_GCASH_AMOUNT', 'AWAITING_DELIVERY_DETAILS', 'AWAITING_CHECKOUT_CONFIRM'].includes(session.state)
+  );
+
+  const hasExplicitRatingAnchor = /(?:isa(?:ng)?|dalawa(?:ng)?|tatlo(?:ng)?|apat|lima(?:ng)?|one|two|three|four|five|\d+)\s*(?:na\s*)?(?:stars?|bituin|ratings?|rate\b)/i.test(rawText) || /[⭐★]/.test(rawText);
+  const shouldEvaluateFeedback = (!isInActiveOrderingPipeline || hasExplicitRatingAnchor) && (session.state === 'AWAITING_FEEDBACK_COMMENT' || session.state === 'awaiting_feedback' || hasExplicitRatingAnchor);
+
+  if (shouldEvaluateFeedback) {
+    const feedbackParsed = parseCustomerFeedback(rawText, session);
+    if (feedbackParsed.isFeedback) {
+      const feedbackResult = await processFeedbackSubmission({
+        psid,
+        session,
+        rating: feedbackParsed.rating,
+        comment: feedbackParsed.comment
+      });
+      return { intent: 'FEEDBACK_SUBMITTED', confidence: 1.0, replyLog: feedbackResult.botReply };
+    }
   }
 
   // Global Reset / Cancel Intercept
@@ -2634,19 +2646,39 @@ async function tryGeminiConversationalTurn(psid, session, rawText) {
       await saveSession(session);
     }
 
-    // If Gemini extracted explicit menu items to add to cart, validate against in-stock DB items
-    if (geminiRes.intent === 'ADD_TO_CART' && Array.isArray(geminiRes.extractedItems) && geminiRes.extractedItems.length > 0) {
+    // Feature 4: Multi-Item Batch Extraction to Cart
+    const batchItems = (Array.isArray(geminiRes.items) && geminiRes.items.length > 0)
+      ? geminiRes.items
+      : (Array.isArray(geminiRes.extractedItems) ? geminiRes.extractedItems : []);
+
+    if ((geminiRes.intent === 'ADD_TO_CART' || batchItems.length > 0) && batchItems.length > 0) {
       let addedCount = 0;
       if (!session.cart) session.cart = [];
 
-      for (const ext of geminiRes.extractedItems) {
+      for (const ext of batchItems) {
+        const rawName = String(ext.name || '').trim().toLowerCase();
         const dbItem = (menuItems || []).find(m =>
-          m.id === Number(ext.menuItemId) ||
-          (ext.name && m.name.toLowerCase() === String(ext.name).toLowerCase())
+          (ext.menuItemId && m.id === Number(ext.menuItemId)) ||
+          (rawName && (m.name.toLowerCase() === rawName || m.name.toLowerCase().includes(rawName) || rawName.includes(m.name.toLowerCase())))
         );
         if (dbItem) {
-          const qty = Math.max(1, parseInt(ext.quantity, 10) || 1);
-          addToCart(session.cart, dbItem, qty);
+          const qty = Math.max(1, parseInt(ext.qty || ext.quantity, 10) || 1);
+          const customParts = [];
+          if (ext.size) customParts.push(`Size: ${ext.size}`);
+          if (ext.customizations?.milk) customParts.push(`Milk: ${ext.customizations.milk}`);
+          if (ext.customizations?.sugar_level) customParts.push(`Sugar: ${ext.customizations.sugar_level}`);
+          if (ext.customizations?.temperature) customParts.push(`Temp: ${ext.customizations.temperature}`);
+          if (ext.customizations?.egg) customParts.push(`Egg: ${ext.customizations.egg}`);
+          if (ext.customizations?.specialInstructions) customParts.push(ext.customizations.specialInstructions);
+          if (ext.specialInstructions) customParts.push(ext.specialInstructions);
+
+          const specialNotes = customParts.join(', ');
+          const line = addToCart(session.cart, dbItem, qty);
+          if (specialNotes) {
+            line.specialInstructions = line.specialInstructions
+              ? `${line.specialInstructions}; ${specialNotes}`
+              : specialNotes;
+          }
           addedCount += qty;
         }
       }

@@ -169,10 +169,138 @@ async function overrideFare(req, res) {
   }
 }
 
+/**
+ * FEATURE 1: Rider Active Orders (Role-Based Query Filtering)
+ * Whitelist: ONLY orders where order_type = 'delivery' AND status = 'dispatched'
+ * Strictly excludes: pending, preparing, delivered, cancelled
+ * Sorted chronologically by updated_at ASC (FIFO queue)
+ */
+async function getActiveRiderOrders(req, res) {
+  try {
+    const riderId = req.query.riderId ? parseInt(req.query.riderId, 10) : null;
+    let query = `
+      SELECT 
+        d.id AS delivery_id,
+        d.order_id,
+        d.rider_id,
+        d.vehicle_type,
+        d.distance_km,
+        d.weather_condition,
+        d.final_fare,
+        d.status AS delivery_status,
+        d.dispatched_at,
+        d.created_at AS delivery_created_at,
+        o.order_number,
+        o.order_type AS dining_mode,
+        o.status AS order_status,
+        o.total_amount,
+        o.delivery_address,
+        o.customer_notes,
+        o.updated_at AS order_updated_at,
+        CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, '')) AS customer_name,
+        c.phone_number AS customer_phone,
+        dp.full_name AS rider_name,
+        dp.phone_number AS rider_phone
+      FROM orders o
+      JOIN deliveries d ON d.order_id = o.id
+      JOIN customers c ON o.customer_id = c.id
+      LEFT JOIN delivery_personnel dp ON d.rider_id = dp.id
+      WHERE LOWER(o.order_type) = 'delivery'
+        AND LOWER(o.status) = 'dispatched'
+        AND LOWER(d.status) IN ('dispatched', 'assigned')
+    `;
+
+    const params = [];
+    if (riderId) {
+      query += ` AND d.rider_id = ?`;
+      params.push(riderId);
+    }
+
+    query += ` ORDER BY o.updated_at ASC, d.created_at ASC`;
+
+    const [orders] = await db.query(query, params);
+
+    return res.json({
+      success: true,
+      count: orders.length,
+      orders,
+      deliveries: orders.map(ord => ({
+        ...ord,
+        id: ord.delivery_id,
+        status: ord.order_status
+      }))
+    });
+  } catch (err) {
+    console.error('[Rider Active Orders Error]', err);
+    return res.status(500).json({ success: false, message: 'Failed to retrieve active rider orders.' });
+  }
+}
+
+/**
+ * FEATURE 1: Rider Delivered History
+ * Returns only orders where order_type = 'delivery' AND status = 'delivered'
+ */
+async function getRiderHistory(req, res) {
+  try {
+    const riderId = req.query.riderId ? parseInt(req.query.riderId, 10) : null;
+    let query = `
+      SELECT 
+        d.id AS delivery_id,
+        d.order_id,
+        d.rider_id,
+        d.distance_km,
+        d.final_fare,
+        d.status AS delivery_status,
+        d.delivered_at,
+        o.order_number,
+        o.order_type AS dining_mode,
+        o.status AS order_status,
+        o.total_amount,
+        o.delivery_address,
+        o.customer_notes,
+        CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, '')) AS customer_name,
+        c.phone_number AS customer_phone,
+        dp.full_name AS rider_name
+      FROM orders o
+      JOIN deliveries d ON d.order_id = o.id
+      JOIN customers c ON o.customer_id = c.id
+      LEFT JOIN delivery_personnel dp ON d.rider_id = dp.id
+      WHERE LOWER(o.order_type) = 'delivery'
+        AND LOWER(o.status) = 'delivered'
+    `;
+
+    const params = [];
+    if (riderId) {
+      query += ` AND d.rider_id = ?`;
+      params.push(riderId);
+    }
+
+    query += ` ORDER BY d.delivered_at DESC, o.updated_at DESC LIMIT 50`;
+
+    const [history] = await db.query(query, params);
+
+    return res.json({
+      success: true,
+      count: history.length,
+      history,
+      deliveries: history.map(h => ({
+        ...h,
+        id: h.delivery_id,
+        status: h.order_status
+      }))
+    });
+  } catch (err) {
+    console.error('[Rider History Error]', err);
+    return res.status(500).json({ success: false, message: 'Failed to retrieve rider history.' });
+  }
+}
+
 module.exports = {
   getDeliveries,
   getRiders,
   computeFare,
   assignRider,
-  overrideFare
+  overrideFare,
+  getActiveRiderOrders,
+  getRiderHistory
 };

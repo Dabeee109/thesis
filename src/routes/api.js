@@ -59,6 +59,8 @@ router.post('/orders/:id/reject-void', authController.authMiddleware, orderContr
 // 4. Smart Delivery Management Routes (FR6)
 router.get('/deliveries', authController.authMiddleware, deliveryController.getDeliveries);
 router.get('/riders', authController.authMiddleware, deliveryController.getRiders);
+router.get('/rider/active-orders', deliveryController.getActiveRiderOrders);
+router.get('/rider/history', deliveryController.getRiderHistory);
 router.post('/deliveries/compute-fare', deliveryController.computeFare);
 router.post('/deliveries/assign-rider', authController.authMiddleware, deliveryController.assignRider);
 router.patch('/deliveries/:id/override-fare', authController.authMiddleware, deliveryController.overrideFare);
