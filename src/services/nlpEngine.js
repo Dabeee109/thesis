@@ -703,33 +703,36 @@ async function handleTextInput(psid, session, rawText) {
   // Check for payment confirmation signal like "Send na po", "Bayad na po", "Na-send ko na"
   const isPaidSignal = /(?:^|\b)(?:send na po|na-?send|bayad na|paid|done paying|ok na po|tapos na po|settled)(?:\b|$)/i.test(rawText);
   if (isPaidSignal) {
-    if (!session.activeOrderNumber && session.pendingStage5) {
-      await handleStage5Confirmation(psid, session);
+    if (session.pendingStage5) {
+      return handleStage5Confirmation(psid, session, { isAlreadyPaid: true });
     }
     if (session.activeOrderNumber) {
-      await db.query(
-        `UPDATE payments SET status = 'verified', verified_at = CURRENT_TIMESTAMP 
-         WHERE order_id = (SELECT id FROM orders WHERE order_number = ? LIMIT 1)`,
-        [session.activeOrderNumber]
-      );
-      notificationService.broadcastSSE('ORDER_STATUS_CHANGED', {
-        orderNumber: session.activeOrderNumber,
-        newStatus: 'pending',
-        paymentStatus: 'verified'
-      });
-      const reply = `Natanggap at verified na po namin ang inyong GCash payment para sa Order #${session.activeOrderNumber}!\nNa-forward na po sa aming dispatch at kitchen team ang inyong order. Maraming salamat po sa pag-order sa Diner's Cafe! Hintayin na lang po natin dumating si kuya rider.`;
-      await sendTextMessage(psid, reply);
-      session.state = 'AWAITING_DELIVERY';
-      session.current_step = 'AWAITING_DELIVERY';
-      await saveSession(session);
-      return { intent: 'GCASH_PAID_SIGNAL', confidence: 1.0, replyLog: reply };
+      const [orderRows] = await db.query('SELECT id, status FROM orders WHERE order_number = ? LIMIT 1', [session.activeOrderNumber]);
+      if (orderRows && orderRows.length > 0 && orderRows[0].status !== 'cancelled' && orderRows[0].status !== 'delivered') {
+        await db.query(
+          `UPDATE payments SET status = 'verified', verified_at = CURRENT_TIMESTAMP 
+           WHERE order_id = ?`,
+          [orderRows[0].id]
+        );
+        notificationService.broadcastSSE('ORDER_STATUS_CHANGED', {
+          orderNumber: session.activeOrderNumber,
+          newStatus: 'pending',
+          paymentStatus: 'verified'
+        });
+        const reply = `Natanggap at verified na po namin ang inyong GCash payment para sa Order #${session.activeOrderNumber}!\nNa-forward na po sa aming dispatch at kitchen team ang inyong delivery order. Maraming salamat po sa pag-order sa Diner's Cafe! Hintayin na lang po natin dumating si kuya rider.`;
+        await sendTextMessage(psid, reply);
+        session.state = 'AWAITING_DELIVERY';
+        session.current_step = 'AWAITING_DELIVERY';
+        await saveSession(session);
+        return { intent: 'GCASH_PAID_SIGNAL', confidence: 1.0, replyLog: reply };
+      }
     }
   }
 
   // Check for affirmative confirmation to Stage 5 summary like "Yes tama lang lahat", "Confirm", "Oo"
   const isAffirmativeConfirm = /(?:^|\b)(?:yes|oo|opo|confirm|proceed|tama|sige|push|g|ok na)(?:\b|$)/i.test(rawText);
   if (isAffirmativeConfirm && (session.state === 'AWAITING_STAGE5_CONFIRM' || session.pendingStage5)) {
-    return handleStage5Confirmation(psid, session);
+    return handleStage5Confirmation(psid, session, { isAlreadyPaid: false });
   }
 
   // 0. State: AWAITING_CANCEL_CONFIRMATION (Intercept before any other logic or NLP)
@@ -1299,9 +1302,10 @@ Contact number or landmark:`;
   }
 
   if (
-    ['track', 'track order', 'where is my order', 'status'].includes(norm) ||
-    /\b(?:track|nasaan|asan|balita|status|kamusta|kumusta)\b.*\b(?:order|delivery|pagkain|kape)\b/i.test(rawText) ||
-    /\b(?:order|delivery)\b.*\b(?:status|balita|nasaan|asan)\b/i.test(rawText)
+    ['track', 'track order', 'where is my order', 'status', 'order status'].includes(norm) ||
+    /\b(?:track|nasaan|asan|balita|status|kamusta|kumusta|update)\b.*\b(?:order|delivery|pagkain|kape)\b/i.test(rawText) ||
+    /\b(?:order|delivery)\b.*\b(?:status|balita|nasaan|asan|update)\b/i.test(rawText) ||
+    /\b(?:gaano|kailan|kelan|oras|katagal)\b.*\b(?:bago|dumating|makuha|ma kuha|deliver|order)\b/i.test(rawText)
   ) {
     await handleTrackOrder(psid, session);
     return { intent: 'TRACK_ORDER', confidence: 1.0 };
@@ -2455,7 +2459,8 @@ function resetFeedbackSession(session, ratedOrderNumber) {
 /**
  * Finalize and place real order from Stage 5 confirmation
  */
-async function handleStage5Confirmation(psid, session) {
+async function handleStage5Confirmation(psid, session, options = {}) {
+  const { isAlreadyPaid = false } = options;
   const p = session.pendingStage5 || {};
   const customerName = p.name || session.customer_name || session.details?.name || 'Customer';
   const deliveryAddress = p.address || session.delivery_address || session.details?.address || 'Inside Cafe (Open Seating / Counter Pickup)';
@@ -2518,6 +2523,35 @@ async function handleStage5Confirmation(psid, session) {
   session.cart = [];
   session.pendingStage5 = null;
 
+  // Broadcast to Admin Dashboard so Kanban displays card in Pending Approval
+  notificationService.broadcastSSE('NEW_ORDER', {
+    orderNumber: orderNum,
+    status: 'pending',
+    totalAmount,
+    customerName,
+    paymentMethod
+  });
+
+  if (isAlreadyPaid) {
+    await db.query(
+      `UPDATE payments SET status = 'verified', verified_at = CURRENT_TIMESTAMP 
+       WHERE order_id = (SELECT id FROM orders WHERE order_number = ? LIMIT 1)`,
+      [orderNum]
+    );
+    notificationService.broadcastSSE('ORDER_STATUS_CHANGED', {
+      orderNumber: orderNum,
+      newStatus: 'pending',
+      paymentStatus: 'verified'
+    });
+    session.state = 'AWAITING_DELIVERY';
+    session.current_step = 'AWAITING_DELIVERY';
+    await saveSession(session);
+
+    const reply = `Natanggap at verified na po namin ang inyong confirmation at GCash payment para sa Order #${orderNum}!\nNa-forward na po sa aming dispatch at kitchen team ang inyong delivery order. Maraming salamat po sa pag-order sa Diner's Cafe, Sir/Ma'am ${customerName}! Hintayin na lang po natin dumating si kuya rider.`;
+    await sendTextMessage(psid, reply);
+    return { intent: 'ORDER_CONFIRMED_PAID', confidence: 1.0, replyLog: reply };
+  }
+
   if (paymentMethod === 'gcash') {
     session.state = 'AWAITING_PAYMENT_VERIFICATION';
     session.current_step = 'AWAITING_PAYMENT_VERIFICATION';
@@ -2578,20 +2612,33 @@ async function handleTrackOrder(psid, session) {
   if (!rows || rows.length === 0) {
     await sendQuickReplies(
       psid,
-      "You don't have any active orders right now.",
+      "Wala po kayong aktibong order sa ngayon. Nais niyo po bang mag-order?",
       [{ title: '☕ Menu', payload: 'MENU_HOME' }]
     );
     return;
   }
 
   const o = rows[0];
-  let statusText = 'kasalukuyang inihahanda sa kusina (Pending)';
-  if (o.status === 'preparing') statusText = 'kasalukuyang niluluto at inihahanda sa kusina';
+  let statusText = 'Pending Approval (inihahanda sa kusina)';
+  if (o.status === 'preparing') statusText = 'kasalukuyang inihahanda at niluluto sa kusina';
   else if (o.status === 'dispatched') statusText = 'on the way na po kasama si kuya rider';
   else if (o.status === 'delivered') statusText = 'matagumpay nang nai-deliver';
   else if (o.status === 'cancelled') statusText = 'na-cancel po';
 
-  const replyMsg = `Status ng inyong Order #${o.order_number}:\nIto po ay ${statusText}!\nTotal: ₱${parseFloat(o.total_amount).toFixed(2)} (${o.order_type.toUpperCase()}).`;
+  let etaText = '';
+  if (o.status === 'pending' || o.status === 'preparing') {
+    etaText = '\nKaraniwan po, 30 to 45 minutes ang preparation at delivery. I-a-update po namin kayo agad!';
+  } else if (o.status === 'dispatched') {
+    etaText = '\nAsahan po itong darating sa loob ng susunod na 15-20 minuto!';
+  }
+
+  if (o.status === 'delivered' || o.status === 'cancelled') {
+    session.activeOrderNumber = null;
+  } else {
+    session.activeOrderNumber = o.order_number;
+  }
+
+  const replyMsg = `Status ng inyong Order #${o.order_number}:\nIto po ay ${statusText}!${etaText}\nTotal: ₱${parseFloat(o.total_amount).toFixed(2)} (${o.order_type.toUpperCase()}).`;
   await sendQuickReplies(
     psid,
     replyMsg,
@@ -2622,19 +2669,25 @@ async function tryGeminiConversationalTurn(psid, session, rawText) {
       return null;
     }
 
+    const { formatOrderSummaryReceipt } = require('./geminiService');
+    geminiRes.replyText = formatOrderSummaryReceipt(geminiRes.replyText);
+
     // Capture Stage 5 summary in session for explicit confirmation
     const isStage5Summary = /summary\s+ng\s+(?:inyong\s+)?order/i.test(geminiRes.replyText) ||
-      (/\bName\s*:/i.test(geminiRes.replyText) && /\bLocation\s*:/i.test(geminiRes.replyText) && /\bTotal\s*:/i.test(geminiRes.replyText));
+      (/\bName\s*:/i.test(geminiRes.replyText) && /\bLocation\s*:/i.test(geminiRes.replyText) && /\bTotal\s*:/i.test(geminiRes.replyText)) ||
+      (/\bName\s*:/i.test(geminiRes.replyText) && /\bOrder\s*:/i.test(geminiRes.replyText) && /\bTotal\s*:/i.test(geminiRes.replyText));
 
     if (isStage5Summary) {
-      const nameMatch = geminiRes.replyText.match(/Name\s*:\s*([^\n]+)/i);
-      const locMatch = geminiRes.replyText.match(/Location\s*:\s*([^\n]+)/i);
-      const payMatch = geminiRes.replyText.match(/Payment option\s*:\s*([^\n]+)/i);
-      const diningMatch = geminiRes.replyText.match(/Dining mode\s*:\s*([^\n]+)/i);
+      const nameMatch = geminiRes.replyText.match(/Name\s*:\s*([^\n\r]+)/i);
+      const locMatch = geminiRes.replyText.match(/Location\s*:\s*([^\n\r]+)/i);
+      const payMatch = geminiRes.replyText.match(/Payment option\s*:\s*([^\n\r]+)/i);
+      const diningMatch = geminiRes.replyText.match(/Dining mode\s*:\s*([^\n\r]+)/i);
       const totalMatch = geminiRes.replyText.match(/Total\s*:\s*(?:₱|PHP\s*)?([\d,.]+)/i);
 
       session.state = 'AWAITING_STAGE5_CONFIRM';
       session.current_step = 'AWAITING_STAGE5_CONFIRM';
+      // Clear any prior active order number so we don't accidentally track an old completed/cancelled order
+      session.activeOrderNumber = null;
       session.pendingStage5 = {
         name: nameMatch?.[1]?.trim() || session.customer_name || 'Customer',
         address: locMatch?.[1]?.trim() || session.delivery_address || 'Inside Cafe',

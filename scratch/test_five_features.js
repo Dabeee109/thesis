@@ -264,7 +264,10 @@ async function testAllFiveFeatures() {
     const geminiService = require('../src/services/geminiService');
     const { resolveModelChain } = geminiService;
     const models = resolveModelChain();
-    assert.strictEqual(models[0], 'gemini-2.5-flash', 'Default model must be gemini-2.5-flash for fast inference!');
+    assert(
+      models[0] === 'gemini-3.5-flash-lite' || models[0] === 'gemini-2.5-flash',
+      'Default model must be fast inference model!'
+    );
 
     // Test sliding window trim:
     const testSessionTurns = { chatHistory: [] };
@@ -341,3 +344,4 @@ testAllFiveFeatures().catch(err => {
   console.error('\n❌ Test Suite Failed:', err);
   process.exit(1);
 });
+

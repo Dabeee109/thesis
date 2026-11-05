@@ -13,10 +13,10 @@ const {
   buildFewShotPromptBlock
 } = require('./baristaTrainingData');
 
-// Default to gemini-2.5-flash for fast sub-2-second inference latency (Feature 3)
-const PRIMARY_MODEL = 'gemini-2.5-flash';
-const FALLBACK_MODEL = 'gemini-2.5-flash-lite';
-const TERTIARY_MODEL = 'gemini-2.0-flash';
+// Default to gemini-3.5-flash-lite for fast sub-1-second latency and high free-tier limits (Feature 3)
+const PRIMARY_MODEL = 'gemini-3.5-flash-lite';
+const FALLBACK_MODEL = 'gemini-3.1-flash-lite';
+const TERTIARY_MODEL = 'gemini-3-flash-preview';
 
 // Structured JSON Schema enforced by Gemini API response_format (Feature 4 Multi-Item Array)
 const BARISTA_RESPONSE_SCHEMA = {
@@ -110,9 +110,12 @@ function resolveApiKey() {
  * Resolve model chain with automatic circuit breaker and failover (Feature 3)
  */
 function resolveModelChain(preferredModel) {
-  const raw = String(preferredModel || process.env.GEMINI_MODEL || config.geminiModel || PRIMARY_MODEL).trim();
+  let raw = String(preferredModel || process.env.GEMINI_MODEL || config.geminiModel || PRIMARY_MODEL).trim();
+  if (raw === 'gemini-2.5-flash' || raw === 'gemini-2.0-flash' || raw === 'gemini-2.5-flash-lite') {
+    raw = PRIMARY_MODEL;
+  }
   const normalized = raw || PRIMARY_MODEL;
-  const candidates = Array.from(new Set([normalized, PRIMARY_MODEL, FALLBACK_MODEL, TERTIARY_MODEL, 'gemini-3.7-flash']));
+  const candidates = Array.from(new Set([normalized, PRIMARY_MODEL, FALLBACK_MODEL, TERTIARY_MODEL, 'gemini-3.1-flash-lite', 'gemini-3.5-flash-lite']));
   const now = Date.now();
   const healthy = candidates.filter(m => (modelCooldownUntil.get(m) || 0) <= now);
   return healthy.length > 0 ? healthy : candidates;
@@ -170,9 +173,13 @@ CUSTOMER SESSION CONTEXT:
 - Customer Name: ${session.customer_name || session.details?.name || session.name || 'Valued Guest'}
 - Selected Dining Mode: ${session.dining_mode || session.orderType || session.order_type || 'Pending Stage 1 Selection'}
 - Current Cart: ${currentCartString}
-- Active Order Number: ${session.activeOrderNumber || 'None'}
+- Active Order Number: ${session.activeOrderNumber || 'None'}${session.activeOrderStatus ? ` (Status: ${session.activeOrderStatus})` : ''}
 - Conversation State: ${session.state || 'IDLE'}
 - Applied Discount: ${session.discount_info || 'None'}
+
+ORDER STATUS INTEGRITY & ANTI-HALLUCINATION RULES:
+- Never fabricate an order number or claim an order is "on the way" or "kasama na ni rider sa biyahe" unless its confirmed status is 'dispatched'.
+- If the customer asks for status and Active Order Number is 'None' or order is pending, tell them it is currently pending approval / being prepared in the kitchen (30-45 mins typical delivery time) or invite them to check back.
 
 STAGE PIPELINE DISCIPLINE:
 - Stage 1 (Dining Mode Slot Locking): If Selected Dining Mode is already established (Dine In, Take Out, or Delivery), this slot is PERMANENTLY LOCKED for this session. DO NOT ask Stage 1 again! NEVER loop back or re-inquire about dining mode. Proceed directly to Stage 2 (customizations), Stage 3 (discounts), or Stage 4/5. Only ask Stage 1 if Selected Dining Mode is 'Pending Stage 1 Selection'.
@@ -351,29 +358,33 @@ function formatOrderSummaryReceipt(text) {
 
   if (
     /summary\s+ng\s+(?:inyong\s+)?order/i.test(text) ||
-    (/\bName\s*:/i.test(text) && /\bLocation\s*:/i.test(text) && /\bTotal\s*:/i.test(text))
+    (/\bName\s*:/i.test(text) && /\bLocation\s*:/i.test(text) && /\bTotal\s*:/i.test(text)) ||
+    (/\bName\s*:/i.test(text) && /\bOrder\s*:/i.test(text) && /\bTotal\s*:/i.test(text))
   ) {
     let formatted = text.trim();
 
-    // 1. Separate introductory sentence
+    // 1. Protect and separate introductory sentence
     formatted = formatted.replace(
       /(Eto po ang summary ng inyong order:?)\s*/i,
-      '$1\n'
+      '__INTRO_RECEIPT__\n'
     );
 
-    // 2. Separate each key field
-    formatted = formatted.replace(/\s*(Name\s*:)/i, '\n$1');
-    formatted = formatted.replace(/\s*(Location\s*:)/i, '\n$1');
-    formatted = formatted.replace(/\s*(Payment option\s*:)/i, '\n$1');
-    formatted = formatted.replace(/\s*(Dining mode\s*:)/i, '\n$1');
-    formatted = formatted.replace(/\s*(Discount\s*:)/i, '\n$1');
-    formatted = formatted.replace(/((?:Discount|Dining mode):[^\n]*?)\s+(Order\s*:)/i, '$1\n$2');
+    // 2. Separate each key field onto its own line
+    formatted = formatted.replace(/\s*(Name\s*:)/gi, '\n$1');
+    formatted = formatted.replace(/\s*(Location\s*:)/gi, '\n$1');
+    formatted = formatted.replace(/\s*(Payment option\s*:)/gi, '\n$1');
+    formatted = formatted.replace(/\s*(Dining mode\s*:)/gi, '\n$1');
+    formatted = formatted.replace(/\s*(Discount\s*:)/gi, '\n$1');
+    formatted = formatted.replace(/\s*(Order\s*:)/gi, '\n$1');
 
     // In case items are squashed onto a single line like: Order: - 1x item1 - 2x item2
-    formatted = formatted.replace(/(\nOrder:\s*(?:-\s*)?[^\n]+?)\s+([-\u2022*]\s*\d+x\s+)/gi, '$1\n$2');
+    formatted = formatted.replace(/((?:Order:|-\s*\d+x[^\n]+))\s+([-\u2022*]\s*\d+x\s+)/gi, '$1\n$2');
 
-    formatted = formatted.replace(/\s+(Total\s*:)/i, '\n$1');
-    formatted = formatted.replace(/\s*(Tama po ba (?:lahat ng )?details\?)/i, '\n$1');
+    formatted = formatted.replace(/\s*(Total\s*:)/gi, '\n$1');
+    formatted = formatted.replace(/\s*(Tama po ba (?:lahat ng )?details\?)/gi, '\n\n$1');
+
+    // Restore protected intro
+    formatted = formatted.replace('__INTRO_RECEIPT__', 'Eto po ang summary ng inyong order:');
 
     // 3. Normalize newlines
     formatted = formatted

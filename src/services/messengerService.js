@@ -15,29 +15,33 @@ function formatOrderSummaryReceipt(text) {
 
   if (
     /summary\s+ng\s+(?:inyong\s+)?order/i.test(text) ||
-    (/\bName\s*:/i.test(text) && /\bLocation\s*:/i.test(text) && /\bTotal\s*:/i.test(text))
+    (/\bName\s*:/i.test(text) && /\bLocation\s*:/i.test(text) && /\bTotal\s*:/i.test(text)) ||
+    (/\bName\s*:/i.test(text) && /\bOrder\s*:/i.test(text) && /\bTotal\s*:/i.test(text))
   ) {
     let formatted = text.trim();
 
-    // 1. Separate introductory sentence
+    // 1. Protect and separate introductory sentence
     formatted = formatted.replace(
       /(Eto po ang summary ng inyong order:?)\s*/i,
-      '$1\n'
+      '__INTRO_RECEIPT__\n'
     );
 
-    // 2. Separate each key field
-    formatted = formatted.replace(/\s*(Name\s*:)/i, '\n$1');
-    formatted = formatted.replace(/\s*(Location\s*:)/i, '\n$1');
-    formatted = formatted.replace(/\s*(Payment option\s*:)/i, '\n$1');
-    formatted = formatted.replace(/\s*(Dining mode\s*:)/i, '\n$1');
-    formatted = formatted.replace(/\s*(Discount\s*:)/i, '\n$1');
-    formatted = formatted.replace(/((?:Discount|Dining mode):[^\n]*?)\s+(Order\s*:)/i, '$1\n$2');
+    // 2. Separate each key field onto its own line
+    formatted = formatted.replace(/\s*(Name\s*:)/gi, '\n$1');
+    formatted = formatted.replace(/\s*(Location\s*:)/gi, '\n$1');
+    formatted = formatted.replace(/\s*(Payment option\s*:)/gi, '\n$1');
+    formatted = formatted.replace(/\s*(Dining mode\s*:)/gi, '\n$1');
+    formatted = formatted.replace(/\s*(Discount\s*:)/gi, '\n$1');
+    formatted = formatted.replace(/\s*(Order\s*:)/gi, '\n$1');
 
     // In case items are squashed onto a single line like: Order: - 1x item1 - 2x item2
-    formatted = formatted.replace(/(\nOrder:\s*(?:-\s*)?[^\n]+?)\s+([-\u2022*]\s*\d+x\s+)/gi, '$1\n$2');
+    formatted = formatted.replace(/((?:Order:|-\s*\d+x[^\n]+))\s+([-\u2022*]\s*\d+x\s+)/gi, '$1\n$2');
 
-    formatted = formatted.replace(/\s+(Total\s*:)/i, '\n$1');
-    formatted = formatted.replace(/\s*(Tama po ba (?:lahat ng )?details\?)/i, '\n$1');
+    formatted = formatted.replace(/\s*(Total\s*:)/gi, '\n$1');
+    formatted = formatted.replace(/\s*(Tama po ba (?:lahat ng )?details\?)/gi, '\n\n$1');
+
+    // Restore protected intro
+    formatted = formatted.replace('__INTRO_RECEIPT__', 'Eto po ang summary ng inyong order:');
 
     // 3. Normalize newlines
     formatted = formatted
@@ -53,12 +57,12 @@ function formatOrderSummaryReceipt(text) {
 }
 
 /**
- * Clean redundant whitespace from text while preserving emojis
+ * Clean redundant horizontal whitespace from text while preserving newlines and emojis
  */
 function cleanText(str) {
   if (!str || typeof str !== 'string') return '';
   const formatted = formatOrderSummaryReceipt(str);
-  return formatted.replace(/[ ]{2,}/g, ' ').trim();
+  return formatted.replace(/[^\S\r\n]{2,}/g, ' ').trim();
 }
 
 /**

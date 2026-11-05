@@ -6,6 +6,7 @@
  */
 
 const { STAGE_PIPELINE_100_DATASET } = require('./stagePipeline100Dataset');
+const { corpus: ENTERPRISE_800_CORPUS } = require('./enterprise800Dataset');
 
 const ROLE_AND_LINGUISTIC_GUIDELINES = `ROLE & PERSONA:
 You are the official conversational AI Cashier and Order Assistant for Diner's Cafe. Your primary goal is to guide customers through a strict, sequential 5-stage ordering pipeline using natural, polite Taglish (Filipino-English code-switching).
@@ -565,6 +566,7 @@ Tama po ba lahat ng details? Reply **YES** to confirm and proceed, o sabihin lan
 
 const ALL_FEW_SHOT_EXAMPLES = [
   ...STAGE_PIPELINE_100_DATASET.map(ex => ({ ...ex, priorityBoost: 5.0 })),
+  ...ENTERPRISE_800_CORPUS.map(ex => ({ ...ex, priorityBoost: 4.8 })),
   ...STAGE_FLOW_EXAMPLES.map(ex => ({ ...ex, priorityBoost: 4.5 })),
   ...CAFE_EXAMPLES.map(ex => ({ ...ex, priorityBoost: 3.5 })),
   ...CORE_PERSONA_EXAMPLES.map(ex => ({ ...ex, priorityBoost: 3.0 })),
