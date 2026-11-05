@@ -8,11 +8,57 @@ const config = require('../config/config');
 const { broadcastSSE } = require('./notificationService');
 
 /**
+ * Format order summary receipts into distinct lines if received squashed
+ */
+function formatOrderSummaryReceipt(text) {
+  if (!text || typeof text !== 'string') return text;
+
+  if (
+    /summary\s+ng\s+(?:inyong\s+)?order/i.test(text) ||
+    (/\bName\s*:/i.test(text) && /\bLocation\s*:/i.test(text) && /\bTotal\s*:/i.test(text))
+  ) {
+    let formatted = text.trim();
+
+    // 1. Separate introductory sentence
+    formatted = formatted.replace(
+      /(Eto po ang summary ng inyong order:?)\s*/i,
+      '$1\n'
+    );
+
+    // 2. Separate each key field
+    formatted = formatted.replace(/\s*(Name\s*:)/i, '\n$1');
+    formatted = formatted.replace(/\s*(Location\s*:)/i, '\n$1');
+    formatted = formatted.replace(/\s*(Payment option\s*:)/i, '\n$1');
+    formatted = formatted.replace(/\s*(Dining mode\s*:)/i, '\n$1');
+    formatted = formatted.replace(/\s*(Discount\s*:)/i, '\n$1');
+    formatted = formatted.replace(/((?:Discount|Dining mode):[^\n]*?)\s+(Order\s*:)/i, '$1\n$2');
+
+    // In case items are squashed onto a single line like: Order: - 1x item1 - 2x item2
+    formatted = formatted.replace(/(\nOrder:\s*(?:-\s*)?[^\n]+?)\s+([-\u2022*]\s*\d+x\s+)/gi, '$1\n$2');
+
+    formatted = formatted.replace(/\s+(Total\s*:)/i, '\n$1');
+    formatted = formatted.replace(/\s*(Tama po ba (?:lahat ng )?details\?)/i, '\n$1');
+
+    // 3. Normalize newlines
+    formatted = formatted
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+      .join('\n');
+
+    return formatted;
+  }
+
+  return text;
+}
+
+/**
  * Clean redundant whitespace from text while preserving emojis
  */
 function cleanText(str) {
   if (!str || typeof str !== 'string') return '';
-  return str.replace(/[ ]{2,}/g, ' ').trim();
+  const formatted = formatOrderSummaryReceipt(str);
+  return formatted.replace(/[ ]{2,}/g, ' ').trim();
 }
 
 /**
@@ -206,6 +252,7 @@ async function sendImageAttachment(psid, imageUrl, options = {}) {
 
 module.exports = {
   callSendAPI,
+  formatOrderSummaryReceipt,
   sendTextMessage,
   sendImageAttachment,
   sendQuickReplies,

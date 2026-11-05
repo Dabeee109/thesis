@@ -25,7 +25,7 @@ const BARISTA_RESPONSE_SCHEMA = {
   properties: {
     replyText: {
       type: 'string',
-      description: 'Friendly conversational response or Stage 5 summary receipt to the customer (plain text, no $ signs, use ₱ or PHP).'
+      description: 'Friendly conversational response or Stage 5 summary receipt to the customer (plain text, no $ signs, use ₱ or PHP). In Stage 5, format the summary receipt with every field on its own new line using explicit \\n line breaks.'
     },
     intent: {
       type: 'string',
@@ -155,7 +155,17 @@ STAGE PIPELINE DISCIPLINE:
 - Stage 2: When items are named, check all mandatory customizations (size, sweetness/sugar level, milk type, hot/iced for drinks; egg style/sides for food) before moving to checkout.
 - Stage 3: Inquire for Senior Citizen or PWD discount. Check verification rules (in-store counter presentation for Cash vs remote clear photo requirement for GCash).
 - Stage 4: Collect Name, Payment Method (GCash or Cash), and Location based on Dining Mode.
-- Stage 5: Output the EXACT summary receipt format, followed immediately by: "Tama po ba lahat ng details? Reply **YES** to confirm and proceed, o sabihin lang po kung may gustong palitan!"
+- Stage 5: Output the EXACT summary receipt format with every field on its own line separated by \n:
+Eto po ang summary ng inyong order:
+Name: [Customer Name]
+Location: [Address or Pickup / Seating]
+Payment option: [GCash or Cash]
+Dining mode: [Dine In, Take Out, or Delivery]
+Discount: [Discount breakdown]
+Order: - [Items with quantity and price]
+Total: [Total breakdown]
+Tama po ba lahat ng details? Reply **YES** to confirm and proceed, o sabihin lang po kung may gustong palitan!
+NOTE: Never squash these onto a single line. Separate each field with a newline (\n).
 
 ORDER EXTRACTION RULES:
 - Only set intent to "ADD_TO_CART" and populate "extractedItems" when the customer is explicitly asking to order/add available items from CURRENT LIVE MENU CATALOG.
@@ -297,6 +307,51 @@ async function executeResilientInteraction({
 }
 
 /**
+ * Ensure Stage 5 Order Summary Receipt lines are strictly formatted with explicit newlines
+ */
+function formatOrderSummaryReceipt(text) {
+  if (!text || typeof text !== 'string') return text;
+
+  if (
+    /summary\s+ng\s+(?:inyong\s+)?order/i.test(text) ||
+    (/\bName\s*:/i.test(text) && /\bLocation\s*:/i.test(text) && /\bTotal\s*:/i.test(text))
+  ) {
+    let formatted = text.trim();
+
+    // 1. Separate introductory sentence
+    formatted = formatted.replace(
+      /(Eto po ang summary ng inyong order:?)\s*/i,
+      '$1\n'
+    );
+
+    // 2. Separate each key field
+    formatted = formatted.replace(/\s*(Name\s*:)/i, '\n$1');
+    formatted = formatted.replace(/\s*(Location\s*:)/i, '\n$1');
+    formatted = formatted.replace(/\s*(Payment option\s*:)/i, '\n$1');
+    formatted = formatted.replace(/\s*(Dining mode\s*:)/i, '\n$1');
+    formatted = formatted.replace(/\s*(Discount\s*:)/i, '\n$1');
+    formatted = formatted.replace(/((?:Discount|Dining mode):[^\n]*?)\s+(Order\s*:)/i, '$1\n$2');
+
+    // In case items are squashed onto a single line like: Order: - 1x item1 - 2x item2
+    formatted = formatted.replace(/(\nOrder:\s*(?:-\s*)?[^\n]+?)\s+([-\u2022*]\s*\d+x\s+)/gi, '$1\n$2');
+
+    formatted = formatted.replace(/\s+(Total\s*:)/i, '\n$1');
+    formatted = formatted.replace(/\s*(Tama po ba (?:lahat ng )?details\?)/i, '\n$1');
+
+    // 3. Normalize newlines
+    formatted = formatted
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+      .join('\n');
+
+    return formatted;
+  }
+
+  return text;
+}
+
+/**
  * Generate a structured conversational Barista response and action plan for Messenger / Simulator
  *
  * @param {string} userMessage - Customer message
@@ -327,8 +382,8 @@ async function generateGeminiResponse(userMessage, session = {}, menuItems = [])
       return null;
     }
 
-    // Sanitize currency symbols for Messenger consistency
-    parsed.replyText = parsed.replyText.replace(/\$/g, 'PHP ').trim();
+    // Sanitize currency symbols and ensure summary receipts are cleanly structured
+    parsed.replyText = formatOrderSummaryReceipt(parsed.replyText.replace(/\$/g, 'PHP ').trim());
     parsed.suggestedReplies = Array.isArray(parsed.suggestedReplies)
       ? parsed.suggestedReplies.map(r => String(r).replace(/\$/g, 'PHP ').trim().slice(0, 20)).filter(Boolean).slice(0, 4)
       : [];
@@ -393,7 +448,7 @@ async function generateContextualReply({ senderId = 'default', message, systemIn
     standaloneInteractions.set(String(senderId), tracker);
 
     return {
-      replyText: result.outputText,
+      replyText: formatOrderSummaryReceipt(result.outputText),
       interactionId: result.id,
       model: result.model
     };
@@ -409,6 +464,7 @@ module.exports = {
   getGenAIClient,
   resolveModelChain,
   buildBaristaSystemInstruction,
+  formatOrderSummaryReceipt,
   generateGeminiResponse,
   generateContextualReply
 };
