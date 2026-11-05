@@ -140,7 +140,7 @@ async function verifyPaymentTransaction({ referenceNumber, session, psid, receip
     await updateOrderAndPaymentStatus({
       session,
       psid,
-      orderStatus: 'PAID',
+      orderStatus: 'pending',
       paymentStatus: 'verified',
       referenceNumber: cleanRef,
       receiptUrl,
@@ -197,11 +197,11 @@ async function verifyPaymentTransaction({ referenceNumber, session, psid, receip
     [cleanRef]
   );
 
-  // 2. Update order in database with status 'PAID' and note
+  // 2. Update order in database with status 'pending' and note
   await updateOrderAndPaymentStatus({
     session,
     psid,
-    orderStatus: 'PAID',
+    orderStatus: 'pending',
     paymentStatus: 'verified',
     referenceNumber: cleanRef,
     receiptUrl,
@@ -234,6 +234,7 @@ async function verifyPaymentTransaction({ referenceNumber, session, psid, receip
  */
 async function updateOrderAndPaymentStatus({ session, psid, orderStatus, paymentStatus, referenceNumber, receiptUrl, actualPaid, orderTotal, notes, isMismatch = 0 }) {
   try {
+    const effectiveOrderStatus = (orderStatus && orderStatus.toUpperCase() === 'PAID') ? 'pending' : (orderStatus || 'pending');
     const orderNumber = session.activeOrderNumber;
 
     if (orderNumber) {
@@ -251,7 +252,7 @@ async function updateOrderAndPaymentStatus({ session, psid, orderStatus, payment
           `UPDATE orders 
            SET status = ?, gcash_ref = ?, receipt_url = COALESCE(?, receipt_url), customer_notes = ? 
            WHERE id = ?`,
-          [orderStatus, referenceNumber, receiptUrl, combinedNotes, orderId]
+          [effectiveOrderStatus, referenceNumber, receiptUrl, combinedNotes, orderId]
         );
 
         await db.query(
@@ -314,7 +315,7 @@ async function updateOrderAndPaymentStatus({ session, psid, orderStatus, payment
 
       await db.query(
         `UPDATE orders SET status = ?, gcash_ref = ?, receipt_url = ? WHERE order_number = ?`,
-        [orderStatus, referenceNumber, receiptUrl, newOrderNum]
+        [effectiveOrderStatus, referenceNumber, receiptUrl, newOrderNum]
       );
       if (session.cart && session.cart.length > 0) {
         session.ordered_items = [...session.cart];

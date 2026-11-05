@@ -298,7 +298,8 @@ function renderKanban(orders) {
   Object.values(columns).forEach(col => { if (col) col.innerHTML = ''; });
 
   orders.forEach(order => {
-    const status = order.status;
+    let status = (order.status || 'pending').toLowerCase();
+    if (status === 'paid' || status === 'new' || status === 'unpaid') status = 'pending';
     if (counts[status] !== undefined) counts[status]++;
     if (!columns[status]) return;
 

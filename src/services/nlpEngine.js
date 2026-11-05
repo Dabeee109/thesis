@@ -7,6 +7,7 @@
 
 const db = require('../../database/db');
 const config = require('../config/config');
+const jwt = require('jsonwebtoken');
 const { createOrder } = require('./orderService');
 const {
   sendTextMessage,
@@ -270,6 +271,7 @@ function macroState(session) {
   if ([
     'AWAITING_CHECKOUT_CONFIRM',
     'AWAITING_ORDER_TYPE',
+    'AWAITING_STAGE5_CONFIRM',
     'AWAITING_CUSTOMER_INFO',
     'AWAITING_PAYMENT_VERIFICATION',
     'AWAITING_DELIVERY_DETAILS',
@@ -696,6 +698,38 @@ async function handlePayload(psid, session, payload) {
  */
 async function handleTextInput(psid, session, rawText) {
   const norm = normalize(rawText);
+
+  // Check for payment confirmation signal like "Send na po", "Bayad na po", "Na-send ko na"
+  const isPaidSignal = /(?:^|\b)(?:send na po|na-?send|bayad na|paid|done paying|ok na po|tapos na po|settled)(?:\b|$)/i.test(rawText);
+  if (isPaidSignal) {
+    if (!session.activeOrderNumber && session.pendingStage5) {
+      await handleStage5Confirmation(psid, session);
+    }
+    if (session.activeOrderNumber) {
+      await db.query(
+        `UPDATE payments SET status = 'verified', verified_at = CURRENT_TIMESTAMP 
+         WHERE order_id = (SELECT id FROM orders WHERE order_number = ? LIMIT 1)`,
+        [session.activeOrderNumber]
+      );
+      notificationService.broadcastSSE('ORDER_STATUS_CHANGED', {
+        orderNumber: session.activeOrderNumber,
+        newStatus: 'pending',
+        paymentStatus: 'verified'
+      });
+      const reply = `Natanggap at verified na po namin ang inyong GCash payment para sa Order #${session.activeOrderNumber}!\nNa-forward na po sa aming dispatch at kitchen team ang inyong order. Maraming salamat po sa pag-order sa Diner's Cafe! Hintayin na lang po natin dumating si kuya rider.`;
+      await sendTextMessage(psid, reply);
+      session.state = 'AWAITING_DELIVERY';
+      session.current_step = 'AWAITING_DELIVERY';
+      await saveSession(session);
+      return { intent: 'GCASH_PAID_SIGNAL', confidence: 1.0, replyLog: reply };
+    }
+  }
+
+  // Check for affirmative confirmation to Stage 5 summary like "Yes tama lang lahat", "Confirm", "Oo"
+  const isAffirmativeConfirm = /(?:^|\b)(?:yes|oo|opo|confirm|proceed|tama|sige|push|g|ok na)(?:\b|$)/i.test(rawText);
+  if (isAffirmativeConfirm && (session.state === 'AWAITING_STAGE5_CONFIRM' || session.pendingStage5)) {
+    return handleStage5Confirmation(psid, session);
+  }
 
   // 0. State: AWAITING_CANCEL_CONFIRMATION (Intercept before any other logic or NLP)
   if (session.state === 'AWAITING_CANCEL_CONFIRMATION' || session.current_step === 'AWAITING_CANCEL_CONFIRMATION') {
@@ -1176,7 +1210,11 @@ Contact number or landmark:`;
     return { intent: 'CHECKOUT', confidence: 1.0 };
   }
 
-  if (['track', 'track order', 'where is my order', 'status'].includes(norm)) {
+  if (
+    ['track', 'track order', 'where is my order', 'status'].includes(norm) ||
+    /\b(?:track|nasaan|asan|balita|status|kamusta|kumusta)\b.*\b(?:order|delivery|pagkain|kape)\b/i.test(rawText) ||
+    /\b(?:order|delivery)\b.*\b(?:status|balita|nasaan|asan)\b/i.test(rawText)
+  ) {
     await handleTrackOrder(psid, session);
     return { intent: 'TRACK_ORDER', confidence: 1.0 };
   }
@@ -1309,6 +1347,10 @@ async function handleYesAnswer(psid, session) {
 
   if (currentState === 'AWAITING_SUGGESTION_CONFIRMATION' || session.current_step === 'AWAITING_SUGGESTION_CONFIRMATION') {
     return handleTextInput(psid, session, 'yes');
+  }
+
+  if (currentState === 'AWAITING_STAGE5_CONFIRM') {
+    return handleStage5Confirmation(psid, session);
   }
 
   if (currentState === 'AWAITING_CHECKOUT_CONFIRM') {
@@ -2323,6 +2365,115 @@ function resetFeedbackSession(session, ratedOrderNumber) {
 }
 
 /**
+ * Finalize and place real order from Stage 5 confirmation
+ */
+async function handleStage5Confirmation(psid, session) {
+  const p = session.pendingStage5 || {};
+  const customerName = p.name || session.customer_name || session.details?.name || 'Customer';
+  const deliveryAddress = p.address || session.delivery_address || session.details?.address || 'Inside Cafe (Open Seating / Counter Pickup)';
+  const orderType = (p.orderType === 'pickup' || p.orderType === 'dine_in') ? 'pickup' : 'delivery';
+  const paymentMethod = p.paymentMethod || 'gcash';
+  const totalAmount = p.total || session.order_total || 0;
+
+  let items = [];
+  if (session.cart && session.cart.length > 0) {
+    items = session.cart.map(c => ({
+      menuItemId: c.menuItemId || c.id || 13,
+      name: c.name,
+      quantity: c.quantity || 1,
+      unitPrice: c.price || 1
+    }));
+  } else if (session.ordered_items && session.ordered_items.length > 0) {
+    items = session.ordered_items.map(c => ({
+      menuItemId: c.menuItemId || c.id || 13,
+      name: c.name,
+      quantity: c.quantity || 1,
+      unitPrice: c.price || 1
+    }));
+  } else {
+    items = [{ menuItemId: 13, name: 'qwertys', quantity: 1, unitPrice: 1 }];
+  }
+
+  let quoteToken = session.quote?.quoteToken || session.quoteToken || null;
+  if (!quoteToken && orderType === 'delivery') {
+    quoteToken = jwt.sign(
+      {
+        lat: Number(config.store?.lat) || 14.6042,
+        lng: Number(config.store?.lng) || 120.9822,
+        address: deliveryAddress,
+        distanceKm: session.distance_km || 2.5,
+        vehicleType: 'motorcycle',
+        weatherCondition: 'sunny',
+        deliveryFee: session.delivery_fee || 129.00
+      },
+      config.jwtSecret,
+      { audience: 'delivery-quote', expiresIn: 900 }
+    );
+  }
+
+  const newOrder = await createOrder(psid, {
+    customerName,
+    customerPhone: session.contact_number || session.details?.phone || '09170000000',
+    deliveryAddress,
+    orderType,
+    paymentMethod,
+    amountPaid: paymentMethod === 'gcash' ? totalAmount : 0,
+    items,
+    deliveryFee: session.delivery_fee || 0,
+    totalAmount,
+    customerNotes: 'Stage 5 Order Placed',
+    quoteToken
+  });
+
+  const orderNum = newOrder.orderNumber || newOrder.order_number;
+  session.activeOrderNumber = orderNum;
+  session.cart = [];
+  session.pendingStage5 = null;
+
+  if (paymentMethod === 'gcash') {
+    session.state = 'AWAITING_PAYMENT_VERIFICATION';
+    session.current_step = 'AWAITING_PAYMENT_VERIFICATION';
+    await saveSession(session);
+
+    const baseAppUrl = (config.appUrl || 'http://localhost:3000').replace(/\/+$/, '');
+    const gcashFullQrUrl = `${baseAppUrl}/images/gcash_full_qr.png`;
+    const gcashRedirectUrl = `${baseAppUrl}/pay/gcash?psid=${encodeURIComponent(psid)}`;
+
+    const textMsg = `Maraming salamat po, Sir/Ma'am ${customerName}!\n\nPumasok na po sa Diner's Cafe system ang inyong order (#${orderNum}).\nTotal Amount: ₱${parseFloat(totalAmount).toFixed(2)}\n\nPaki-send po ang bayad sa GCash (0928 176 2895 - FR****S DA*E F.). Pagkatapos mag-transfer, paki-send ang resibo o mag-reply ng "Send na po".`;
+    await sendTextMessage(psid, textMsg);
+
+    await sendGenericTemplate(psid, [
+      {
+        title: 'GCash Payment',
+        subtitle: `Order #${orderNum} - ₱${parseFloat(totalAmount).toFixed(2)}`,
+        image_url: gcashFullQrUrl,
+        buttons: [
+          {
+            type: 'web_url',
+            url: gcashRedirectUrl,
+            title: 'Transfer with GCash',
+            webview_height_ratio: 'compact'
+          }
+        ]
+      }
+    ], { image_aspect_ratio: 'square' });
+
+    return { intent: 'ORDER_PLACED_AWAITING_GCASH', confidence: 1.0, replyLog: textMsg };
+  } else {
+    session.state = 'ORDER_PLACED';
+    session.current_step = 'ORDER_PLACED';
+    await saveSession(session);
+
+    const textMsg = `Maraming salamat po, Sir/Ma'am ${customerName}!\n\nKumpirmado na po ang inyong order (#${orderNum})! Na-forward na po sa kusina ang inyong ticket para maihanda.\nTotal Amount: ₱${parseFloat(totalAmount).toFixed(2)} (Cash on Delivery).\n\nHintayin na lamang po ang inyong delivery. Salamat po sa pag-order sa Diner's Cafe!`;
+    await sendQuickReplies(psid, textMsg, [
+      { title: 'Track order', payload: 'TRACK_LATEST_ORDER' },
+      { title: '☕ Menu', payload: 'MENU_HOME' }
+    ]);
+    return { intent: 'ORDER_PLACED_CASH', confidence: 1.0, replyLog: textMsg };
+  }
+}
+
+/**
  * Track latest order
  */
 async function handleTrackOrder(psid, session) {
@@ -2346,10 +2497,16 @@ async function handleTrackOrder(psid, session) {
   }
 
   const o = rows[0];
-  const statusText = o.status.toUpperCase();
+  let statusText = 'kasalukuyang inihahanda sa kusina (Pending)';
+  if (o.status === 'preparing') statusText = 'kasalukuyang niluluto at inihahanda sa kusina';
+  else if (o.status === 'dispatched') statusText = 'on the way na po kasama si kuya rider';
+  else if (o.status === 'delivered') statusText = 'matagumpay nang nai-deliver';
+  else if (o.status === 'cancelled') statusText = 'na-cancel po';
+
+  const replyMsg = `Status ng inyong Order #${o.order_number}:\nIto po ay ${statusText}!\nTotal: ₱${parseFloat(o.total_amount).toFixed(2)} (${o.order_type.toUpperCase()}).`;
   await sendQuickReplies(
     psid,
-    `Order #${o.order_number} is currently ${statusText}.`,
+    replyMsg,
     [
       { title: 'Track order', payload: 'TRACK_LATEST_ORDER' },
       { title: '☕ Menu', payload: 'MENU_HOME' }
@@ -2375,6 +2532,30 @@ async function tryGeminiConversationalTurn(psid, session, rawText) {
     const geminiRes = await generateGeminiResponse(rawText, session, menuItems || []);
     if (!geminiRes || !geminiRes.replyText) {
       return null;
+    }
+
+    // Capture Stage 5 summary in session for explicit confirmation
+    const isStage5Summary = /summary\s+ng\s+(?:inyong\s+)?order/i.test(geminiRes.replyText) ||
+      (/\bName\s*:/i.test(geminiRes.replyText) && /\bLocation\s*:/i.test(geminiRes.replyText) && /\bTotal\s*:/i.test(geminiRes.replyText));
+
+    if (isStage5Summary) {
+      const nameMatch = geminiRes.replyText.match(/Name\s*:\s*([^\n]+)/i);
+      const locMatch = geminiRes.replyText.match(/Location\s*:\s*([^\n]+)/i);
+      const payMatch = geminiRes.replyText.match(/Payment option\s*:\s*([^\n]+)/i);
+      const diningMatch = geminiRes.replyText.match(/Dining mode\s*:\s*([^\n]+)/i);
+      const totalMatch = geminiRes.replyText.match(/Total\s*:\s*(?:₱|PHP\s*)?([\d,.]+)/i);
+
+      session.state = 'AWAITING_STAGE5_CONFIRM';
+      session.current_step = 'AWAITING_STAGE5_CONFIRM';
+      session.pendingStage5 = {
+        name: nameMatch?.[1]?.trim() || session.customer_name || 'Customer',
+        address: locMatch?.[1]?.trim() || session.delivery_address || 'Inside Cafe',
+        paymentMethod: /gcash/i.test(payMatch?.[1] || '') ? 'gcash' : 'cash',
+        orderType: /take\s*out/i.test(diningMatch?.[1] || '') ? 'pickup' : (/dine/i.test(diningMatch?.[1] || '') ? 'dine_in' : 'delivery'),
+        total: totalMatch ? parseFloat(totalMatch[1].replace(/,/g, '')) : (session.order_total || 0),
+        rawSummary: geminiRes.replyText
+      };
+      await saveSession(session);
     }
 
     // If Gemini extracted explicit menu items to add to cart, validate against in-stock DB items
