@@ -149,6 +149,8 @@ async function getSession(psid) {
     pendingFeedbackOrderId: null,
     pendingFeedbackOrderNumber: extras.pendingFeedbackOrderNumber || null,
     geminiInteractionId: extras.geminiInteractionId || null,
+    dining_mode: extras.dining_mode || extras.orderType || null,
+    discount_info: extras.discount_info || null,
     chatHistory: Array.isArray(extras.chatHistory) ? extras.chatHistory.slice(-10) : [],
     failedAttempts: extras.failedAttempts || 0,
     lastInteraction: extras.lastInteraction || Date.now()
@@ -216,6 +218,8 @@ async function saveSession(session) {
       pendingItem: session.pendingItem || null,
       pending_suggestion: session.pending_suggestion || null,
       geminiInteractionId: session.geminiInteractionId || null,
+      dining_mode: session.dining_mode || session.orderType || null,
+      discount_info: session.discount_info || null,
       chatHistory: Array.isArray(session.chatHistory) ? session.chatHistory.slice(-10) : []
     });
     const state = session.state || session.current_step || 'IDLE';
