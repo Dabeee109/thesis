@@ -70,15 +70,23 @@
       </div>
     </aside>
 
+    <!-- Mobile Sidebar Backdrop -->
+    <div id="sidebarBackdrop" class="sidebar-backdrop" onclick="toggleSidebar(false)"></div>
+
     <!-- Main Content Wrapper -->
-    <div class="main-wrapper">
+    <div class="main-wrapper" id="mainContent">
       <!-- Topbar -->
       <header class="topbar">
-        <div class="topbar-title">
-          <h1 style="font-size: 1.35rem;" id="page-title">Operational Overview</h1>
-          <div class="live-indicator">
-            <span class="live-dot"></span>
-            <span>Live Stream Active</span>
+        <div style="display: flex; align-items: center; gap: 14px;">
+          <button id="sidebarToggle" class="sidebar-toggle-btn" onclick="toggleSidebar()" aria-label="Toggle Sidebar" title="Toggle Sidebar">
+            ☰
+          </button>
+          <div class="topbar-title">
+            <h1 style="font-size: 1.35rem;" id="page-title">Operational Overview</h1>
+            <div class="live-indicator">
+              <span class="live-dot"></span>
+              <span>Live Stream Active</span>
+            </div>
           </div>
         </div>
 

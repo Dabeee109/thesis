@@ -42,6 +42,7 @@ const {
 const { recognizeReceipt, parseReceiptText, UNREADABLE_REPLY } = require('./receiptOcrService');
 const { verifyPaymentTransaction, resolveOrderTotal, formatAmount } = require('./paymentVerificationService');
 const { generateGeminiResponse } = require('./geminiService');
+const { parseCustomerFeedback, processFeedbackSubmission } = require('./feedbackParser');
 
 const MENU_MAX_ITEMS = parseInt(process.env.MENU_MAX_ITEMS, 10) || 50;
 const NLP_STATE_TTL_MIN = parseInt(process.env.NLP_STATE_TTL_MIN, 10) || 30;
@@ -417,7 +418,7 @@ async function handleMessageEvent(psid, incomingText = '', payload = null, locat
       confidence = result.confidence !== undefined ? result.confidence : confidence;
       botReplyLog = result.replyLog || '';
     }
-
+    return result;
   } catch (err) {
     console.error('[NLP Engine Error]', err);
     const fb = botMessages.fallback();
@@ -868,18 +869,89 @@ async function handleTextInput(psid, session, rawText) {
     return { intent: 'AWAITING_SUGGESTION_CONFIRMATION_RETRY', confidence: 1.0, replyLog: reply };
   }
 
-  // 1. Trigger Order Cancellation Flow
+  const isDetailsStateCheck = [
+    'AWAITING_NAME',
+    'AWAITING_ADDRESS',
+    'AWAITING_PHONE',
+    'AWAITING_EDIT_FIELD',
+    'AWAITING_PAYMENT'
+  ].includes(session.state);
+
+  // 1. Trigger Order Cancellation & Refund Gatekeeping Flow (Module 3)
   const cancelTriggerPhrases = [
     'cancel order',
     'cancel my order',
     'i cancel ang order',
     'icancel ang order',
-    'kanselahin'
+    'kanselahin',
+    'pa cancel',
+    'pa-cancel',
+    'pacancel',
+    'refund',
+    'pa refund',
+    'pa-refund',
+    'parefund'
   ];
-  const isCancelTrigger = cancelTriggerPhrases.some(p => norm === p || norm.includes(p)) ||
-    /\b(i[-\s]?cancel\s+(ang\s+)?order|cancel\s+(my\s+)?order|kanselahin)\b/i.test(rawText);
+  const isCancelTrigger = !isDetailsStateCheck && (
+    cancelTriggerPhrases.some(p => norm === p || norm.includes(p)) ||
+    /\b(?:pa[-\s]?cancel|i[-\s]?cancel|kanselahin|refund|pa[-\s]?refund)\b/i.test(rawText) ||
+    /\b(?:cancel(?:led)?\s+(?:the\s+|my\s+|ang\s+)?order)\b/i.test(rawText) ||
+    /^(?:cancel|pa[-\s]?cancel|kanselahin|refund)$/i.test(norm)
+  );
 
   if (isCancelTrigger) {
+    // Check for active placed order in database or session
+    let activeOrder = null;
+    if (session.activeOrderNumber) {
+      const [rows] = await db.query(
+        `SELECT id, order_number, status FROM orders WHERE order_number = ? LIMIT 1`,
+        [session.activeOrderNumber]
+      );
+      if (rows && rows.length > 0 && !['delivered', 'cancelled'].includes(rows[0].status)) {
+        activeOrder = rows[0];
+      }
+    }
+    if (!activeOrder && psid) {
+      const [rows] = await db.query(
+        `SELECT o.id, o.order_number, o.status
+         FROM orders o
+         JOIN customers c ON c.id = o.customer_id
+         WHERE c.psid = ? AND o.status NOT IN ('delivered', 'cancelled')
+         ORDER BY o.id DESC LIMIT 1`,
+        [psid]
+      );
+      if (rows && rows.length > 0) {
+        activeOrder = rows[0];
+      }
+    }
+
+    if (activeOrder) {
+      const { updateOrderStatus } = require('./orderService');
+      if (activeOrder.status === 'pending') {
+        await updateOrderStatus(activeOrder.id, 'cancelled', {
+          cancellationReason: 'Cancelled by customer'
+        });
+        session.activeOrderNumber = null;
+        session.current_step = 'idle';
+        session.state = 'idle';
+        session.cart = [];
+        await saveSession(session);
+
+        const reply = "Na-cancel na po ang inyong order. Ang refund po (kung bayad via online) ay papasok within 5-10 minutes.";
+        await sendTextMessage(psid, reply);
+        return { intent: 'ORDER_CANCELLED_PENDING', confidence: 1.0, replyLog: reply };
+      } else if (activeOrder.status === 'preparing') {
+        const reply = "Paumanhin po, hindi na po maaaring ma-cancel ang inyong order dahil ito ay kasalukuyan nang inihahanda sa kusina.";
+        await sendTextMessage(psid, reply);
+        return { intent: 'ORDER_CANCEL_REJECTED_PREPARING', confidence: 1.0, replyLog: reply };
+      } else if (activeOrder.status === 'dispatched') {
+        const reply = "Paumanhin po, hindi na po maaaring ma-cancel ang inyong order dahil na-dispatch na ito at papunta na ang rider sa inyo.";
+        await sendTextMessage(psid, reply);
+        return { intent: 'ORDER_CANCEL_REJECTED_DISPATCHED', confidence: 1.0, replyLog: reply };
+      }
+    }
+
+    // If no active placed order (only draft items in cart or during ordering flow)
     session.previous_step = (session.current_step && session.current_step !== 'idle') ? session.current_step : 'ordering';
     session.current_step = 'AWAITING_CANCEL_CONFIRMATION';
     session.state = 'AWAITING_CANCEL_CONFIRMATION';
@@ -890,13 +962,17 @@ async function handleTextInput(psid, session, rawText) {
     return { intent: 'CANCEL_ORDER_REQUESTED', confidence: 1.0, replyLog: reply };
   }
 
-  const isDetailsStateCheck = [
-    'AWAITING_NAME',
-    'AWAITING_ADDRESS',
-    'AWAITING_PHONE',
-    'AWAITING_EDIT_FIELD',
-    'AWAITING_PAYMENT'
-  ].includes(session.state);
+  // 2. Multilingual Feedback & Star Rating Parser (Module 1)
+  const feedbackParsed = parseCustomerFeedback(rawText);
+  if (feedbackParsed.isFeedback) {
+    const feedbackResult = await processFeedbackSubmission({
+      psid,
+      session,
+      rating: feedbackParsed.rating,
+      comment: feedbackParsed.comment
+    });
+    return { intent: 'FEEDBACK_SUBMITTED', confidence: 1.0, replyLog: feedbackResult.botReply };
+  }
 
   // Global Reset / Cancel Intercept
   const isResetCmd = ['reset', 'start over', 'umulit', 'reset session'].includes(norm) ||
@@ -2623,6 +2699,7 @@ async function tryGeminiConversationalTurn(psid, session, rawText) {
 
 module.exports = {
   handleMessageEvent,
+  handleTextInput,
   macroState,
   expireStaleState,
   sendFullMenu,

@@ -151,7 +151,7 @@ CUSTOMER SESSION CONTEXT:
 - Applied Discount: ${session.discount_info || 'None'}
 
 STAGE PIPELINE DISCIPLINE:
-- Stage 1: If dining mode is not yet established, ask: "Hello po! Welcome to Diner's Cafe! Ask ko lang po muna, will this be for **Dine In**, **Take Out**, or **Delivery**?"
+- Stage 1 (Dining Mode Slot Locking): If Selected Dining Mode is already established (Dine In, Take Out, or Delivery), this slot is PERMANENTLY LOCKED for this session. DO NOT ask Stage 1 again! NEVER loop back or re-inquire about dining mode. Proceed directly to Stage 2 (customizations), Stage 3 (discounts), or Stage 4/5. Only ask Stage 1 if Selected Dining Mode is 'Pending Stage 1 Selection'.
 - Stage 2: When items are named, check all mandatory customizations (size, sweetness/sugar level, milk type, hot/iced for drinks; egg style/sides for food) before moving to checkout.
 - Stage 3: Inquire for Senior Citizen or PWD discount. Check verification rules (in-store counter presentation for Cash vs remote clear photo requirement for GCash).
 - Stage 4: Collect Name, Payment Method (GCash or Cash), and Location based on Dining Mode.

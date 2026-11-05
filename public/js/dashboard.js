@@ -19,6 +19,13 @@ function escapeHtml(str) {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // Restore desktop sidebar collapsed preference (Module 4)
+  try {
+    if (window.innerWidth > 768 && localStorage.getItem('sidebar_collapsed') === 'true') {
+      document.body.classList.add('sidebar-collapsed');
+    }
+  } catch (e) {}
+
   // 1. Verify User Authentication
   const user = API.getUser();
   if (user) {
@@ -85,7 +92,67 @@ function setupNavigation() {
   });
 }
 
+// Sidebar Collapsible Controller (Module 4)
+function toggleSidebar(forceState) {
+  const isMobile = window.innerWidth <= 768;
+  if (isMobile) {
+    if (typeof forceState === 'boolean') {
+      document.body.classList.toggle('sidebar-mobile-open', forceState);
+    } else {
+      document.body.classList.toggle('sidebar-mobile-open');
+    }
+  } else {
+    const isCurrentlyCollapsed = document.body.classList.contains('sidebar-collapsed');
+    const newState = (typeof forceState === 'boolean') ? forceState : !isCurrentlyCollapsed;
+    document.body.classList.toggle('sidebar-collapsed', newState);
+    try {
+      localStorage.setItem('sidebar_collapsed', newState ? 'true' : 'false');
+    } catch (e) {}
+  }
+}
+
+// Web Audio API Order Chime Alert (Module 2.B)
+function playOrderChime() {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+    osc1.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15); // A5
+
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(880, ctx.currentTime + 0.15); // A5
+    osc2.frequency.exponentialRampToValueAtTime(1174.66, ctx.currentTime + 0.35); // D6
+
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.55);
+
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc1.start(ctx.currentTime);
+    osc1.stop(ctx.currentTime + 0.2);
+    osc2.start(ctx.currentTime + 0.15);
+    osc2.stop(ctx.currentTime + 0.55);
+  } catch (e) {
+    console.debug('Audio chime unable to play:', e);
+  }
+}
+
 function switchTab(tabId) {
+  if (window.innerWidth <= 768) {
+    toggleSidebar(false);
+  }
+
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('.tab-pane').forEach(el => el.classList.remove('active'));
 
@@ -139,7 +206,12 @@ async function refreshAllData() {
 
 function handleRealtimeEvent(eventType, data) {
   loadKPIs();
-  if (eventType === 'NEW_ORDER' || eventType === 'ORDER_STATUS_CHANGED' || eventType === 'PAYMENT_UPDATE') {
+  if (eventType === 'NEW_ORDER') {
+    playOrderChime();
+    API.toast(`🔔 Bagong Order! #${data.orderNumber} (${data.customerName || 'Customer'})`, 'info');
+    loadOrders();
+    loadDeliveries();
+  } else if (eventType === 'ORDER_STATUS_CHANGED' || eventType === 'PAYMENT_UPDATE') {
     loadOrders();
     loadDeliveries();
   }

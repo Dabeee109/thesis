@@ -248,13 +248,20 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
     itemCount: enrichedItems.length
   });
 
-  // 11. Send notification record
+  // 11. Send notification record & outbound push to Messenger (Module 2.C)
+  const pendingApprovalMsg = "Salamat po! Ang inyong order ay **Pending Approval** na sa aming system. I-notify po namin kayo agad oras na ma-verify ng store.";
   await sendNotification(
     effectivePsid,
     'order_confirmation',
     `Order Confirmed: ${orderNumber}`,
-    `Thank you! Your order #${orderNumber} for ₱${totalAmount.toFixed(2)} has been received and is waiting for kitchen preparation.`
+    pendingApprovalMsg
   );
+
+  if (effectivePsid && !effectivePsid.startsWith('POS_MANUAL_')) {
+    await sendTextMessage(effectivePsid, pendingApprovalMsg).catch(err => {
+      console.warn('[orderService] Failed to send pending approval push to Messenger:', err.message);
+    });
+  }
 
   return {
     orderId,
@@ -362,14 +369,24 @@ async function updateOrderStatus(orderId, newStatus, extraData = {}) {
     customerName: `${order.first_name || ''} ${order.last_name || ''}`.trim()
   });
 
-  // Automated customer notifications based on status
+  // Automated customer notifications based on status (Module 2.C)
   let notifMessage = '';
   if (newStatus === 'preparing') {
-    notifMessage = `🍳 Our kitchen has started preparing your order #${order.order_number}! We'll notify you once it's on the way.`;
+    notifMessage = "Update po sa inyong order: Kasalukuyan na po itong **In Kitchen Preparation**! Inihahanda na po ng aming kitchen/barista team ang inyong order.";
     await sendNotification(order.psid, 'preparing', `Order #${order.order_number} is Preparing`, notifMessage);
+    if (order.psid && !order.psid.startsWith('POS_MANUAL_')) {
+      await sendTextMessage(order.psid, notifMessage).catch(err => {
+        console.warn('[orderService] Failed to send preparing push to Messenger:', err.message);
+      });
+    }
   } else if (newStatus === 'dispatched') {
-    notifMessage = `🛵 Great news! Your order #${order.order_number} has been dispatched and is currently on its way to ${order.delivery_address}.`;
+    notifMessage = "Update po sa inyong order: Ang inyong order ay **Dispatched / On Delivery** na! Hawak na po ito ng ating rider at papunta na sa inyong location.";
     await sendNotification(order.psid, 'dispatched', `Order #${order.order_number} Dispatched`, notifMessage);
+    if (order.psid && !order.psid.startsWith('POS_MANUAL_')) {
+      await sendTextMessage(order.psid, notifMessage).catch(err => {
+        console.warn('[orderService] Failed to send dispatched push to Messenger:', err.message);
+      });
+    }
   } else if (newStatus === 'delivered') {
     notifMessage = `Order #${order.order_number} delivered.`;
     await sendNotification(order.psid, 'delivered', `Order #${order.order_number} Delivered`, notifMessage);
@@ -386,9 +403,13 @@ async function updateOrderStatus(orderId, newStatus, extraData = {}) {
       psid: order.psid
     });
   } else if (newStatus === 'cancelled') {
-    const reasonText = extraData.cancellationReason ? `Reason: ${extraData.cancellationReason}` : 'Cancelled by cafe staff.';
-    notifMessage = `⚠️ Your order #${order.order_number} has been cancelled/voided. ${reasonText} If you paid via GCash or have questions, our team will assist you shortly.`;
+    notifMessage = "Paumanhin po, ang inyong order ay na-cancel sa aming system. Kung kayo po ay nagbayad via GCash/online payment, ang inyong refund ay mapo-process at babalik sa inyong account within 5 to 10 minutes.";
     await sendNotification(order.psid, 'cancelled', `Order #${order.order_number} Cancelled`, notifMessage);
+    if (order.psid && !order.psid.startsWith('POS_MANUAL_')) {
+      await sendTextMessage(order.psid, notifMessage).catch(err => {
+        console.warn('[orderService] Failed to send cancelled push to Messenger:', err.message);
+      });
+    }
   }
 
   return {
