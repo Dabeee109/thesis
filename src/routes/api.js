@@ -48,6 +48,7 @@ router.post('/menu/upload-image', authController.authMiddleware, menuController.
 router.put('/menu/:id', authController.authMiddleware, menuController.updateMenuItem);
 router.put('/admin/menu/:id', authController.authMiddleware, menuController.updateMenuItem);
 router.patch('/menu/:id/toggle-availability', authController.authMiddleware, menuController.toggleAvailability);
+router.patch('/menu/:id/stock', authController.authMiddleware, menuController.updateMenuItemStock);
 router.delete('/menu/:id', authController.authMiddleware, menuController.deleteMenuItem);
 router.delete('/admin/menu/:id', authController.authMiddleware, menuController.deleteMenuItem);
 

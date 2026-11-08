@@ -945,6 +945,36 @@ function filterMenuCategory(slug) {
   renderMenuItems(allMenuCategories);
 }
 
+/**
+ * Dynamic 3-Tier Numerical Stock Status Badge
+ * - >10: IN STOCK (Green)
+ * - 1-10: LOW STOCK (Yellow / Amber)
+ * - <=0: SOLD OUT (Red)
+ */
+function renderStockBadge(quantity) {
+  const q = Number(quantity) || 0;
+  if (q > 10) {
+    return `<span class="badge badge-success" style="background-color: rgba(34, 197, 94, 0.2); color: #22c55e; border: 1px solid #22c55e;">IN STOCK (${q})</span>`;
+  } else if (q > 0 && q <= 10) {
+    return `<span class="badge badge-warning" style="background-color: rgba(234, 179, 8, 0.2); color: #eab308; border: 1px solid #eab308;">LOW STOCK (${q} left)</span>`;
+  } else {
+    return `<span class="badge badge-danger" style="background-color: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid #ef4444;">SOLD OUT</span>`;
+  }
+}
+
+async function quickAdjustStock(itemId, delta) {
+  try {
+    const res = await API.patch(`/menu/${itemId}/stock`, { delta });
+    if (res && res.success) {
+      API.toast(res.message, 'success');
+      loadMenu();
+    }
+  } catch (err) {
+    console.error('Quick adjust stock error:', err);
+    API.toast(err.message || 'Failed to update stock.', 'danger');
+  }
+}
+
 function renderMenuItems(categories) {
   const grid = document.getElementById('menu-grid-container');
   grid.innerHTML = '';
@@ -963,20 +993,24 @@ function renderMenuItems(categories) {
             <span class="menu-card-price">₱${parseFloat(item.price).toFixed(2)}</span>
           </div>
           <div class="menu-card-desc">${item.description || ''}</div>
-          <div style="display: flex; gap: 8px; margin-bottom: 12px; align-items: center; flex-wrap: wrap;">
-            ${(item.is_available && (item.stock_quantity > 0)) ? `
-              <span class="badge" style="background: rgba(34, 197, 94, 0.16); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.35); font-weight: 700; padding: 4px 10px; border-radius: 9999px;">
-                Stock: ${item.stock_quantity}
-              </span>
-            ` : `
-              <span class="badge" style="background: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid rgba(248, 113, 113, 0.35); font-weight: 700; padding: 4px 10px; border-radius: 9999px;">
-                Sold Out
-              </span>
-            `}
+          <div style="display: flex; gap: 8px; margin-bottom: 10px; align-items: center; flex-wrap: wrap;">
+            ${renderStockBadge(item.stock_quantity)}
             <span class="badge ${item.is_available ? 'badge-delivered' : 'badge-mismatch'}">
               ${item.is_available ? 'In Menu' : 'Unavailable'}
             </span>
           </div>
+
+          <!-- Quick Restock Stepper Controls -->
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding: 6px 10px; background: var(--bg-surface-elevated, #241a12); border-radius: 8px; border: 1px solid var(--border-subtle);">
+            <span style="font-size: 0.76rem; color: var(--text-muted); font-weight: 600;">QUICK RESTOCK:</span>
+            <div style="display: inline-flex; align-items: center; gap: 4px;">
+              <button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 7px; font-weight: 800; font-size: 0.8rem; line-height: 1;" onclick="quickAdjustStock(${item.id}, -1)" title="Decrease 1">-1</button>
+              <span style="font-weight: 800; font-size: 0.88rem; min-width: 26px; text-align: center; color: var(--brand-primary);">${item.stock_quantity || 0}</span>
+              <button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 7px; font-weight: 800; font-size: 0.8rem; line-height: 1;" onclick="quickAdjustStock(${item.id}, 1)" title="Increase 1">+1</button>
+              <button type="button" class="btn btn-primary btn-sm" style="padding: 2px 8px; font-weight: 700; font-size: 0.72rem; line-height: 1;" onclick="quickAdjustStock(${item.id}, 10)" title="Quick Restock +10">+10</button>
+            </div>
+          </div>
+
           <div class="menu-card-actions">
             <button class="btn ${item.is_available ? 'btn-outline' : 'btn-success'} btn-sm" onclick="toggleMenuItemAvailability(${item.id})">
               ${item.is_available ? 'Hide' : 'Enable'}

@@ -85,48 +85,68 @@ async function verifyStockAvailability(items) {
  */
 async function deductStockForOrder(items, orderNumber) {
   for (const item of items) {
-    // 1. Get current inventory record
-    const [invRows] = await db.query(
-      `SELECT id, stock_quantity, low_stock_threshold FROM inventory WHERE menu_item_id = ?`,
-      [item.menuItemId]
+    const qty = parseInt(item.quantity, 10) || 1;
+    const menuItemId = item.menuItemId || item.id;
+
+    // 1. Get current menu item record and decrement stock_quantity
+    const [menuRows] = await db.query(
+      `SELECT id, stock_quantity, is_available FROM menu_items WHERE id = ?`,
+      [menuItemId]
     );
 
+    const currentMenuStock = (menuRows && menuRows.length > 0) ? (menuRows[0].stock_quantity !== undefined ? menuRows[0].stock_quantity : 50) : 50;
+    const newMenuStock = Math.max(0, currentMenuStock - qty);
+    const newAvailability = newMenuStock > 0 ? 1 : 0;
+
+    // Decrement menu_items.stock_quantity directly
+    await db.query(
+      `UPDATE menu_items SET stock_quantity = ?, is_available = ? WHERE id = ?`,
+      [newMenuStock, newAvailability, menuItemId]
+    );
+
+    // 2. Also synchronize inventory table
+    const [invRows] = await db.query(
+      `SELECT id, stock_quantity, low_stock_threshold FROM inventory WHERE menu_item_id = ?`,
+      [menuItemId]
+    );
+
+    let invId = null;
+    let lowThreshold = 10;
     if (invRows.length > 0) {
       const inv = invRows[0];
-      const newStock = Math.max(0, inv.stock_quantity - item.quantity);
-
-      // Update inventory stock
+      invId = inv.id;
+      lowThreshold = inv.low_stock_threshold || 10;
       await db.query(
         `UPDATE inventory SET stock_quantity = ? WHERE id = ?`,
-        [newStock, inv.id]
+        [newMenuStock, inv.id]
       );
+    }
 
-      // Auto-toggle menu item availability if stock hits 0
-      if (newStock === 0) {
-        await db.query(
-          `UPDATE menu_items SET is_available = 0 WHERE id = ?`,
-          [item.menuItemId]
-        );
-      }
-
-      // Log stock deduction in audit trail
+    // 3. Log stock deduction in audit trail
+    if (invId) {
       await db.query(
         `INSERT INTO inventory_logs (inventory_id, change_amount, reason, reference_id, logged_by)
          VALUES (?, ?, 'order_placed', ?, 'Order Automation')`,
-        [inv.id, -item.quantity, orderNumber]
+        [invId, -qty, orderNumber]
       );
-
-      // Check if threshold crossed
-      if (newStock <= inv.low_stock_threshold) {
-        broadcastSSE('STOCK_ALERT', {
-          inventoryId: inv.id,
-          menuItemId: item.menuItemId,
-          newStock,
-          threshold: inv.low_stock_threshold,
-          alertType: newStock === 0 ? 'OUT_OF_STOCK' : 'LOW_STOCK'
-        });
-      }
     }
+
+    // 4. Broadcast real-time stock alert if low or sold out
+    if (newMenuStock <= lowThreshold) {
+      broadcastSSE('STOCK_ALERT', {
+        menuItemId,
+        newStock: newMenuStock,
+        threshold: lowThreshold,
+        alertType: newMenuStock === 0 ? 'OUT_OF_STOCK' : 'LOW_STOCK'
+      });
+    }
+
+    // 5. Broadcast general inventory update for live Menu Catalog cards
+    broadcastSSE('INVENTORY_UPDATED', {
+      menuItemId,
+      newStock: newMenuStock,
+      isAvailable: newAvailability
+    });
   }
 }
 

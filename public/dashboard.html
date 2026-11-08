@@ -44,9 +44,6 @@
         <li class="nav-item" data-tab="menu">
           <button><span style="font-size: 1.2rem;">☕</span> <span>Menu Catalog</span></button>
         </li>
-        <li class="nav-item" data-tab="promotions">
-          <button><span style="font-size: 1.2rem;">📢</span> <span>Promotions & Events</span></button>
-        </li>
         <li class="nav-item" data-tab="delivery">
           <button><span style="font-size: 1.2rem;">🛵</span> <span>Smart Delivery</span></button>
         </li>
@@ -336,40 +333,6 @@
 
           <div class="menu-grid" id="menu-grid-container">
             <!-- Rendered via JS -->
-          </div>
-        </section>
-
-        <!-- ================================================================= -->
-        <!-- TAB 4: PROMOTIONS & EVENTS (Replaces legacy Inventory Module) -->
-        <!-- ================================================================= -->
-        <section id="tab-promotions" class="tab-pane">
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
-            <div>
-              <h2>Promotions, Events & Seasonal Deals</h2>
-              <p style="color: var(--text-muted); font-size: 0.88rem;">Manage customer campaign perks, cafe live events, and send automated mass broadcasts via Messenger</p>
-            </div>
-            <div style="display: flex; gap: 10px;">
-              <button class="btn btn-secondary btn-sm" onclick="loadPromotions()">🔄 Refresh</button>
-              <button class="btn btn-primary btn-sm" onclick="openPromoModal()">+ Create Promo / Event</button>
-            </div>
-          </div>
-
-          <div class="table-container">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Promotion / Event Title</th>
-                  <th>Type</th>
-                  <th>Poster</th>
-                  <th>Mechanics / Perk</th>
-                  <th>Applicable Item / Category</th>
-                  <th>Schedule / Validity</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="promotions-tbody"></tbody>
-            </table>
           </div>
         </section>
 
@@ -1085,11 +1048,11 @@
           </div>
         </div>
 
-        <!-- Stock Quantity & Availability Management (Requirement 1) -->
+        <!-- Stock Quantity & Availability Management (Requirement 1 & 3) -->
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;" class="form-group" id="menu-stock-row">
           <div>
-            <label class="form-label" for="menu-stock-input">Current Stock (Quantity / Servings)</label>
-            <input type="number" id="menu-stock-input" class="form-control" min="0" step="1" placeholder="25" value="25" oninput="handleStockQuantityChange(this.value)">
+            <label class="form-label" for="menu-stock-input">Stock Quantity (pcs)</label>
+            <input type="number" id="menu-stock-input" class="form-control" min="0" step="1" placeholder="50" value="50" oninput="handleStockQuantityChange(this.value)">
           </div>
           <div>
             <label class="form-label" for="menu-availability-input">Availability Status</label>

@@ -66,7 +66,7 @@ function initSqliteFallback() {
         name TEXT NOT NULL,
         description TEXT,
         price REAL NOT NULL DEFAULT 0.00,
-        stock_quantity INTEGER NOT NULL DEFAULT 0,
+        stock_quantity INTEGER NOT NULL DEFAULT 50,
         image_url TEXT,
         is_available INTEGER NOT NULL DEFAULT 1,
         is_bestseller INTEGER NOT NULL DEFAULT 0,
@@ -80,7 +80,7 @@ function initSqliteFallback() {
       CREATE TABLE IF NOT EXISTS inventory (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         menu_item_id INTEGER UNIQUE NOT NULL REFERENCES menu_items(id) ON DELETE CASCADE,
-        stock_quantity INTEGER NOT NULL DEFAULT 0,
+        stock_quantity INTEGER NOT NULL DEFAULT 50,
         low_stock_threshold INTEGER NOT NULL DEFAULT 10,
         unit TEXT NOT NULL DEFAULT 'servings',
         last_restocked_at DATETIME DEFAULT CURRENT_TIMESTAMP,

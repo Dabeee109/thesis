@@ -1449,7 +1449,7 @@ async function handleTextInput(psid, session, rawText) {
             session.pending_suggestion = null;
             session.pendingItem = null;
             await saveSession(session);
-            const soldOutMsg = `Pasensya na po, sold out / out of stock na po ang ${addedName} sa ngayon.`;
+            const soldOutMsg = `Paumanhin po, sold out na po ang item na ito. (${addedName} is currently unavailable)`;
             await sendTextMessage(psid, soldOutMsg);
             return { intent: 'ORDER_ITEM_OUT_OF_STOCK', handled: true };
           }
@@ -1744,7 +1744,7 @@ async function handleTextInput(psid, session, rawText) {
     // Notify user of any out-of-stock items (Requirement 4)
     if (addedItems && addedItems.outOfStockItems && addedItems.outOfStockItems.length > 0) {
       for (const oosName of addedItems.outOfStockItems) {
-        const soldOutMsg = `Pasensya na po, sold out / out of stock na po ang ${oosName} sa ngayon.`;
+        const soldOutMsg = `Paumanhin po, sold out na po ang item na ito. (${oosName} is currently unavailable)`;
         await sendTextMessage(psid, soldOutMsg);
       }
     }
@@ -2879,7 +2879,7 @@ async function handleOrderItemText(psid, session, rawText, nlu) {
     const stock = matchedItem.stock_quantity !== undefined ? matchedItem.stock_quantity : 999;
     const isAvail = matchedItem.is_available === undefined || matchedItem.is_available === 1 || matchedItem.is_available === true;
     if (stock <= 0 || !isAvail) {
-      const soldOutMsg = `Pasensya na po, sold out / out of stock na po ang ${matchedItem.name} sa ngayon.`;
+      const soldOutMsg = `Paumanhin po, sold out na po ang item na ito. (${matchedItem.name} is currently unavailable)`;
       await sendTextMessage(psid, soldOutMsg);
       return { intent: 'ORDER_ITEM_OUT_OF_STOCK', confidence: 1.0, handled: true };
     }
@@ -2911,7 +2911,7 @@ async function handleOrderItemText(psid, session, rawText, nlu) {
     const candStock = topCand.stock_quantity !== undefined ? topCand.stock_quantity : 999;
     const candAvail = topCand.is_available === undefined || topCand.is_available === 1 || topCand.is_available === true;
     if (candStock <= 0 || !candAvail) {
-      const soldOutMsg = `Pasensya na po, sold out / out of stock na po ang ${topCand.name} sa ngayon.`;
+      const soldOutMsg = `Paumanhin po, sold out na po ang item na ito. (${topCand.name} is currently unavailable)`;
       await sendTextMessage(psid, soldOutMsg);
       return { intent: 'ORDER_ITEM_OUT_OF_STOCK', confidence: 1.0, handled: true };
     }
@@ -3886,7 +3886,7 @@ async function tryGeminiConversationalTurn(psid, session, rawText) {
           const itemStock = dbItem.stock_quantity !== undefined ? dbItem.stock_quantity : 999;
           const isAvail = dbItem.is_available === undefined || dbItem.is_available === 1 || dbItem.is_available === true;
           if (itemStock <= 0 || !isAvail) {
-            const soldOutMsg = `Pasensya na po, sold out / out of stock na po ang ${dbItem.name} sa ngayon.`;
+            const soldOutMsg = `Paumanhin po, sold out na po ang item na ito. (${dbItem.name} is currently unavailable)`;
             await sendTextMessage(psid, soldOutMsg);
             continue;
           }

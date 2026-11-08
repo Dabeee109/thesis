@@ -37,13 +37,26 @@ async function getMenu(req, res) {
       ORDER BY m.is_bestseller DESC, m.name ASC
     `);
 
-    // Group items under categories
+    // Group items under categories with 3-tier status computation
+    const enrichedItems = items.map(item => {
+      const q = parseInt(item.stock_quantity, 10) || 0;
+      let status = 'IN_STOCK';
+      if (q <= 0) status = 'SOLD_OUT';
+      else if (q <= 10) status = 'LOW_STOCK';
+
+      return {
+        ...item,
+        stock_quantity: q,
+        status
+      };
+    });
+
     const menu = categories.map(cat => ({
       ...cat,
-      items: items.filter(item => item.category_id === cat.id)
+      items: enrichedItems.filter(item => item.category_id === cat.id)
     }));
 
-    return res.json({ success: true, categories: menu, allItems: items });
+    return res.json({ success: true, categories: menu, allItems: enrichedItems });
   } catch (err) {
     console.error('[Menu Controller Error]', err);
     return res.status(500).json({ success: false, message: 'Failed to retrieve menu.' });
@@ -80,7 +93,7 @@ async function createMenuItem(req, res) {
       return res.status(400).json({ success: false, message: 'Category, item name, and price are required.' });
     }
 
-    let finalStock = stock_quantity !== undefined ? parseInt(stock_quantity, 10) : (stockQuantity !== undefined ? parseInt(stockQuantity, 10) : (initialStock !== undefined ? parseInt(initialStock, 10) : 25));
+    let finalStock = stock_quantity !== undefined ? parseInt(stock_quantity, 10) : (stockQuantity !== undefined ? parseInt(stockQuantity, 10) : (initialStock !== undefined ? parseInt(initialStock, 10) : 50));
     if (isNaN(finalStock) || finalStock < 0) finalStock = 0;
 
     let finalAvail = is_available !== undefined ? is_available : (isAvailable !== undefined ? isAvailable : 1);
@@ -370,10 +383,70 @@ async function uploadMenuImage(req, res) {
   }
 }
 
+/**
+ * Quick Adjust Stock Quantity (PATCH /api/menu/:id/stock)
+ * Accepts { quantity } or { delta }
+ */
+async function updateMenuItemStock(req, res) {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { quantity, delta } = req.body;
+
+    const [currentRows] = await db.query('SELECT id, name, stock_quantity, is_available FROM menu_items WHERE id = ?', [id]);
+    if (currentRows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Menu item not found.' });
+    }
+
+    const currentStock = currentRows[0].stock_quantity !== undefined ? currentRows[0].stock_quantity : 50;
+    let newStock = currentStock;
+
+    if (quantity !== undefined) {
+      newStock = Math.max(0, parseInt(quantity, 10) || 0);
+    } else if (delta !== undefined) {
+      newStock = Math.max(0, currentStock + (parseInt(delta, 10) || 0));
+    }
+
+    const isAvailable = newStock > 0 ? 1 : 0;
+
+    await db.query(
+      'UPDATE menu_items SET stock_quantity = ?, is_available = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [newStock, isAvailable, id]
+    );
+
+    await db.query(
+      'UPDATE inventory SET stock_quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE menu_item_id = ?',
+      [newStock, id]
+    ).catch(() => {});
+
+    broadcastSSE('INVENTORY_UPDATED', {
+      menuItemId: id,
+      newStock,
+      isAvailable
+    });
+
+    let status = 'IN_STOCK';
+    if (newStock <= 0) status = 'SOLD_OUT';
+    else if (newStock <= 10) status = 'LOW_STOCK';
+
+    return res.json({
+      success: true,
+      message: `Stock updated to ${newStock} pcs (${status}).`,
+      id,
+      stock_quantity: newStock,
+      status,
+      is_available: isAvailable
+    });
+  } catch (err) {
+    console.error('[Update Stock Error]', err);
+    return res.status(500).json({ success: false, message: err.message || 'Failed to update stock.' });
+  }
+}
+
 module.exports = {
   getMenu,
   createMenuItem,
   updateMenuItem,
+  updateMenuItemStock,
   toggleAvailability,
   deleteMenuItem,
   uploadMenuImage
