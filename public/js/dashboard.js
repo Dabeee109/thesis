@@ -238,6 +238,7 @@ function switchTab(tabId) {
   document.getElementById('page-title').innerText = titles[tabId] || 'Dashboard';
 
   // Load specific tab data on switch
+  if (tabId === 'overview') loadStoreStatus();
   if (tabId === 'orders') loadOrders();
   if (tabId === 'menu') loadMenu();
   if (tabId === 'promotions') loadPromotions();
@@ -251,6 +252,7 @@ function switchTab(tabId) {
     loadFacebookSettings();
     loadStoreLocationSettings();
     loadGcashSettings();
+    loadOperatingHoursSettings();
   }
 }
 
@@ -267,7 +269,9 @@ async function refreshAllData() {
     loadUsers(),
     loadFacebookSettings(),
     loadStoreLocationSettings(),
-    loadGcashSettings()
+    loadGcashSettings(),
+    loadStoreStatus(),
+    loadOperatingHoursSettings()
   ]);
 }
 
@@ -310,6 +314,13 @@ function handleRealtimeEvent(eventType, data) {
   }
   if (eventType === 'CHATBOT_STATUS_CHANGED') {
     updateChatbotUI(data);
+  }
+  if (eventType === 'STORE_STATUS_CHANGED') {
+    loadStoreStatus();
+  }
+  if (eventType === 'OPERATING_HOURS_UPDATED') {
+    loadOperatingHoursSettings();
+    loadStoreStatus();
   }
 }
 
@@ -3129,5 +3140,186 @@ Pagkatapos magbayad, paki-send po rito ang SCREENSHOT ng resibo o i-type ang 13-
   `;
 
   openModal(previewModalId);
+}
+
+// ----------------------------------------------------------------------------
+// 12. Store Operational Status & Operating Hours Management
+// ----------------------------------------------------------------------------
+
+let currentStoreStatus = 'OPEN';
+
+async function loadStoreStatus() {
+  try {
+    const res = await API.get('/settings/store-status');
+    if (res && res.success) {
+      currentStoreStatus = (res.store_status || 'OPEN').toUpperCase();
+      renderStoreStatusUI(currentStoreStatus, res.isOpen, res.operating_hours);
+    }
+  } catch (err) {
+    console.error('Failed to load store status:', err);
+  }
+}
+
+function renderStoreStatusUI(status, isOpen, hours) {
+  const btn = document.getElementById('btn-store-status-toggle');
+  const icon = document.getElementById('store-status-icon');
+  const text = document.getElementById('store-status-text');
+  const banner = document.getElementById('store-status-banner');
+  const headline = document.getElementById('store-status-headline');
+  const desc = document.getElementById('store-status-desc');
+  const hoursEl = document.getElementById('overview-operating-hours');
+
+  const isStoreOpen = (status === 'OPEN');
+
+  if (btn) {
+    if (isStoreOpen) {
+      btn.className = 'btn btn-success btn-sm';
+      btn.style.background = '#16a34a';
+      btn.style.borderColor = '#22c55e';
+      btn.style.color = '#ffffff';
+    } else {
+      btn.className = 'btn btn-danger btn-sm';
+      btn.style.background = '#dc2626';
+      btn.style.borderColor = '#ef4444';
+      btn.style.color = '#ffffff';
+    }
+  }
+
+  if (icon) icon.innerText = isStoreOpen ? '🟢' : '🔴';
+  if (text) text.innerText = isStoreOpen ? 'Store OPEN' : 'Store CLOSED';
+
+  if (banner) {
+    banner.style.background = isStoreOpen ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.12)';
+    banner.style.borderLeft = isStoreOpen ? '4px solid var(--status-success)' : '4px solid #ef4444';
+  }
+
+  if (headline) {
+    headline.innerText = isStoreOpen ? 'Live Ordering Active' : 'Store Currently Closed';
+    headline.style.color = isStoreOpen ? '#86efac' : '#fca5a5';
+  }
+
+  if (desc) {
+    desc.innerText = isStoreOpen
+      ? 'Messenger bot is actively accepting orders and routing kitchen preparation.'
+      : 'Messenger bot will notify customers that the store is closed and handle advance pre-orders.';
+  }
+
+  if (hoursEl && hours) {
+    hoursEl.innerText = `${formatTime12Hour(hours.open)} - ${formatTime12Hour(hours.close)} (PHT)`;
+  }
+}
+
+function formatTime12Hour(timeStr) {
+  if (!timeStr) return '';
+  const parts = timeStr.split(':');
+  let h = parseInt(parts[0], 10);
+  const m = parts[1] || '00';
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return `${h.toString().padStart(2, '0')}:${m} ${ampm}`;
+}
+
+async function toggleStoreOperationalStatus() {
+  const newStatus = (currentStoreStatus === 'OPEN') ? 'CLOSED' : 'OPEN';
+  const confirmMsg = newStatus === 'CLOSED'
+    ? 'Are you sure you want to mark the store as CLOSED? The Messenger bot will stop taking immediate live orders and notify customers that the store is closed.'
+    : 'Are you sure you want to OPEN the store? The Messenger bot will start accepting live customer orders.';
+  
+  if (!confirm(confirmMsg)) {
+    return;
+  }
+
+  const btn = document.getElementById('btn-store-status-toggle');
+  if (btn) btn.disabled = true;
+
+  try {
+    const res = await API.put('/settings/store-status', { store_status: newStatus });
+    if (res && res.success) {
+      currentStoreStatus = res.store_status;
+      renderStoreStatusUI(currentStoreStatus, res.isOpen, res.operating_hours);
+      API.toast(
+        currentStoreStatus === 'OPEN' ? '🟢 Store is now OPEN for live orders!' : '🔴 Store is now CLOSED (Pre-orders only).',
+        currentStoreStatus === 'OPEN' ? 'success' : 'warning'
+      );
+    } else {
+      API.toast(res.message || 'Failed to update store status.', 'error');
+    }
+  } catch (err) {
+    console.error('Error toggling store status:', err);
+    API.toast(err.message || 'Failed to update store status.', 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function loadOperatingHoursSettings() {
+  try {
+    const res = await API.get('/settings/operating-hours');
+    if (res && res.success) {
+      const openInput = document.getElementById('store-open-time-input');
+      const closeInput = document.getElementById('store-close-time-input');
+      const badge = document.getElementById('operating-hours-badge');
+      const hoursEl = document.getElementById('overview-operating-hours');
+
+      const openVal = (res.store_open_time || '09:00:00').substring(0, 5);
+      const closeVal = (res.store_close_time || '21:00:00').substring(0, 5);
+
+      if (openInput) openInput.value = openVal;
+      if (closeInput) closeInput.value = closeVal;
+
+      if (hoursEl) {
+        hoursEl.innerText = `${formatTime12Hour(openVal)} - ${formatTime12Hour(closeVal)} (PHT)`;
+      }
+
+      if (badge) {
+        badge.innerText = `${formatTime12Hour(openVal)} - ${formatTime12Hour(closeVal)}`;
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load operating hours settings:', err);
+  }
+}
+
+async function saveOperatingHoursSettings() {
+  const openInput = document.getElementById('store-open-time-input');
+  const closeInput = document.getElementById('store-close-time-input');
+  const btn = document.getElementById('btn-save-operating-hours');
+
+  const store_open_time = openInput ? openInput.value : '';
+  const store_close_time = closeInput ? closeInput.value : '';
+
+  if (!store_open_time || !store_close_time) {
+    API.toast('Please select both opening and closing times.', 'warning');
+    return;
+  }
+
+  const origBtnText = btn ? btn.innerHTML : '';
+  try {
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳ Saving...</span>';
+    }
+
+    const res = await API.put('/settings/operating-hours', {
+      store_open_time,
+      store_close_time
+    });
+
+    if (res && res.success) {
+      API.toast('Operating hours updated successfully!', 'success');
+      await loadOperatingHoursSettings();
+      await loadStoreStatus();
+    } else {
+      API.toast(res.message || 'Failed to update operating hours.', 'error');
+    }
+  } catch (err) {
+    console.error('Failed to save operating hours:', err);
+    API.toast(err.message || 'Error updating operating hours.', 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = origBtnText;
+    }
+  }
 }
 

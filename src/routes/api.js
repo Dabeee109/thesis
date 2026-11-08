@@ -131,4 +131,15 @@ router.get('/settings/location', authController.authMiddleware, authController.r
 router.put('/settings/location', authController.authMiddleware, authController.requireAdmin, settingsController.updateStoreLocationSettings);
 router.get('/store/location/public', settingsController.getPublicStoreLocation);
 
+// Store Operating Hours & Live Interactive Operational Status
+router.get('/settings/operating-hours', settingsController.getOperatingHoursSettings);
+router.get('/admin/settings/operating-hours', authController.authMiddleware, authController.requireAdmin, settingsController.getOperatingHoursSettings);
+router.put('/settings/operating-hours', authController.authMiddleware, authController.requireAdmin, settingsController.updateOperatingHoursSettings);
+router.put('/admin/settings/operating-hours', authController.authMiddleware, authController.requireAdmin, settingsController.updateOperatingHoursSettings);
+
+router.get('/settings/store-status', settingsController.getStoreStatus);
+router.get('/admin/settings/store-status', settingsController.getStoreStatus);
+router.put('/settings/store-status', authController.authMiddleware, authController.requireAdmin, settingsController.updateStoreStatus);
+router.put('/admin/settings/store-status', authController.authMiddleware, authController.requireAdmin, settingsController.updateStoreStatus);
+
 module.exports = router;

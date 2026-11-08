@@ -265,6 +265,7 @@ function initSqliteFallback() {
       CREATE TABLE IF NOT EXISTS system_settings (
         id INTEGER PRIMARY KEY DEFAULT 1,
         chatbot_enabled INTEGER DEFAULT 1,
+        store_status TEXT DEFAULT 'OPEN',
         store_open_time TEXT DEFAULT '09:00:00',
         store_close_time TEXT DEFAULT '21:00:00',
         store_timezone TEXT DEFAULT 'Asia/Manila',
@@ -339,6 +340,7 @@ function initSqliteFallback() {
     try { sqliteDb.exec(`ALTER TABLE deliveries ADD COLUMN customer_lat REAL DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN is_preorder INTEGER DEFAULT 0;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN chatbot_enabled INTEGER DEFAULT 1;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN store_status TEXT DEFAULT 'OPEN';`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN store_open_time TEXT DEFAULT '09:00:00';`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN store_close_time TEXT DEFAULT '21:00:00';`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN store_timezone TEXT DEFAULT 'Asia/Manila';`); } catch (e) { }

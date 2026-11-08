@@ -8,6 +8,8 @@ const path = require('path');
 const multer = require('multer');
 const config = require('../config/config');
 const storeSettingsService = require('../services/storeSettingsService');
+const systemSettingsService = require('../services/systemSettingsService');
+const { broadcastSSE } = require('../services/notificationService');
 
 const QR_UPLOADS_DIR = path.resolve(process.cwd(), 'public/uploads/qr');
 if (!fs.existsSync(QR_UPLOADS_DIR)) {
@@ -371,6 +373,138 @@ async function updateGcashSettings(req, res) {
   }
 }
 
+/**
+ * Get store operating hours & current schedule status
+ * (GET /api/settings/operating-hours)
+ */
+async function getOperatingHoursSettings(req, res) {
+  try {
+    const sys = await systemSettingsService.getSystemSettings();
+    const schedule = systemSettingsService.isStoreOpen();
+    return res.json({
+      success: true,
+      store_open_time: sys.store_open_time || '09:00:00',
+      store_close_time: sys.store_close_time || '21:00:00',
+      store_timezone: sys.store_timezone || 'Asia/Manila',
+      store_status: sys.store_status || (schedule.isOpen ? 'OPEN' : 'CLOSED'),
+      isOpen: schedule.isOpen,
+      schedule
+    });
+  } catch (err) {
+    console.error('[Get Operating Hours Error]', err);
+    return res.status(500).json({ success: false, message: 'Failed to retrieve store operating hours.' });
+  }
+}
+
+/**
+ * Update store operating hours configuration
+ * (PUT /api/settings/operating-hours)
+ */
+async function updateOperatingHoursSettings(req, res) {
+  try {
+    const { store_open_time, store_close_time, store_timezone } = req.body;
+    const user = req.user ? (req.user.name || req.user.email || 'Admin') : 'Admin';
+
+    if (!store_open_time || !store_close_time) {
+      return res.status(400).json({ success: false, message: 'store_open_time and store_close_time are required.' });
+    }
+
+    const updated = await systemSettingsService.updateSystemSettings({
+      store_open_time,
+      store_close_time,
+      store_timezone,
+      updated_by: user
+    });
+
+    const schedule = systemSettingsService.isStoreOpen();
+
+    broadcastSSE('OPERATING_HOURS_UPDATED', {
+      store_open_time: updated.store_open_time,
+      store_close_time: updated.store_close_time,
+      store_timezone: updated.store_timezone,
+      schedule,
+      updated_by: user
+    });
+
+    return res.json({
+      success: true,
+      message: 'Store operating hours updated successfully.',
+      settings: updated,
+      schedule
+    });
+  } catch (err) {
+    console.error('[Update Operating Hours Error]', err);
+    return res.status(500).json({ success: false, message: err.message || 'Failed to update store operating hours.' });
+  }
+}
+
+/**
+ * Get active store operational status (OPEN / CLOSED)
+ * (GET /api/settings/store-status)
+ */
+async function getStoreStatus(req, res) {
+  try {
+    const sys = await systemSettingsService.getSystemSettings();
+    const schedule = systemSettingsService.isStoreOpen();
+    return res.json({
+      success: true,
+      store_status: sys.store_status || (schedule.isOpen ? 'OPEN' : 'CLOSED'),
+      isOpen: schedule.isOpen,
+      schedule
+    });
+  } catch (err) {
+    console.error('[Get Store Status Error]', err);
+    return res.status(500).json({ success: false, message: 'Failed to retrieve store status.' });
+  }
+}
+
+/**
+ * Interactive Store Status Toggle
+ * (PUT /api/settings/store-status)
+ */
+async function updateStoreStatus(req, res) {
+  try {
+    const { store_status, isOpen } = req.body;
+    let targetStatus;
+    if (store_status !== undefined) {
+      targetStatus = String(store_status).toUpperCase().trim();
+    } else if (isOpen !== undefined) {
+      targetStatus = isOpen ? 'OPEN' : 'CLOSED';
+    } else {
+      // Toggle current status
+      const currentSchedule = systemSettingsService.isStoreOpen();
+      targetStatus = currentSchedule.isOpen ? 'CLOSED' : 'OPEN';
+    }
+
+    const user = req.user ? (req.user.name || req.user.email || 'Admin') : 'Admin';
+
+    const updated = await systemSettingsService.updateSystemSettings({
+      store_status: targetStatus,
+      updated_by: user
+    });
+
+    const schedule = systemSettingsService.isStoreOpen();
+
+    broadcastSSE('STORE_STATUS_CHANGED', {
+      store_status: targetStatus,
+      isOpen: schedule.isOpen,
+      schedule,
+      updated_by: user
+    });
+
+    return res.json({
+      success: true,
+      message: `Store status successfully updated to ${targetStatus}.`,
+      store_status: targetStatus,
+      isOpen: schedule.isOpen,
+      schedule
+    });
+  } catch (err) {
+    console.error('[Update Store Status Error]', err);
+    return res.status(500).json({ success: false, message: err.message || 'Failed to update store status.' });
+  }
+}
+
 module.exports = {
   getFacebookSettings,
   updateFacebookSettings,
@@ -380,5 +514,9 @@ module.exports = {
   getGeneralSettings,
   updateGcashSettings,
   getPublicStoreLocation,
+  getOperatingHoursSettings,
+  updateOperatingHoursSettings,
+  getStoreStatus,
+  updateStoreStatus,
   qrUpload
 };
