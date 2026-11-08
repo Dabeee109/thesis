@@ -238,3 +238,4 @@ if (require.main === module) {
 }
 
 module.exports = { runMigration, verifiedCategories, verifiedMenuItems };
+

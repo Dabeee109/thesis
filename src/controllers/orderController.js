@@ -217,12 +217,41 @@ async function rejectVoid(req, res) {
  * Cancel / Void Order endpoint
  * POST /api/admin/orders/:id/cancel
  * POST /api/orders/:id/cancel
+ * Enforces Dynamic Order Cancellation Guard:
+ * - IN_PREPARATION: Block cancellation ("kasalukuyan na pong inihahanda sa kusina")
+ * - DISPATCHED / ON_DELIVERY: Block cancellation ("na-dispatch na po ang inyong order at kasalukuyan na pong papunta ang ating rider")
+ * - PENDING: Allow cancellation, restore stock, inform kitchen dashboard
  */
 async function cancelOrder(req, res) {
   try {
     const { id } = req.params;
-    const { reason, cancellationReason } = req.body;
-    const finalReason = cancellationReason || reason || 'Cancelled by Admin';
+    const { reason, cancellationReason, forceAdminOverride } = req.body;
+    const finalReason = cancellationReason || reason || 'Cancelled by customer / admin request';
+
+    const [rows] = await db.query('SELECT id, order_number, status FROM orders WHERE id = ?', [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Order not found.' });
+    }
+    const currentOrder = rows[0];
+    const s = String(currentOrder.status).toLowerCase();
+    const isAdminOverride = req.user && req.user.role === 'admin' && Boolean(forceAdminOverride);
+
+    if (!isAdminOverride) {
+      if (s === 'preparing' || s === 'in_preparation') {
+        return res.status(400).json({
+          success: false,
+          code: 'CANCELLATION_BLOCKED_IN_PREPARATION',
+          message: `Paumanhin po, kasalukuyan na pong inihahanda sa kusina ang inyong order #${currentOrder.order_number}. Hindi na po ito maaaring i-cancel upang maiwasan ang food waste. Maraming salamat po sa pag-unawa!`
+        });
+      }
+      if (s === 'dispatched' || s === 'on_delivery') {
+        return res.status(400).json({
+          success: false,
+          code: 'CANCELLATION_BLOCKED_DISPATCHED',
+          message: `Paumanhin po, na-dispatch na po ang inyong order #${currentOrder.order_number} at kasalukuyan na pong papunta ang ating rider sa inyong lokasyon. Hindi na po ito maaaring i-cancel. Pakihanda na lang po ang inyong bayad o pagtanggap. Salamat po!`
+        });
+      }
+    }
 
     const updated = await updateOrderStatus(parseInt(id, 10), 'cancelled', {
       cancellationReason: finalReason

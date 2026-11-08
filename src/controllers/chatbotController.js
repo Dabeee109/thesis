@@ -4,6 +4,7 @@
  */
 
 const db = require('../../database/db');
+const systemSettingsService = require('../services/systemSettingsService');
 const { handleMessageEvent, getSession, getChatbotStatus, setChatbotStatus } = require('../services/nlpEngine');
 const { broadcastSSE } = require('../services/notificationService');
 
@@ -64,32 +65,54 @@ async function getSimulatorSession(req, res) {
 }
 
 /**
- * Get current AI Chatbot status (ON/OFF)
+ * Get current AI Chatbot status & store operating hours
  */
-function getStatus(req, res) {
-  const status = getChatbotStatus();
-  return res.json({ success: true, ...status });
+async function getStatus(req, res) {
+  const sys = await systemSettingsService.getSystemSettings();
+  const storeSchedule = systemSettingsService.isStoreOpen();
+  return res.json({
+    success: true,
+    isEnabled: Boolean(sys.chatbot_enabled),
+    chatbot_enabled: sys.chatbot_enabled,
+    lastToggledBy: sys.last_toggled_by || 'Admin',
+    lastToggledAt: sys.last_toggled_at || sys.updated_at,
+    store_open_time: sys.store_open_time,
+    store_close_time: sys.store_close_time,
+    storeSchedule
+  });
 }
 
 /**
- * Toggle AI Chatbot status (ON/OFF)
+ * Toggle AI Chatbot status (ON/OFF) persistently
  */
-function toggleStatus(req, res) {
-  const { isEnabled } = req.body;
-  if (isEnabled === undefined) {
+async function toggleStatus(req, res) {
+  const { isEnabled, chatbot_enabled } = req.body;
+  const targetState = isEnabled !== undefined ? isEnabled : chatbot_enabled;
+  if (targetState === undefined) {
     return res.status(400).json({ success: false, message: 'isEnabled boolean is required.' });
   }
 
-  const user = req.user ? req.user.name : 'Admin';
-  const updatedStatus = setChatbotStatus(Boolean(isEnabled), user);
+  const user = req.user ? (req.user.full_name || req.user.name || 'Admin') : 'Admin';
+  const updatedSys = await systemSettingsService.updateSystemSettings({
+    chatbot_enabled: Boolean(targetState),
+    updated_by: user
+  });
+  setChatbotStatus(Boolean(targetState), user);
+
+  const statusResponse = {
+    isEnabled: Boolean(updatedSys.chatbot_enabled),
+    chatbot_enabled: updatedSys.chatbot_enabled,
+    lastToggledBy: user,
+    lastToggledAt: updatedSys.last_toggled_at || updatedSys.updated_at
+  };
 
   // Broadcast to all active dashboards and simulators in real-time
-  broadcastSSE('CHATBOT_STATUS_CHANGED', updatedStatus);
+  broadcastSSE('CHATBOT_STATUS_CHANGED', statusResponse);
 
   return res.json({
     success: true,
-    message: `AI Chatbot has been successfully ${updatedStatus.isEnabled ? 'turned ON (Active)' : 'turned OFF (Paused)'}.`,
-    ...updatedStatus
+    message: `AI Chatbot has been successfully ${statusResponse.isEnabled ? 'turned ON (Active)' : 'turned OFF (Muted / Kill Switch Active)'}.`,
+    ...statusResponse
   });
 }
 

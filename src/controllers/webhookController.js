@@ -7,6 +7,7 @@
 const crypto = require('crypto');
 const config = require('../config/config');
 const db = require('../../database/db');
+const systemSettingsService = require('../services/systemSettingsService');
 const { handleMessageEvent, getSession, saveSession, generateSummaryReceipt } = require('../services/nlpEngine');
 const { verifyPaymentTransaction, resolveOrderTotal, formatAmount } = require('../services/paymentVerificationService');
 const { sendTextMessage } = require('../services/messengerService');
@@ -122,9 +123,25 @@ async function processMetaEntries(entries = []) {
 /**
  * Incoming Webhook Event Handler (POST /api/webhook & POST /webhook)
  * Immediately returns HTTP 200 OK (Fast-Ack < 5s SLA) and dispatches AI + outbound delivery asynchronously.
+ * Enforces Master AI Chatbot Toggle (Mute / Kill Switch): if chatbot_enabled is false,
+ * immediately acknowledges Meta with 200 EVENT_RECEIVED and returns without dispatching replies,
+ * allowing managers to chat manually in Page Inbox without bot interference.
  */
 function processWebhookEvents(req, res) {
   const body = req.body || {};
+
+  // Requirement 2: Master AI Chatbot Toggle (Mute / Kill Switch)
+  if (!systemSettingsService.isChatbotEnabled()) {
+    console.log('[Webhook Master Toggle] Chatbot is disabled (chatbot_enabled=0). Acknowledging Meta without bot reply.');
+    if (body.object === 'page') {
+      return res.status(200).type('text/plain').send('EVENT_RECEIVED');
+    }
+    return res.status(200).json({
+      success: true,
+      status: 'muted',
+      message: 'EVENT_RECEIVED: Chatbot is currently muted by store manager for manual Page Inbox handling.'
+    });
+  }
 
   // 1. Meta Messenger Platform Payload ({ object: "page", entry: [...] })
   if (body.object === 'page') {

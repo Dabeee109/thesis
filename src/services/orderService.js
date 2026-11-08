@@ -215,6 +215,7 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
   const initialPaymentProof = orderData.paymentProofImage || orderData.payment_proof_image || null;
   const customerLat = (orderData.customer_lat !== undefined ? orderData.customer_lat : (orderData.customerLat !== undefined ? orderData.customerLat : (orderData.lat !== undefined ? orderData.lat : (claims && claims.lat ? claims.lat : null))));
   const customerLng = (orderData.customer_lng !== undefined ? orderData.customer_lng : (orderData.customerLng !== undefined ? orderData.customerLng : (orderData.lng !== undefined ? orderData.lng : (claims && claims.lng ? claims.lng : null))));
+  const isPreorder = (orderData.is_preorder || orderData.isPreorder || !(require('./systemSettingsService').isStoreOpen().isOpen)) ? 1 : 0;
 
   let orderResult = null;
   let orderNumber = '';
@@ -223,9 +224,9 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
     try {
       const [res] = await db.query(
         `INSERT INTO orders 
-         (order_number, customer_id, order_type, status, subtotal, delivery_fee, total_amount, delivery_address, customer_phone, distance_km, customer_notes, payment_status, payment_ref_number, payment_proof_image, customer_lat, customer_lng)
-         VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [orderNumber, customerId, orderType, subtotal, deliveryFee, totalAmount, effectiveDeliveryAddress, phone || null, effectiveDistanceKm, customerNotes, initialPaymentStatus, initialPaymentRef, initialPaymentProof, customerLat, customerLng]
+         (order_number, customer_id, order_type, status, subtotal, delivery_fee, total_amount, delivery_address, customer_phone, distance_km, customer_notes, payment_status, payment_ref_number, payment_proof_image, customer_lat, customer_lng, is_preorder)
+         VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [orderNumber, customerId, orderType, subtotal, deliveryFee, totalAmount, effectiveDeliveryAddress, phone || null, effectiveDistanceKm, customerNotes, initialPaymentStatus, initialPaymentRef, initialPaymentProof, customerLat, customerLng, isPreorder]
       );
       orderResult = res;
       break;
@@ -367,6 +368,12 @@ async function updateOrderStatus(orderId, newStatus, extraData = {}) {
          WHERE menu_item_id = ?`,
         [it.quantity, it.menu_item_id]
       );
+      await db.query(
+        `UPDATE menu_items 
+         SET stock_quantity = stock_quantity + ?, is_available = 1, updated_at = CURRENT_TIMESTAMP 
+         WHERE id = ?`,
+        [it.quantity, it.menu_item_id]
+      ).catch(() => {});
       const [invRows] = await db.query(`SELECT id FROM inventory WHERE menu_item_id = ?`, [it.menu_item_id]);
       if (invRows.length > 0) {
         await db.query(
@@ -587,7 +594,7 @@ async function getOrdersList(filters = {}) {
       f.rating AS customer_rating,
       f.comments AS customer_feedback
     FROM orders o
-    JOIN customers c ON o.customer_id = c.id
+    LEFT JOIN customers c ON o.customer_id = c.id
     LEFT JOIN payments p ON o.id = p.order_id
     LEFT JOIN deliveries d ON o.id = d.order_id
     LEFT JOIN delivery_personnel dp ON d.rider_id = dp.id
@@ -655,7 +662,7 @@ async function getOrderDetails(orderIdentifier) {
       f.rating,
       f.comments AS feedback_comments
     FROM orders o
-    JOIN customers c ON o.customer_id = c.id
+    LEFT JOIN customers c ON o.customer_id = c.id
     LEFT JOIN payments p ON o.id = p.order_id
     LEFT JOIN deliveries d ON o.id = d.order_id
     LEFT JOIN delivery_personnel dp ON d.rider_id = dp.id

@@ -10,6 +10,7 @@ const path = require('path');
 const db = require('../../database/db');
 const config = require('../config/config');
 const storeSettingsService = require('./storeSettingsService');
+const systemSettingsService = require('./systemSettingsService');
 const jwt = require('jsonwebtoken');
 const { createOrder } = require('./orderService');
 const {
@@ -72,10 +73,12 @@ let lastToggledBy = 'System';
 let lastToggledAt = new Date().toISOString();
 
 function getChatbotStatus() {
+  const sys = systemSettingsService.getCachedSystemSettings();
   return {
-    isEnabled: isChatbotActive,
-    lastToggledBy,
-    lastToggledAt
+    isEnabled: Boolean(sys.chatbot_enabled),
+    chatbot_enabled: sys.chatbot_enabled,
+    lastToggledBy: sys.last_toggled_by || lastToggledBy,
+    lastToggledAt: sys.last_toggled_at || lastToggledAt
   };
 }
 
@@ -83,6 +86,7 @@ function setChatbotStatus(enabled, user = 'Admin') {
   isChatbotActive = Boolean(enabled);
   lastToggledBy = user;
   lastToggledAt = new Date().toISOString();
+  systemSettingsService.updateSystemSettings({ chatbot_enabled: Boolean(enabled), updated_by: user }).catch(() => {});
   return getChatbotStatus();
 }
 
@@ -340,7 +344,8 @@ async function finalizeOrderSummaryAndPayment(psid, session) {
         items: (session.cart || []).map(c => ({ menuItemId: c.menuItemId || c.id, quantity: c.quantity || 1 })),
         deliveryFee,
         totalAmount: grandTotal,
-        discountAmount
+        discountAmount,
+        is_preorder: Boolean(session.is_preorder)
       });
 
       const orderNum = order.orderNumber || order.order_number;
@@ -376,6 +381,7 @@ async function finalizeOrderSummaryAndPayment(psid, session) {
         deliveryFee,
         totalAmount: grandTotal,
         discountAmount,
+        is_preorder: Boolean(session.is_preorder),
         paymentStatus: 'Pending'
       });
       orderNum = order.orderNumber || order.order_number;
@@ -841,6 +847,123 @@ async function handlePaymentProofTextInput(psid, session, rawText) {
 }
 
 /**
+ * Helper: Detects cancellation trigger words or postback payloads
+ */
+function isCancelTriggerWord(norm = '', rawText = '', eventPayload = '') {
+  if (eventPayload === 'ACTION_CANCEL_ORDER' || eventPayload === 'CANCEL_ORDER') return true;
+  const triggerPhrases = [
+    'cancel',
+    'cancel order',
+    'cancel my order',
+    'i-cancel ang order',
+    'i cancel ang order',
+    'icancel ang order',
+    'icancel',
+    'pa cancel',
+    'pa-cancel',
+    'pacancel',
+    'ayaw ko na',
+    'ayaw ko na po',
+    'ayaw ko na nito',
+    'ayoko na',
+    'kanselahin',
+    'refund',
+    'pa refund',
+    'pa-refund',
+    'parefund'
+  ];
+  if (triggerPhrases.some(p => norm === p || norm.includes(p))) return true;
+  if (/\b(?:pa[-\s]?cancel|i[-\s]?cancel|kanselahin|ayaw\s+ko\s+na|ayoko\s+na)\b/i.test(rawText)) return true;
+  if (/\bcancel\b.*?\b(?:order|food|delivery|kape|drink|ko)\b/i.test(rawText)) return true;
+  if (/\b(?:order|food|delivery)\b.*?\bcancel\b/i.test(rawText)) return true;
+  return false;
+}
+
+/**
+ * Dynamic Order Cancellation Guard (Status-Based Rules - Requirement 1)
+ * Evaluates active order status:
+ * 1. IN_PREPARATION: Block cancellation, reply with food waste prevention message
+ * 2. DISPATCHED / ON_DELIVERY: Block cancellation, reply with rider on-the-way message
+ * 3. PENDING: Allow cancellation, update status, restore stock in menu_items & inventory
+ */
+async function handleCancellationRequest(psid, session, rawText = '') {
+  let activeOrder = null;
+  if (session.activeOrderNumber) {
+    const [rows] = await db.query(
+      `SELECT id, order_number, status, total_amount FROM orders WHERE order_number = ? LIMIT 1`,
+      [session.activeOrderNumber]
+    );
+    if (rows && rows.length > 0 && !['delivered', 'cancelled'].includes(String(rows[0].status).toLowerCase())) {
+      activeOrder = rows[0];
+    }
+  }
+
+  if (!activeOrder && psid) {
+    const [rows] = await db.query(
+      `SELECT o.id, o.order_number, o.status, o.total_amount
+       FROM orders o
+       JOIN customers c ON c.id = o.customer_id
+       WHERE c.psid = ? AND LOWER(o.status) NOT IN ('delivered', 'cancelled')
+       ORDER BY o.id DESC LIMIT 1`,
+      [psid]
+    );
+    if (rows && rows.length > 0) {
+      activeOrder = rows[0];
+    }
+  }
+
+  if (activeOrder) {
+    const s = String(activeOrder.status).toLowerCase();
+    const { updateOrderStatus } = require('./orderService');
+
+    // Rule 1: IN_PREPARATION (In Kitchen) -> Block cancellation
+    if (s === 'preparing' || s === 'in_preparation' || s === 'in kitchen preparation') {
+      const reply = `Paumanhin po, kasalukuyan na pong inihahanda sa kusina ang inyong order #${activeOrder.order_number}. Hindi na po ito maaaring i-cancel upang maiwasan ang food waste. Maraming salamat po sa pag-unawa!`;
+      await sendTextMessage(psid, reply);
+      return { intent: 'ORDER_CANCEL_BLOCKED_PREPARING', confidence: 1.0, replyLog: reply };
+    }
+
+    // Rule 2: DISPATCHED or ON_DELIVERY -> Block cancellation
+    if (s === 'dispatched' || s === 'on_delivery' || s === 'dispatched / on delivery') {
+      const reply = `Paumanhin po, na-dispatch na po ang inyong order #${activeOrder.order_number} at kasalukuyan na pong papunta ang ating rider sa inyong lokasyon. Hindi na po ito maaaring i-cancel. Pakihanda na lang po ang inyong bayad o pagtanggap. Salamat po!`;
+      await sendTextMessage(psid, reply);
+      return { intent: 'ORDER_CANCEL_BLOCKED_DISPATCHED', confidence: 1.0, replyLog: reply };
+    }
+
+    // Rule 3: PENDING or AWAITING_CONFIRMATION -> Allow cancellation & restore stock
+    if (s === 'pending' || s === 'awaiting_confirmation') {
+      await updateOrderStatus(activeOrder.id, 'cancelled', {
+        cancellationReason: 'Cancelled by customer via Messenger'
+      });
+      session.activeOrderNumber = null;
+      session.current_step = 'idle';
+      session.state = 'idle';
+      session.cart = [];
+      await saveSession(session);
+
+      const reply = `Na-cancel na po ang inyong order #${activeOrder.order_number}. Naibalik na po ang stock ng inyong items sa aming kusina. Kung nagbayad po kayo via online/GCash, mangyaring makipag-ugnayan sa amin para sa agarang refund. Maraming salamat po!`;
+      await sendTextMessage(psid, reply);
+      return { intent: 'ORDER_CANCELLED_PENDING', confidence: 1.0, replyLog: reply };
+    }
+  }
+
+  // If no placed active order: check for draft items in cart
+  if (session.cart && session.cart.length > 0) {
+    session.cart = [];
+    session.state = 'IDLE';
+    session.current_step = 'idle';
+    await saveSession(session);
+    const reply = "Na-cancel na po ang inyong kasalukuyang cart selection. Maaari po kayong pumili muli sa ating menu anumang oras!";
+    await sendTextMessage(psid, reply);
+    return { intent: 'CANCEL_CART', confidence: 1.0, replyLog: reply };
+  }
+
+  const reply = "Wala po kayong kasalukuyang aktibong order na maaaring i-cancel. May maitutulong pa ba ako sa inyo?";
+  await sendTextMessage(psid, reply);
+  return { intent: 'CANCEL_EMPTY', confidence: 1.0, replyLog: reply };
+}
+
+/**
  * Main Message & Event Handler for Facebook Messenger Webhook & Simulator
  */
 async function handleMessageEvent(psid, incomingText = '', payload = null, location = null, attachments = null) {
@@ -938,16 +1061,60 @@ async function handleMessageEvent(psid, incomingText = '', payload = null, locat
       return;
     }
 
-    // Chatbot Pause / Maintenance check
-    if (!isChatbotActive) {
-      detectedIntent = 'CHATBOT_OFFLINE';
-      botReplyLog = 'Chatbot paused message sent.';
-      await sendQuickReplies(
-        psid,
-        `Our automated assistant is temporarily paused by cafe staff. Please call ${config.store.phone} for assistance.`,
-        [{ title: 'Store Info', payload: 'STORE_INFO' }]
-      );
-      return;
+    // 0c. Master AI Chatbot Toggle (Mute / Kill Switch - Requirement 2)
+    if (!systemSettingsService.isChatbotEnabled()) {
+      detectedIntent = 'CHATBOT_MUTED';
+      console.log(`[NLP Engine] Chatbot is disabled (chatbot_enabled=0). Skipping automated reply for ${psid}.`);
+      return { intent: 'CHATBOT_MUTED', confidence: 1.0, replyLog: 'Chatbot muted' };
+    }
+
+    // 0d. Store Operating Hours & Pre-Order Handler (Requirement 3)
+    const storeSchedule = systemSettingsService.isStoreOpen();
+    if (!storeSchedule.isOpen) {
+      const normInput = (text || '').toLowerCase().trim();
+      const isCancel = isCancelTriggerWord(normInput, text, eventPayload);
+
+      // Handle explicit Pre-order triggers
+      if (eventPayload === 'ACTION_PREORDER' || normInput === 'mag pre-order' || normInput === 'pre-order' || normInput === 'preorder') {
+        session.is_preorder = true;
+        await saveSession(session);
+        const reply = `Salamat po! Naka-activate na po ang inyong Pre-Order mode. Maaari na po kayong pumili sa ating menu sa ibaba. Ang inyong order ay ihahanda at ipapadala pagkabukas ng aming kusina sa susunod na shift (${storeSchedule.openTimeFormatted}).`;
+        await sendTextMessage(psid, reply);
+        await sendFullMenu(psid, session);
+        return { intent: 'PREORDER_ACTIVATED', confidence: 1.0, replyLog: reply };
+      }
+
+      // Handle explicit Leave Message triggers
+      if (eventPayload === 'ACTION_LEAVE_MESSAGE' || normInput === 'mag-iwan ng mensahe') {
+        session.state = 'LEAVING_MESSAGE';
+        await saveSession(session);
+        const reply = `Salamat po! Maaari po ninyong i-type dito ang inyong mensahe o katanungan. Babasahin at tutugunan po ito ng aming staff sa oras ng pagbubukas ng tindahan (${storeSchedule.openTimeFormatted}). Magandang araw po!`;
+        await sendTextMessage(psid, reply);
+        return { intent: 'LEAVE_MESSAGE_REQUESTED', confidence: 1.0, replyLog: reply };
+      }
+
+      if (session.state === 'LEAVING_MESSAGE') {
+        session.state = 'IDLE';
+        await saveSession(session);
+        const reply = `Maraming salamat po! Naitala na po namin ang inyong mensahe. Tutugunan po kayo ng aming staff sa pagbubukas ng tindahan sa ${storeSchedule.openTimeFormatted}.`;
+        await sendTextMessage(psid, reply);
+        return { intent: 'MESSAGE_RECORDED', confidence: 1.0, replyLog: reply };
+      }
+
+      // If user triggers cancellation, let it through to cancellation guard
+      if (isCancel || eventPayload === 'ACTION_CANCEL_ORDER' || eventPayload === 'CANCEL_ORDER') {
+        return handleCancellationRequest(psid, session, text);
+      }
+
+      // If customer is NOT already in active pre-order shopping flow, show the closed notice
+      if (!session.is_preorder) {
+        const closedNotice = `Magandang araw po! Sarado na po ang aming kitchen ngayong oras na ito. Ang operating hours po ng Diner's Cafe ay ${storeSchedule.openTimeFormatted} - ${storeSchedule.closeTimeFormatted} (Manila Time). Nais niyo po ba mag pre-order para sa aming susunod na opening, o mag-iwan ng mensahe para sa aming staff?`;
+        await sendQuickReplies(psid, closedNotice, [
+          { title: 'Mag Pre-Order', payload: 'ACTION_PREORDER' },
+          { title: 'Mag-iwan ng Mensahe', payload: 'ACTION_LEAVE_MESSAGE' }
+        ]);
+        return { intent: 'STORE_CLOSED_NOTICE', confidence: 1.0, replyLog: closedNotice };
+      }
     }
 
     // 1. Handle Postback & Button Payloads (Decision 1a)
@@ -1007,6 +1174,32 @@ async function handlePayload(psid, session, payload) {
     await saveSession(session);
     const msg = botMessages.cleared();
     await sendQuickReplies(psid, msg.text, msg.quickReplies);
+    return;
+  }
+
+  // Cancellation Payloads
+  if (payload === 'ACTION_CANCEL_ORDER' || payload === 'CANCEL_ORDER') {
+    return handleCancellationRequest(psid, session, 'cancel order');
+  }
+
+  // Pre-Order Action Payload
+  if (payload === 'ACTION_PREORDER') {
+    session.is_preorder = true;
+    await saveSession(session);
+    const storeSchedule = systemSettingsService.isStoreOpen();
+    const reply = `Salamat po! Naka-activate na po ang inyong Pre-Order mode. Maaari na po kayong pumili sa ating menu sa ibaba. Ang inyong order ay ihahanda at ipapadala pagkabukas ng aming kusina sa susunod na shift (${storeSchedule.openTimeFormatted}).`;
+    await sendTextMessage(psid, reply);
+    await sendFullMenu(psid, session);
+    return;
+  }
+
+  // Leave Message Action Payload
+  if (payload === 'ACTION_LEAVE_MESSAGE') {
+    session.state = 'LEAVING_MESSAGE';
+    await saveSession(session);
+    const storeSchedule = systemSettingsService.isStoreOpen();
+    const reply = `Salamat po! Maaari po ninyong i-type dito ang inyong mensahe o katanungan. Babasahin at tutugunan po ito ng aming staff sa oras ng pagbubukas ng tindahan (${storeSchedule.openTimeFormatted}). Magandang araw po!`;
+    await sendTextMessage(psid, reply);
     return;
   }
 
@@ -1313,6 +1506,11 @@ async function handlePayload(psid, session, payload) {
 async function handleTextInput(psid, session, rawText) {
   const norm = normalize(rawText);
 
+  // Dynamic Order Cancellation Guard (Status-Based Rules)
+  if (isCancelTriggerWord(norm, rawText)) {
+    return handleCancellationRequest(psid, session, rawText);
+  }
+
   // Check for payment confirmation signal like "Send na po", "Bayad na po", "Na-send ko na"
   const isPaidSignal = /(?:^|\b)(?:send na po|na-?send|bayad na|paid|done paying|ok na po|tapos na po|settled)(?:\b|$)/i.test(rawText);
   if (isPaidSignal) {
@@ -1363,39 +1561,7 @@ async function handleTextInput(psid, session, rawText) {
       classifyShort(rawText) === 'NO';
 
     if (hasAffirmative && !hasNegative) {
-      session.cart = [];
-      session.order_type = null;
-      session.orderType = null;
-      session.delivery_address = null;
-      session.address = '';
-      session.gcash_ref = null;
-      session.partial_paid = null;
-      session.order_total = null;
-      session.receipt_url = null;
-      session.details = null;
-      session.quote = null;
-      session.checkout = null;
-      session.pendingItem = null;
-      session.pending_suggestion = null;
-      session.pendingAction = null;
-      if (session.activeOrderNumber) {
-        try {
-          await db.query(
-            `UPDATE orders SET status = 'cancelled', cancellation_reason = 'Cancelled by customer' WHERE order_number = ?`,
-            [session.activeOrderNumber]
-          );
-        } catch (e) {
-          console.error('[Cancel Order DB Error]', e.message);
-        }
-        session.activeOrderNumber = null;
-      }
-      session.current_step = 'idle';
-      session.state = 'idle';
-      await saveSession(session);
-
-      const reply = 'Order has been cancelled.';
-      await sendTextMessage(psid, reply);
-      return { intent: 'CANCEL_ORDER_CONFIRMED', confidence: 1.0, replyLog: reply };
+      return handleCancellationRequest(psid, session, rawText);
     }
 
     if (hasNegative && !hasAffirmative) {
@@ -3988,5 +4154,7 @@ module.exports = {
   calculateDeliveryDistanceAndFee,
   computeDeliveryFee,
   geocodeCustomerAddress,
-  sanitizeCustomerAddress
+  sanitizeCustomerAddress,
+  handleCancellationRequest,
+  isCancelTriggerWord
 };

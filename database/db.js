@@ -255,9 +255,35 @@ function initSqliteFallback() {
         store_latitude REAL NOT NULL DEFAULT 14.5794,
         store_longitude REAL NOT NULL DEFAULT 121.0359,
         max_delivery_radius_km REAL NOT NULL DEFAULT 3.00,
+        chatbot_enabled INTEGER DEFAULT 1,
+        store_open_time TEXT DEFAULT '09:00:00',
+        store_close_time TEXT DEFAULT '21:00:00',
+        store_timezone TEXT DEFAULT 'Asia/Manila',
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS system_settings (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        chatbot_enabled INTEGER DEFAULT 1,
+        store_open_time TEXT DEFAULT '09:00:00',
+        store_close_time TEXT DEFAULT '21:00:00',
+        store_timezone TEXT DEFAULT 'Asia/Manila',
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
     `);
+
+    // Seed default system_settings if empty
+    try {
+      const sysCount = sqliteDb.prepare(`SELECT COUNT(*) as count FROM system_settings`).get();
+      if (sysCount && sysCount.count === 0) {
+        sqliteDb.prepare(`
+          INSERT INTO system_settings (id, chatbot_enabled, store_open_time, store_close_time, store_timezone)
+          VALUES (1, 1, '09:00:00', '21:00:00', 'Asia/Manila')
+        `).run();
+      }
+    } catch (e) {
+      console.warn('[SQLite] system_settings seed check skipped:', e.message);
+    }
 
     // Seed default store settings if empty
     try {
@@ -311,7 +337,11 @@ function initSqliteFallback() {
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN customer_lat REAL DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN customer_lng REAL DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE deliveries ADD COLUMN customer_lat REAL DEFAULT NULL;`); } catch (e) { }
-    try { sqliteDb.exec(`ALTER TABLE deliveries ADD COLUMN customer_lng REAL DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN is_preorder INTEGER DEFAULT 0;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN chatbot_enabled INTEGER DEFAULT 1;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN store_open_time TEXT DEFAULT '09:00:00';`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN store_close_time TEXT DEFAULT '21:00:00';`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN store_timezone TEXT DEFAULT 'Asia/Manila';`); } catch (e) { }
 
     // Seed admin_gcash_transactions if empty
     try {

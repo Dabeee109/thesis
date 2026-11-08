@@ -147,3 +147,4 @@ INSERT INTO `menu_items` (`category`, `name`, `description`, `price`, `stock_qua
 ('Chicken Wings & Boneless', 'Boneless Chicken Salted Egg', 'Crispy bite-sized fillets coated in rich aromatic salted egg yolk butter', 269.00, 20, 'AVAILABLE', 1),
 ('Chicken Wings & Boneless', 'Boneless Chicken Bburinkle', 'Korean-style crispy chicken dusted with sweet cheese and vegetable seasoning', 269.00, 20, 'AVAILABLE', 1),
 ('Chicken Wings & Boneless', "Chic'n Bowl (with Rice)", 'Crispy boneless chicken bites drizzled with sauce served over hot rice', 129.00, 35, 'AVAILABLE', 1);
+
