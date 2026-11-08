@@ -10,17 +10,27 @@ const { broadcastSSE } = require('../services/notificationService');
 
 /**
  * Get all categories with their associated menu items and stock
+ * Supports optional ?category= query parameter (by category name or slug)
  */
 async function getMenu(req, res) {
   try {
-    const [categories] = await db.query(
-      `SELECT * FROM categories WHERE is_active = 1 ORDER BY display_order ASC`
-    );
+    const { category } = req.query;
+
+    let catQuery = `SELECT * FROM categories WHERE is_active = 1`;
+    const catParams = [];
+    if (category && category.toLowerCase() !== 'all') {
+      catQuery += ` AND (LOWER(name) = ? OR LOWER(slug) = ?)`;
+      catParams.push(category.toLowerCase(), category.toLowerCase());
+    }
+    catQuery += ` ORDER BY display_order ASC`;
+
+    const [categories] = await db.query(catQuery, catParams);
 
     const [items] = await db.query(`
       SELECT 
         m.id,
         m.category_id,
+        COALESCE(m.category, c.name) AS category,
         m.name,
         m.description,
         m.price,
@@ -29,9 +39,11 @@ async function getMenu(req, res) {
         m.is_bestseller,
         m.preparation_time_min,
         COALESCE(m.stock_quantity, i.stock_quantity, 0) AS stock_quantity,
+        COALESCE(m.status, CASE WHEN COALESCE(m.stock_quantity, i.stock_quantity, 0) <= 0 THEN 'OUT_OF_STOCK' ELSE 'AVAILABLE' END) AS raw_status,
         COALESCE(i.low_stock_threshold, 10) AS low_stock_threshold,
         COALESCE(i.unit, 'servings') AS unit
       FROM menu_items m
+      LEFT JOIN categories c ON c.id = m.category_id
       LEFT JOIN inventory i ON m.id = i.menu_item_id
       WHERE COALESCE(m.is_deleted, 0) = 0
       ORDER BY m.is_bestseller DESC, m.name ASC
@@ -41,8 +53,11 @@ async function getMenu(req, res) {
     const enrichedItems = items.map(item => {
       const q = parseInt(item.stock_quantity, 10) || 0;
       let status = 'IN_STOCK';
-      if (q <= 0) status = 'SOLD_OUT';
-      else if (q <= 10) status = 'LOW_STOCK';
+      if (item.raw_status === 'OUT_OF_STOCK' || q <= 0 || item.is_available === 0) {
+        status = 'SOLD_OUT';
+      } else if (q <= 10) {
+        status = 'LOW_STOCK';
+      }
 
       return {
         ...item,
@@ -51,12 +66,17 @@ async function getMenu(req, res) {
       };
     });
 
+    const categoryIds = new Set(categories.map(c => c.id));
+    const filteredItems = (category && category.toLowerCase() !== 'all')
+      ? enrichedItems.filter(item => categoryIds.has(item.category_id))
+      : enrichedItems;
+
     const menu = categories.map(cat => ({
       ...cat,
       items: enrichedItems.filter(item => item.category_id === cat.id)
     }));
 
-    return res.json({ success: true, categories: menu, allItems: enrichedItems });
+    return res.json({ success: true, categories: menu, allItems: filteredItems });
   } catch (err) {
     console.error('[Menu Controller Error]', err);
     return res.status(500).json({ success: false, message: 'Failed to retrieve menu.' });

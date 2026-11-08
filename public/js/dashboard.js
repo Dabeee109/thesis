@@ -951,16 +951,17 @@ function filterMenuCategory(slug) {
  * - 1-10: LOW STOCK (Yellow / Amber)
  * - <=0: SOLD OUT (Red)
  */
-function renderStockBadge(quantity) {
+function renderStockBadge(quantity, status) {
   const q = Number(quantity) || 0;
-  if (q > 10) {
-    return `<span class="badge badge-success" style="background-color: rgba(34, 197, 94, 0.2); color: #22c55e; border: 1px solid #22c55e;">IN STOCK (${q})</span>`;
-  } else if (q > 0 && q <= 10) {
-    return `<span class="badge badge-warning" style="background-color: rgba(234, 179, 8, 0.2); color: #eab308; border: 1px solid #eab308;">LOW STOCK (${q} left)</span>`;
+  if (status === 'OUT_OF_STOCK' || q <= 0) {
+    return `<span class="badge badge-soldout badge-danger" style="background-color: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid #ef4444; font-weight: 700;">SOLD OUT</span>`;
+  } else if (q <= 10) {
+    return `<span class="badge badge-lowstock badge-warning" style="background-color: rgba(234, 179, 8, 0.2); color: #eab308; border: 1px solid #eab308; font-weight: 700;">LOW STOCK (${q} left)</span>`;
   } else {
-    return `<span class="badge badge-danger" style="background-color: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid #ef4444;">SOLD OUT</span>`;
+    return `<span class="badge badge-instock badge-success" style="background-color: rgba(34, 197, 94, 0.2); color: #22c55e; border: 1px solid #22c55e; font-weight: 700;">IN STOCK (${q})</span>`;
   }
 }
+const renderStockPill = renderStockBadge;
 
 async function quickAdjustStock(itemId, delta) {
   try {
@@ -994,7 +995,7 @@ function renderMenuItems(categories) {
           </div>
           <div class="menu-card-desc">${item.description || ''}</div>
           <div style="display: flex; gap: 8px; margin-bottom: 10px; align-items: center; flex-wrap: wrap;">
-            ${renderStockBadge(item.stock_quantity)}
+            ${renderStockBadge(item.stock_quantity, item.status)}
             <span class="badge ${item.is_available ? 'badge-delivered' : 'badge-mismatch'}">
               ${item.is_available ? 'In Menu' : 'Unavailable'}
             </span>

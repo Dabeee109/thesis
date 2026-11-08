@@ -384,6 +384,18 @@ function initSqliteFallback() {
     if (userCount === 0) {
       seedSqliteData();
     }
+
+    // Auto-refresh menu to verified 91 items if legacy or unpopulated
+    try {
+      const biscoffCheck = sqliteDb.prepare("SELECT COUNT(*) as count FROM menu_items WHERE name = 'Biscoff Cheesecake'").get();
+      if (!biscoffCheck || biscoffCheck.count === 0) {
+        console.log('[Database] Populating verified fresh menu board items...');
+        const { runMigration } = require('./migrations/refresh_full_menu');
+        runMigration().catch(err => console.warn('[Database] Auto-refresh menu error:', err.message));
+      }
+    } catch (menuCheckErr) {
+      console.warn('[Database] Menu verification check skipped:', menuCheckErr.message);
+    }
     console.log('[Database] Fallback SQLite database connected and verified at', dbPath);
     return true;
   } catch (err) {
