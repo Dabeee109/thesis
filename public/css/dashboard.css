@@ -703,9 +703,6 @@ body.sidebar-collapsed .main-wrapper {
   .topbar-title .live-indicator {
     display: none;
   }
-  .topbar-actions a[href*="download.html"] {
-    display: none;
-  }
   .topbar-actions .btn {
     padding: 5px 9px;
     font-size: 0.74rem;

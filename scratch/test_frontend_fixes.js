@@ -43,3 +43,4 @@ console.log('✔ Mobile hamburger button, touch event listeners, and tablet CSS 
 console.log('\n=========================================');
 console.log('ALL FRONTEND & SECURITY CHECKS PASSED!');
 console.log('=========================================\n');
+
