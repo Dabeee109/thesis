@@ -21,6 +21,10 @@ let cachedSettings = {
   override_by: null,     // User who triggered manual override
   last_toggled_by: 'System',
   last_toggled_at: new Date().toISOString(),
+  fare_base: 49.00,
+  fare_per_05km: 12.00,
+  fare_fuel_cost: 2.83,
+  fare_maintenance: 7.50,
   updated_at: new Date().toISOString()
 };
 
@@ -66,6 +70,10 @@ async function getSystemSettings() {
         is_manual_override: (row.is_manual_override === 1 || row.is_manual_override === true || row.is_manual_override === '1') ? 1 : 0,
         override_at: row.override_at || null,
         override_by: row.override_by || null,
+        fare_base: Number.isFinite(Number(row.fare_base)) ? parseFloat(row.fare_base) : 49.00,
+        fare_per_05km: Number.isFinite(Number(row.fare_per_05km)) ? parseFloat(row.fare_per_05km) : 12.00,
+        fare_fuel_cost: Number.isFinite(Number(row.fare_fuel_cost)) ? parseFloat(row.fare_fuel_cost) : 2.83,
+        fare_maintenance: Number.isFinite(Number(row.fare_maintenance)) ? parseFloat(row.fare_maintenance) : 7.50,
         updated_at: row.updated_at || new Date().toISOString()
       };
     }
@@ -183,6 +191,106 @@ async function updateSystemSettings(data = {}) {
   }
 
   return { ...cachedSettings };
+}
+
+/**
+ * Retrieves active delivery fare matrix settings from cache/database
+ */
+async function getFareSettings() {
+  await getSystemSettings();
+  return {
+    fare_base: parseFloat(cachedSettings.fare_base ?? 49.00),
+    fare_per_05km: parseFloat(cachedSettings.fare_per_05km ?? 12.00),
+    fare_fuel_cost: parseFloat(cachedSettings.fare_fuel_cost ?? 2.83),
+    fare_maintenance: parseFloat(cachedSettings.fare_maintenance ?? 7.50),
+    updated_at: cachedSettings.updated_at || new Date().toISOString()
+  };
+}
+
+/**
+ * Updates delivery fare matrix settings in database and synchronization cache
+ */
+async function updateFareSettings(rates = {}, updatedBy = 'Admin') {
+  const fare_base = Number.isFinite(parseFloat(rates.fare_base)) ? parseFloat(rates.fare_base) : cachedSettings.fare_base;
+  const fare_per_05km = Number.isFinite(parseFloat(rates.fare_per_05km)) ? parseFloat(rates.fare_per_05km) : cachedSettings.fare_per_05km;
+  const fare_fuel_cost = Number.isFinite(parseFloat(rates.fare_fuel_cost)) ? parseFloat(rates.fare_fuel_cost) : cachedSettings.fare_fuel_cost;
+  const fare_maintenance = Number.isFinite(parseFloat(rates.fare_maintenance)) ? parseFloat(rates.fare_maintenance) : cachedSettings.fare_maintenance;
+
+  if (fare_base < 0 || fare_per_05km < 0 || fare_fuel_cost < 0 || fare_maintenance < 0) {
+    throw new Error('Fare matrix variables must be non-negative numbers.');
+  }
+
+  cachedSettings.fare_base = fare_base;
+  cachedSettings.fare_per_05km = fare_per_05km;
+  cachedSettings.fare_fuel_cost = fare_fuel_cost;
+  cachedSettings.fare_maintenance = fare_maintenance;
+  cachedSettings.updated_at = new Date().toISOString();
+
+  // 1. Update system_settings
+  await db.query(
+    `UPDATE system_settings
+     SET fare_base = ?, fare_per_05km = ?, fare_fuel_cost = ?, fare_maintenance = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE id = 1`,
+    [fare_base, fare_per_05km, fare_fuel_cost, fare_maintenance]
+  );
+
+  // 2. Update delivery_fare_config table
+  try {
+    const [rows] = await db.query(`SELECT id FROM delivery_fare_config WHERE id = 1`);
+    if (rows && rows.length > 0) {
+      await db.query(
+        `UPDATE delivery_fare_config
+         SET fare_base = ?, fare_per_05km = ?, fare_fuel_cost = ?, fare_maintenance = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = 1`,
+        [fare_base, fare_per_05km, fare_fuel_cost, fare_maintenance, updatedBy]
+      );
+    } else {
+      await db.query(
+        `INSERT INTO delivery_fare_config (id, fare_base, fare_per_05km, fare_fuel_cost, fare_maintenance, updated_by)
+         VALUES (1, ?, ?, ?, ?, ?)`,
+        [fare_base, fare_per_05km, fare_fuel_cost, fare_maintenance, updatedBy]
+      );
+    }
+  } catch (confErr) {
+    console.warn('[SystemSettingsService] delivery_fare_config sync skipped:', confErr.message);
+  }
+
+  // 3. Log audit trail entry in order_audit_logs
+  try {
+    await db.query(
+      `INSERT INTO order_audit_logs (order_id, order_number, action, actor_name, reason, details)
+       VALUES (NULL, 'SETTINGS', 'FARE_MATRIX_UPDATED', ?, 'Admin modified delivery fare matrix', ?)`,
+      [
+        updatedBy,
+        `Fare Matrix rates updated: Base=₱${fare_base.toFixed(2)}, Per0.5km=₱${fare_per_05km.toFixed(2)}, Fuel=₱${fare_fuel_cost.toFixed(2)}, Maint=₱${fare_maintenance.toFixed(2)}`
+      ]
+    );
+  } catch (auditErr) {
+    console.warn('[SystemSettingsService] Fare update audit log warning:', auditErr.message);
+  }
+
+  // 4. Broadcast live update via SSE
+  try {
+    const { broadcastSSE } = require('./notificationService');
+    broadcastSSE('FARE_SETTINGS_UPDATED', {
+      fare_base,
+      fare_per_05km,
+      fare_fuel_cost,
+      fare_maintenance,
+      updatedBy,
+      updated_at: cachedSettings.updated_at
+    });
+  } catch (sseErr) {
+    // broadcast non-critical
+  }
+
+  return {
+    fare_base,
+    fare_per_05km,
+    fare_fuel_cost,
+    fare_maintenance,
+    updated_at: cachedSettings.updated_at
+  };
 }
 
 /**
@@ -578,6 +686,8 @@ module.exports = {
   checkMilestoneCrossing,
   evaluateStoreSchedule,
   recordStoreStatusAudit,
+  getFareSettings,
+  updateFareSettings,
   startStoreScheduleWorker,
   stopStoreScheduleWorker
 };

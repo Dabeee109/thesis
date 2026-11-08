@@ -142,4 +142,9 @@ router.get('/admin/settings/store-status', settingsController.getStoreStatus);
 router.put('/settings/store-status', authController.authMiddleware, authController.requireAdmin, settingsController.updateStoreStatus);
 router.put('/admin/settings/store-status', authController.authMiddleware, authController.requireAdmin, settingsController.updateStoreStatus);
 
+// Delivery Fare Matrix Settings (Requirement 2)
+router.get('/admin/fare-settings', authController.authMiddleware, settingsController.getFareSettings);
+router.put('/admin/fare-settings', authController.authMiddleware, authController.requireAdmin, settingsController.updateFareSettings);
+router.get('/settings/fare-matrix', settingsController.getFareSettings);
+
 module.exports = router;

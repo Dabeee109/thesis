@@ -549,6 +549,55 @@ async function updateStoreStatus(req, res) {
   }
 }
 
+/**
+ * Get Delivery Fare Matrix rates
+ * GET /api/admin/fare-settings
+ */
+async function getFareSettings(req, res) {
+  try {
+    const fareSettings = await systemSettingsService.getFareSettings();
+    return res.json({
+      success: true,
+      fare_settings: fareSettings
+    });
+  } catch (err) {
+    console.error('[Get Fare Settings Error]', err);
+    return res.status(500).json({ success: false, message: err.message || 'Failed to retrieve fare settings.' });
+  }
+}
+
+/**
+ * Update Delivery Fare Matrix rates
+ * PUT /api/admin/fare-settings
+ */
+async function updateFareSettings(req, res) {
+  try {
+    const { fare_base, fare_per_05km, fare_fuel_cost, fare_maintenance } = req.body;
+    const actor = req.user ? (req.user.name || req.user.username || 'Admin') : 'Admin';
+
+    if (fare_base === undefined || fare_per_05km === undefined || fare_fuel_cost === undefined || fare_maintenance === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'All fare matrix variables (fare_base, fare_per_05km, fare_fuel_cost, fare_maintenance) are required.'
+      });
+    }
+
+    const updated = await systemSettingsService.updateFareSettings(
+      { fare_base, fare_per_05km, fare_fuel_cost, fare_maintenance },
+      actor
+    );
+
+    return res.json({
+      success: true,
+      message: 'Delivery fare matrix updated successfully.',
+      fare_settings: updated
+    });
+  } catch (err) {
+    console.error('[Update Fare Settings Error]', err);
+    return res.status(500).json({ success: false, message: err.message || 'Failed to update fare settings.' });
+  }
+}
+
 module.exports = {
   getFacebookSettings,
   updateFacebookSettings,
@@ -562,5 +611,7 @@ module.exports = {
   updateOperatingHoursSettings,
   getStoreStatus,
   updateStoreStatus,
+  getFareSettings,
+  updateFareSettings,
   qrUpload
 };

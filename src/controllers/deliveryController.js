@@ -7,6 +7,7 @@ const db = require('../../database/db');
 const { calculateDeliveryFare } = require('../services/fareCalculator');
 const { broadcastSSE } = require('../services/notificationService');
 const orderService = require('../services/orderService');
+const systemSettingsService = require('../services/systemSettingsService');
 
 /**
  * Get all active and recent deliveries
@@ -79,8 +80,10 @@ async function computeFare(req, res) {
       return res.status(400).json({ success: false, message: 'distanceKm is required.' });
     }
 
-    const fare = calculateDeliveryFare(parseFloat(distanceKm), vehicleType, weatherCondition, currentTime);
-    return res.json({ success: true, fare });
+    // Dynamic Database Rates Query (Requirement 2)
+    const fareSettings = await systemSettingsService.getFareSettings();
+    const fare = calculateDeliveryFare(parseFloat(distanceKm), vehicleType, weatherCondition, currentTime, null, fareSettings);
+    return res.json({ success: true, fare, fareSettings });
   } catch (err) {
     return res.status(400).json({ success: false, message: err.message });
   }

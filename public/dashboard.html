@@ -409,8 +409,15 @@
           <div class="delivery-dispatcher-grid">
             <!-- Left: Interactive Fare Engine (FR6) -->
             <div class="fare-calc-box">
-              <h2 style="font-size: 1.3rem; margin-bottom: 6px;">Smart Delivery Fare Calculator (FR6)</h2>
-              <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 20px;">Internal cafe radius: Strictly 0.0 to 3.0 km</p>
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 6px;">
+                <div>
+                  <h2 style="font-size: 1.3rem; margin-bottom: 4px;">Smart Delivery Fare Calculator (FR6)</h2>
+                  <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 16px;">Internal cafe radius: Strictly 0.0 to 3.0 km</p>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-edit-fare-matrix" onclick="openFareMatrixModal()" style="display: inline-flex; align-items: center; gap: 6px; font-weight: 700; white-space: nowrap; border: 1px solid var(--border-subtle); padding: 7px 12px; cursor: pointer; border-radius: 6px; font-size: 0.82rem; margin-top: 2px;">
+                  <span>⚙️ Edit Fare Matrix</span>
+                </button>
+              </div>
 
               <form id="fare-calc-form" onsubmit="event.preventDefault(); testFareCalculation();">
                 <div class="form-group">
@@ -1547,9 +1554,66 @@
     </div>
   </div>
 
+  <!-- 8. Edit Delivery Fare Matrix Modal (Requirement 3) -->
+  <div id="modal-fare-matrix" class="modal-overlay" style="z-index: 1050;">
+    <div class="modal-content" style="max-width: 500px;">
+      <div class="modal-header">
+        <h3 id="fare-matrix-modal-title" style="display: flex; align-items: center; gap: 8px; color: var(--brand-gold);">
+          <span>⚙️ Edit Delivery Fare Matrix</span>
+        </h3>
+        <button class="modal-close" onclick="closeModal('modal-fare-matrix')">&times;</button>
+      </div>
+
+      <form id="fare-matrix-form" onsubmit="handleSaveFareMatrix(event)">
+        <p style="font-size: 0.86rem; color: var(--text-secondary); line-height: 1.5; margin-bottom: 16px;">
+          Configure the active delivery formula computation variables for internal cafe deliveries (0.0 to 3.0 km). Updates apply dynamically across the fare engine, checkout, and dispatching:
+        </p>
+
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label class="form-label" for="fare-input-base" style="font-weight: 600; display: flex; justify-content: space-between;">
+            <span>Base Fare (First 1.0 km)</span>
+            <span style="color: var(--text-muted); font-size: 0.8rem;">PHP (₱)</span>
+          </label>
+          <input type="number" id="fare-input-base" class="form-control" step="0.50" min="0" placeholder="49.00" required>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label class="form-label" for="fare-input-per-05km" style="font-weight: 600; display: flex; justify-content: space-between;">
+            <span>Distance Charge (per 0.5 km)</span>
+            <span style="color: var(--text-muted); font-size: 0.8rem;">PHP (₱)</span>
+          </label>
+          <input type="number" id="fare-input-per-05km" class="form-control" step="0.50" min="0" placeholder="12.00" required>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label class="form-label" for="fare-input-fuel-cost" style="font-weight: 600; display: flex; justify-content: space-between;">
+            <span>Fuel Cost (Motorcycle only)</span>
+            <span style="color: var(--text-muted); font-size: 0.8rem;">PHP (₱)</span>
+          </label>
+          <input type="number" id="fare-input-fuel-cost" class="form-control" step="0.01" min="0" placeholder="2.83" required>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 18px;">
+          <label class="form-label" for="fare-input-maintenance" style="font-weight: 600; display: flex; justify-content: space-between;">
+            <span>Maintenance Allowance</span>
+            <span style="color: var(--text-muted); font-size: 0.8rem;">PHP (₱)</span>
+          </label>
+          <input type="number" id="fare-input-maintenance" class="form-control" step="0.50" min="0" placeholder="7.50" required>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px; border-top: 1px solid var(--border-subtle); padding-top: 14px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-fare-matrix')">Cancel</button>
+          <button type="submit" id="btn-save-fare-matrix" class="btn btn-primary" style="font-weight: 700; display: inline-flex; align-items: center; gap: 6px;">
+            <span>💾 Save Fare Matrix</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Scripts -->
-  <script src="js/api.js?v=20261109_03"></script>
-  <script src="js/dashboard.js?v=20261109_03"></script>
-  <script src="js/orientation-lock.js?v=20261109_03"></script>
+  <script src="js/api.js?v=20261109_04"></script>
+  <script src="js/dashboard.js?v=20261109_04"></script>
+  <script src="js/orientation-lock.js?v=20261109_04"></script>
 </body>
 </html>

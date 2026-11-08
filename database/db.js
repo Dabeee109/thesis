@@ -272,6 +272,20 @@ function initSqliteFallback() {
         is_manual_override INTEGER DEFAULT 0,
         override_at DATETIME DEFAULT NULL,
         override_by TEXT DEFAULT NULL,
+        fare_base REAL DEFAULT 49.00,
+        fare_per_05km REAL DEFAULT 12.00,
+        fare_fuel_cost REAL DEFAULT 2.83,
+        fare_maintenance REAL DEFAULT 7.50,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS delivery_fare_config (
+        id INTEGER PRIMARY KEY,
+        fare_base REAL DEFAULT 49.00,
+        fare_per_05km REAL DEFAULT 12.00,
+        fare_fuel_cost REAL DEFAULT 2.83,
+        fare_maintenance REAL DEFAULT 7.50,
+        updated_by TEXT DEFAULT 'Admin',
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -373,6 +387,31 @@ function initSqliteFallback() {
     try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN is_manual_override INTEGER DEFAULT 0;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN override_at DATETIME DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN override_by TEXT DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN fare_base REAL DEFAULT 49.00;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN fare_per_05km REAL DEFAULT 12.00;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN fare_fuel_cost REAL DEFAULT 2.83;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN fare_maintenance REAL DEFAULT 7.50;`); } catch (e) { }
+
+    try {
+      sqliteDb.exec(`
+        UPDATE system_settings
+        SET fare_base = COALESCE(fare_base, 49.00),
+            fare_per_05km = COALESCE(fare_per_05km, 12.00),
+            fare_fuel_cost = COALESCE(fare_fuel_cost, 2.83),
+            fare_maintenance = COALESCE(fare_maintenance, 7.50)
+        WHERE id = 1;
+      `);
+    } catch (e) { }
+
+    try {
+      const fareCount = sqliteDb.prepare(`SELECT COUNT(*) as count FROM delivery_fare_config`).get();
+      if (fareCount && fareCount.count === 0) {
+        sqliteDb.prepare(`
+          INSERT INTO delivery_fare_config (id, fare_base, fare_per_05km, fare_fuel_cost, fare_maintenance, updated_by)
+          VALUES (1, 49.00, 12.00, 2.83, 7.50, 'Admin')
+        `).run();
+      }
+    } catch (e) { }
 
     // Seed admin_gcash_transactions if empty
     try {
@@ -625,7 +664,11 @@ async function initDatabase() {
         { table: 'deliveries', column: 'customer_lng', type: 'DECIMAL(10, 7) NULL' },
         { table: 'system_settings', column: 'is_manual_override', type: 'TINYINT(1) DEFAULT 0' },
         { table: 'system_settings', column: 'override_at', type: 'DATETIME NULL' },
-        { table: 'system_settings', column: 'override_by', type: 'VARCHAR(100) NULL' }
+        { table: 'system_settings', column: 'override_by', type: 'VARCHAR(100) NULL' },
+        { table: 'system_settings', column: 'fare_base', type: 'DECIMAL(10,2) DEFAULT 49.00' },
+        { table: 'system_settings', column: 'fare_per_05km', type: 'DECIMAL(10,2) DEFAULT 12.00' },
+        { table: 'system_settings', column: 'fare_fuel_cost', type: 'DECIMAL(10,2) DEFAULT 2.83' },
+        { table: 'system_settings', column: 'fare_maintenance', type: 'DECIMAL(10,2) DEFAULT 7.50' }
       ];
       for (const c of cols) {
         const [rows] = await conn.query(
@@ -677,6 +720,24 @@ async function initDatabase() {
           INDEX idx_order_audit_order_id (order_id),
           INDEX idx_order_audit_action (action)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+
+      await conn.query(`
+        CREATE TABLE IF NOT EXISTS delivery_fare_config (
+          id INT PRIMARY KEY,
+          fare_base DECIMAL(10,2) DEFAULT 49.00,
+          fare_per_05km DECIMAL(10,2) DEFAULT 12.00,
+          fare_fuel_cost DECIMAL(10,2) DEFAULT 2.83,
+          fare_maintenance DECIMAL(10,2) DEFAULT 7.50,
+          updated_by VARCHAR(100) DEFAULT 'Admin',
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+
+      await conn.query(`
+        INSERT INTO delivery_fare_config (id, fare_base, fare_per_05km, fare_fuel_cost, fare_maintenance, updated_by)
+        VALUES (1, 49.00, 12.00, 2.83, 7.50, 'Admin')
+        ON DUPLICATE KEY UPDATE id=id;
       `);
     } catch (migErr) {
       console.warn('[Database] MySQL migration check warning:', migErr.message);

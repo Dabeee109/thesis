@@ -29,6 +29,13 @@ const MAX_DELIVERY_DISTANCE_KM = 3.0;
 const MOTORCYCLE_KM_PER_LITER = 45.0;
 const FUEL_PRICE_PER_LITER = 85.0;
 
+let systemSettingsService = null;
+try {
+  systemSettingsService = require('./systemSettingsService');
+} catch (e) {
+  systemSettingsService = null;
+}
+
 /**
  * Checks whether a given Date or time string falls in extreme heat window (11:00 AM - 3:00 PM).
  * @param {Date|string|null} time 
@@ -70,7 +77,7 @@ function isExtremeHeatWindow(time) {
  * @param {Date|string|null} currentTime - Optional timestamp to evaluate extreme heat window
  * @returns {Object} Complete fare computation details
  */
-function calculateDeliveryFare(distanceKm, vehicleType = 'motorcycle', weatherCondition = 'sunny', currentTime = null, maxRadius = null) {
+function calculateDeliveryFare(distanceKm, vehicleType = 'motorcycle', weatherCondition = 'sunny', currentTime = null, maxRadius = null, customRates = null) {
   const dist = parseFloat(distanceKm);
   if (isNaN(dist) || dist < 0) {
     throw new Error('Invalid distance: Distance must be a positive number.');
@@ -87,6 +94,24 @@ function calculateDeliveryFare(distanceKm, vehicleType = 'motorcycle', weatherCo
     throw new Error("Invalid vehicle type: Must be 'motorcycle' or 'bicycle'.");
   }
 
+  // Resolve dynamic fare matrix variables (Requirement 1 & 2)
+  const cachedSettings = systemSettingsService?.getCachedSystemSettings?.() || {};
+  const activeBaseFare = Number.isFinite(parseFloat(customRates?.fare_base))
+    ? parseFloat(customRates.fare_base)
+    : (Number.isFinite(parseFloat(cachedSettings.fare_base)) ? parseFloat(cachedSettings.fare_base) : 49.00);
+
+  const activePer05km = Number.isFinite(parseFloat(customRates?.fare_per_05km))
+    ? parseFloat(customRates.fare_per_05km)
+    : (Number.isFinite(parseFloat(cachedSettings.fare_per_05km)) ? parseFloat(cachedSettings.fare_per_05km) : 12.00);
+
+  const activeFuelCost = Number.isFinite(parseFloat(customRates?.fare_fuel_cost))
+    ? parseFloat(customRates.fare_fuel_cost)
+    : (Number.isFinite(parseFloat(cachedSettings.fare_fuel_cost)) ? parseFloat(cachedSettings.fare_fuel_cost) : 2.83);
+
+  const activeMaintenance = Number.isFinite(parseFloat(customRates?.fare_maintenance))
+    ? parseFloat(customRates.fare_maintenance)
+    : (Number.isFinite(parseFloat(cachedSettings.fare_maintenance)) ? parseFloat(cachedSettings.fare_maintenance) : 7.50);
+
   let baseFare = 0;
   let distanceCharge = 0;
   let fuelCost = 0;
@@ -97,16 +122,16 @@ function calculateDeliveryFare(distanceKm, vehicleType = 'motorcycle', weatherCo
   const additionalHalfKmSteps = excessDistance > 0 ? Math.ceil(excessDistance / 0.5) : 0;
 
   if (vType === 'motorcycle') {
-    baseFare = 49.00;
-    distanceCharge = additionalHalfKmSteps * 12.00;
-    fuelCost = (dist / MOTORCYCLE_KM_PER_LITER) * FUEL_PRICE_PER_LITER;
-    maintenanceCost = 5.00 * dist;
+    baseFare = activeBaseFare;
+    distanceCharge = additionalHalfKmSteps * activePer05km;
+    fuelCost = dist > 0 ? parseFloat(((dist / 1.5) * activeFuelCost).toFixed(2)) : 0.00;
+    maintenanceCost = dist > 0 ? parseFloat(((dist / 1.5) * activeMaintenance).toFixed(2)) : 0.00;
   } else {
     // Bicycle
-    baseFare = 35.00;
-    distanceCharge = additionalHalfKmSteps * 10.00;
+    baseFare = Math.max(0, activeBaseFare - 14.00);
+    distanceCharge = additionalHalfKmSteps * Math.max(0, activePer05km - 2.00);
     fuelCost = 0.00;
-    maintenanceCost = 3.00 * dist;
+    maintenanceCost = dist > 0 ? parseFloat(((dist / 1.5) * (activeMaintenance * 0.4)).toFixed(2)) : 0.00;
   }
 
   const subtotal = baseFare + distanceCharge + fuelCost + maintenanceCost;

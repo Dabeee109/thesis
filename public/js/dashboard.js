@@ -243,7 +243,11 @@ function switchTab(tabId) {
   if (tabId === 'menu') loadMenu();
   if (tabId === 'promotions') loadPromotions();
   if (tabId === 'inventory') switchTab('promotions');
-  if (tabId === 'delivery') loadDeliveries();
+  if (tabId === 'delivery') {
+    loadDeliveries();
+    loadFareSettings();
+    testFareCalculation();
+  }
   if (tabId === 'feedback') loadFeedback();
   if (tabId === 'reports') loadReports();
   if (tabId === 'chatbot') loadChatbotLogs();
@@ -2040,22 +2044,156 @@ function renderDeliveriesTable(deliveries) {
   });
 }
 
+let currentFareSettings = {
+  fare_base: 49.00,
+  fare_per_05km: 12.00,
+  fare_fuel_cost: 2.83,
+  fare_maintenance: 7.50
+};
+
+/**
+ * Loads current active delivery fare matrix settings
+ */
+async function loadFareSettings() {
+  try {
+    const res = await API.get('/admin/fare-settings');
+    if (res && res.fare_settings) {
+      currentFareSettings = res.fare_settings;
+    }
+  } catch (err) {
+    console.warn('[Dashboard] Could not load fare settings:', err.message);
+  }
+}
+
+/**
+ * Opens the Edit Delivery Fare Matrix modal pre-filled with current values (Requirement 3)
+ */
+async function openFareMatrixModal() {
+  const modal = document.getElementById('modal-fare-matrix');
+  if (!modal) return;
+
+  const baseInput = document.getElementById('fare-input-base');
+  const per05Input = document.getElementById('fare-input-per-05km');
+  const fuelInput = document.getElementById('fare-input-fuel-cost');
+  const maintInput = document.getElementById('fare-input-maintenance');
+
+  // Pre-fill immediately with cached settings
+  if (baseInput) baseInput.value = parseFloat(currentFareSettings.fare_base ?? 49.00).toFixed(2);
+  if (per05Input) per05Input.value = parseFloat(currentFareSettings.fare_per_05km ?? 12.00).toFixed(2);
+  if (fuelInput) fuelInput.value = parseFloat(currentFareSettings.fare_fuel_cost ?? 2.83).toFixed(2);
+  if (maintInput) maintInput.value = parseFloat(currentFareSettings.fare_maintenance ?? 7.50).toFixed(2);
+
+  // Fetch freshest from server
+  try {
+    const res = await API.get('/admin/fare-settings');
+    if (res && res.fare_settings) {
+      currentFareSettings = res.fare_settings;
+      if (baseInput) baseInput.value = parseFloat(currentFareSettings.fare_base ?? 49.00).toFixed(2);
+      if (per05Input) per05Input.value = parseFloat(currentFareSettings.fare_per_05km ?? 12.00).toFixed(2);
+      if (fuelInput) fuelInput.value = parseFloat(currentFareSettings.fare_fuel_cost ?? 2.83).toFixed(2);
+      if (maintInput) maintInput.value = parseFloat(currentFareSettings.fare_maintenance ?? 7.50).toFixed(2);
+    }
+  } catch (e) {
+    // Keep cached
+  }
+
+  const submitBtn = document.getElementById('btn-save-fare-matrix');
+  if (submitBtn) {
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = '<span>💾 Save Fare Matrix</span>';
+  }
+
+  openModal('modal-fare-matrix');
+}
+
+/**
+ * Handles saving the Delivery Fare Matrix (Requirement 3)
+ */
+async function handleSaveFareMatrix(event) {
+  if (event) event.preventDefault();
+
+  const fare_base = parseFloat(document.getElementById('fare-input-base').value);
+  const fare_per_05km = parseFloat(document.getElementById('fare-input-per-05km').value);
+  const fare_fuel_cost = parseFloat(document.getElementById('fare-input-fuel-cost').value);
+  const fare_maintenance = parseFloat(document.getElementById('fare-input-maintenance').value);
+
+  if (isNaN(fare_base) || isNaN(fare_per_05km) || isNaN(fare_fuel_cost) || isNaN(fare_maintenance)) {
+    API.toast('Please enter valid numeric rates for all fare variables.', 'warning');
+    return;
+  }
+
+  if (fare_base < 0 || fare_per_05km < 0 || fare_fuel_cost < 0 || fare_maintenance < 0) {
+    API.toast('Fare variables cannot be negative numbers.', 'warning');
+    return;
+  }
+
+  const submitBtn = document.getElementById('btn-save-fare-matrix');
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span>⏳ Saving Rates...</span>';
+  }
+
+  try {
+    const res = await API.put('/admin/fare-settings', {
+      fare_base,
+      fare_per_05km,
+      fare_fuel_cost,
+      fare_maintenance
+    });
+
+    if (res && res.success) {
+      if (res.fare_settings) {
+        currentFareSettings = res.fare_settings;
+      }
+      API.toast('✅ Delivery Fare Matrix updated successfully!', 'success');
+      closeModal('modal-fare-matrix');
+
+      // Trigger instant recalculation test preview (Requirement 3)
+      await testFareCalculation();
+    } else {
+      API.toast(res.message || 'Failed to update fare matrix.', 'error');
+    }
+  } catch (err) {
+    API.toast(err.message || 'Error updating fare matrix.', 'error');
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '<span>💾 Save Fare Matrix</span>';
+    }
+  }
+}
+
 async function testFareCalculation() {
-  const distanceKm = document.getElementById('fare-dist-input').value;
-  const vehicleType = document.getElementById('fare-vehicle-input').value;
-  const weatherCondition = document.getElementById('fare-weather-input').value;
+  const distEl = document.getElementById('fare-dist-input');
+  const vehicleEl = document.getElementById('fare-vehicle-input');
+  const weatherEl = document.getElementById('fare-weather-input');
+
+  const distanceKm = distEl ? distEl.value : 1.5;
+  const vehicleType = vehicleEl ? vehicleEl.value : 'motorcycle';
+  const weatherCondition = weatherEl ? weatherEl.value : 'sunny';
 
   try {
     const res = await API.post('/deliveries/compute-fare', { distanceKm, vehicleType, weatherCondition });
     if (res && res.fare) {
       const f = res.fare;
-      document.getElementById('out-base-fare').innerText = `₱${f.baseFare.toFixed(2)}`;
-      document.getElementById('out-dist-charge').innerText = `₱${f.distanceCharge.toFixed(2)} (${f.additionalHalfKmSteps} steps)`;
-      document.getElementById('out-fuel-cost').innerText = `₱${f.fuelCost.toFixed(2)}`;
-      document.getElementById('out-maint-cost').innerText = `₱${f.maintenanceCost.toFixed(2)}`;
-      document.getElementById('out-subtotal').innerText = `₱${f.subtotal.toFixed(2)}`;
-      document.getElementById('out-surcharge').innerText = `${Math.round(f.surchargeRate * 100)}% (+₱${f.surchargeAmount.toFixed(2)})`;
-      document.getElementById('out-final-fare').innerText = `₱${f.finalFare.toFixed(2)}`;
+      if (res.fareSettings) {
+        currentFareSettings = res.fareSettings;
+      }
+      const baseEl = document.getElementById('out-base-fare');
+      const distEl = document.getElementById('out-dist-charge');
+      const fuelEl = document.getElementById('out-fuel-cost');
+      const maintEl = document.getElementById('out-maint-cost');
+      const subEl = document.getElementById('out-subtotal');
+      const surEl = document.getElementById('out-surcharge');
+      const finEl = document.getElementById('out-final-fare');
+
+      if (baseEl) baseEl.innerText = `₱${f.baseFare.toFixed(2)}`;
+      if (distEl) distEl.innerText = `₱${f.distanceCharge.toFixed(2)} (${f.additionalHalfKmSteps} steps)`;
+      if (fuelEl) fuelEl.innerText = `₱${f.fuelCost.toFixed(2)}`;
+      if (maintEl) maintEl.innerText = `₱${f.maintenanceCost.toFixed(2)}`;
+      if (subEl) subEl.innerText = `₱${f.subtotal.toFixed(2)}`;
+      if (surEl) surEl.innerText = `${Math.round(f.surchargeRate * 100)}% (+₱${f.surchargeAmount.toFixed(2)})`;
+      if (finEl) finEl.innerText = `₱${f.finalFare.toFixed(2)}`;
     }
   } catch (err) {
     console.error('Compute fare error:', err);
@@ -2101,6 +2239,11 @@ async function handleAssignRiderSubmit(e) {
     console.error('Assign rider error:', err);
   }
 }
+
+window.openFareMatrixModal = openFareMatrixModal;
+window.handleSaveFareMatrix = handleSaveFareMatrix;
+window.testFareCalculation = testFareCalculation;
+window.loadFareSettings = loadFareSettings;
 
 // ----------------------------------------------------------------------------
 // 6. Feedback & Ratings (FR11)
