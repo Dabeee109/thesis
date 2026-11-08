@@ -1385,43 +1385,55 @@ function openEditMenuItemModal(itemId) {
 }
 
 async function handleMenuItemSubmit(e) {
-  if (e && e.preventDefault) {
-    e.preventDefault();
+  if (e) {
+    if (e.preventDefault) e.preventDefault();
+    if (e.stopPropagation) e.stopPropagation();
   }
 
-  const id = document.getElementById('menu-item-id').value;
-  let categoryId = document.getElementById('menu-cat-select').value;
-  const name = (document.getElementById('menu-name-input').value || '').trim();
-  const description = (document.getElementById('menu-desc-input').value || '').trim();
-  const priceInput = document.getElementById('menu-price-input').value;
+  const idEl = document.getElementById('menu-item-id');
+  const id = idEl ? idEl.value.trim() : '';
+  const catSelect = document.getElementById('menu-cat-select');
+  let categoryId = catSelect ? catSelect.value : '';
+  const nameInput = document.getElementById('menu-name-input');
+  const name = nameInput ? nameInput.value.trim() : '';
+  const descInput = document.getElementById('menu-desc-input');
+  const description = descInput ? descInput.value.trim() : '';
+  const priceEl = document.getElementById('menu-price-input');
+  const priceInput = priceEl ? priceEl.value : '';
   const price = parseFloat(priceInput);
-  const prepTimeMin = parseInt(document.getElementById('menu-prep-input').value, 10) || 10;
-  let imageUrl = (document.getElementById('menu-img-input').value || '').trim();
+  const prepEl = document.getElementById('menu-prep-input');
+  const prepTimeMin = parseInt(prepEl ? prepEl.value : 10, 10) || 10;
+  const urlEl = document.getElementById('menu-img-input');
+  let imageUrl = (urlEl && urlEl.value ? urlEl.value.trim() : '');
 
   // Validate required fields
   if (!name) {
     API.toast('Please enter the item name.', 'warning');
-    const nameInput = document.getElementById('menu-name-input');
     if (nameInput) nameInput.focus();
-    return;
+    return false;
   }
 
   if (isNaN(price) || price < 0) {
     API.toast('Please enter a valid price.', 'warning');
-    const priceEl = document.getElementById('menu-price-input');
     if (priceEl) priceEl.focus();
-    return;
+    return false;
   }
 
+  // Ensure categoryId is valid
+  if (!categoryId && catSelect && catSelect.options && catSelect.options.length > 0) {
+    categoryId = catSelect.options[0].value;
+  }
   if (!categoryId && allMenuCategories.length > 0) {
     categoryId = allMenuCategories[0].id;
   }
 
   // Stock and Availability values
-  const stockQuantity = parseInt(document.getElementById('menu-stock-input').value, 10) || 0;
+  const stockEl = document.getElementById('menu-stock-input');
+  const stockQuantity = parseInt(stockEl ? stockEl.value : 0, 10) || 0;
   const availSelect = document.getElementById('menu-availability-input');
   const isAvailable = (availSelect && availSelect.value === '1' && stockQuantity > 0) ? 1 : 0;
-  const unit = (document.getElementById('menu-unit-input') && document.getElementById('menu-unit-input').value) || 'servings';
+  const unitEl = document.getElementById('menu-unit-input');
+  const unit = (unitEl && unitEl.value) || 'servings';
 
   const saveBtn = document.getElementById('menu-save-btn');
   const origBtnText = saveBtn ? saveBtn.innerText : 'Save Item';
@@ -1439,6 +1451,7 @@ async function handleMenuItemSubmit(e) {
       });
       if (uploadRes && uploadRes.imageUrl) {
         imageUrl = uploadRes.imageUrl;
+        if (urlEl) urlEl.value = imageUrl;
       }
     } else if (stagedMenuImageChanged && !imageUrl) {
       // User explicitly cleared the picture
@@ -1472,8 +1485,9 @@ async function handleMenuItemSubmit(e) {
       });
       API.toast('Menu item created successfully!', 'success');
     }
+
     closeModal('modal-menu-item');
-    loadMenu();
+    await loadMenu();
   } catch (err) {
     console.error('Menu submit error:', err);
     API.toast(err.message || 'Failed to save menu item. Please try again.', 'danger');
@@ -1483,7 +1497,18 @@ async function handleMenuItemSubmit(e) {
       saveBtn.innerText = origBtnText;
     }
   }
+
+  return false;
 }
+
+// Attach menu modal handlers to window scope for inline HTML event attributes
+window.handleMenuItemSubmit = handleMenuItemSubmit;
+window.openAddMenuItemModal = openAddMenuItemModal;
+window.openEditMenuItemModal = openEditMenuItemModal;
+window.deleteMenuItem = deleteMenuItem;
+window.toggleMenuItemAvailability = toggleMenuItemAvailability;
+window.quickAdjustStock = quickAdjustStock;
+window.filterMenuCategory = filterMenuCategory;
 
 // ----------------------------------------------------------------------------
 // 4. Promotions & Events Management (Replaces Inventory & Stock Module)
@@ -2508,6 +2533,10 @@ function closeModal(id) {
   const el = document.getElementById(id);
   if (el) el.classList.remove('active');
 }
+
+window.openModal = openModal;
+window.closeModal = closeModal;
+window.openNewOrderModal = openNewOrderModal;
 
 function openNewOrderModal() {
   API.toast('Open the Messenger Simulator to experience placing full conversational orders!', 'info');

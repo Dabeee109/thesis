@@ -108,7 +108,15 @@ async function createMenuItem(req, res) {
       unit = 'servings'
     } = req.body;
 
-    const catId = categoryId || category_id;
+    let catId = (categoryId !== undefined && categoryId !== null && categoryId !== '') 
+      ? categoryId 
+      : ((category_id !== undefined && category_id !== null && category_id !== '') ? category_id : null);
+
+    if (!catId) {
+      const [firstCat] = await db.query('SELECT id FROM categories WHERE is_active = 1 ORDER BY display_order ASC LIMIT 1');
+      if (firstCat && firstCat.length > 0) catId = firstCat[0].id;
+    }
+
     if (!catId || !name || price === undefined) {
       return res.status(400).json({ success: false, message: 'Category, item name, and price are required.' });
     }
@@ -200,7 +208,12 @@ async function updateMenuItem(req, res) {
     }
     const current = existing[0];
 
-    const finalCatId = categoryId !== undefined ? categoryId : (category_id !== undefined ? category_id : current.category_id);
+    let finalCatId = (categoryId !== undefined && categoryId !== null && categoryId !== '') 
+      ? categoryId 
+      : ((category_id !== undefined && category_id !== null && category_id !== '') ? category_id : current.category_id);
+    if (!finalCatId) {
+      finalCatId = current.category_id;
+    }
     const finalName = name !== undefined ? name.trim() : current.name;
     const finalDesc = description !== undefined ? description : current.description;
     const finalPrice = price !== undefined ? parseFloat(price) : current.price;
