@@ -317,7 +317,7 @@ function resolveMessengerImageUrl(rawUrl, meta = {}, options = {}) {
   }
 
   // If relative path (e.g. /uploads/...)
-  const baseAppUrl = (config.appUrl || '').trim().replace(/\/+$/, '');
+  const baseAppUrl = (config.appUrl || process.env.RENDER_EXTERNAL_URL || (process.env.RENDER_EXTERNAL_HOSTNAME ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` : '') || '').trim().replace(/\/+$/, '');
   if (baseAppUrl) {
     let absolute = url.startsWith('/') ? `${baseAppUrl}${url}` : `${baseAppUrl}/${url}`;
     // If appUrl is ngrok-free or localhost, Facebook Messenger client cannot fetch it without receiving HTML warning

@@ -1,10 +1,24 @@
 require('dotenv').config();
 
+let resolvedAppUrl = process.env.APP_URL || '';
+if (process.env.RENDER_EXTERNAL_URL) {
+  if (!resolvedAppUrl || resolvedAppUrl.includes('ngrok') || resolvedAppUrl.includes('localhost') || resolvedAppUrl.includes('127.0.0.1')) {
+    resolvedAppUrl = process.env.RENDER_EXTERNAL_URL;
+  }
+} else if (process.env.RENDER_EXTERNAL_HOSTNAME) {
+  if (!resolvedAppUrl || resolvedAppUrl.includes('ngrok') || resolvedAppUrl.includes('localhost') || resolvedAppUrl.includes('127.0.0.1')) {
+    resolvedAppUrl = `https://${process.env.RENDER_EXTERNAL_HOSTNAME}`;
+  }
+}
+if (!resolvedAppUrl) {
+  resolvedAppUrl = 'http://localhost:3000';
+}
+
 module.exports = {
   port: parseInt(process.env.PORT, 10) || 3000,
   nodeEnv: process.env.NODE_ENV || 'development',
   appName: process.env.APP_NAME || "Diner's Cafe Ordering & Delivery System",
-  appUrl: process.env.APP_URL || 'http://localhost:3000',
+  appUrl: resolvedAppUrl.trim().replace(/\/+$/, ''),
 
   db: {
     host: process.env.DB_HOST || '127.0.0.1',

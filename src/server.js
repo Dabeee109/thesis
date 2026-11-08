@@ -17,6 +17,22 @@ const apiRoutes = require('./routes/api');
 
 const app = express();
 
+// Trust reverse proxy (Render, Cloudflare, Heroku, etc.)
+app.set('trust proxy', 1);
+
+// Auto-detect public URL on Render or cloud host from incoming requests
+app.use((req, res, next) => {
+  const host = req.get('x-forwarded-host') || req.get('host');
+  const proto = req.get('x-forwarded-proto') || req.protocol || 'https';
+  if (host && !host.includes('localhost') && !host.includes('127.0.0.1')) {
+    const detectedUrl = `${proto}://${host}`.replace(/\/+$/, '');
+    if (!config.appUrl || config.appUrl.includes('localhost') || config.appUrl.includes('127.0.0.1')) {
+      config.appUrl = detectedUrl;
+    }
+  }
+  next();
+});
+
 // Ngrok warning bypass middleware
 app.use((req, res, next) => {
   res.setHeader('ngrok-skip-browser-warning', 'true');
@@ -70,8 +86,25 @@ app.get(['/rider-portal.html', '/rider-portal'], (req, res) => {
   res.sendFile(path.join(__dirname, '../public/rider.html'));
 });
 
-// Serve static frontend assets
-app.use(express.static(path.join(__dirname, '../public')));
+// Serve static frontend assets with CORS and cache headers for Facebook crawler
+app.use(express.static(path.join(__dirname, '../public'), {
+  setHeaders: (res, filePath) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    if (/\.(jpg|jpeg|png|webp|gif|svg)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+    }
+  }
+}));
+
+// Fallback recovery for /uploads/:filename if missing on ephemeral Render disk
+app.get('/uploads/:filename', (req, res) => {
+  const filePath = path.join(__dirname, '../public/uploads', req.params.filename);
+  if (fs.existsSync(filePath)) {
+    return res.sendFile(filePath);
+  }
+  // Graceful fallback: Redirect to reliable cafe beverage image to prevent broken icons on Facebook
+  return res.redirect('https://images.unsplash.com/photo-1541167760496-1628856ab772?w=600&auto=format&fit=crop&q=80');
+});
 
 // Server-Sent Events (SSE) Live Broadcast Stream Endpoint
 app.get('/api/events', (req, res) => {

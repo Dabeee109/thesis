@@ -32,7 +32,7 @@ async function checkBotStatus() {
     if (res && res.success) {
       updateBotStatusIndicator(res.isEnabled);
     }
-  } catch (e) {}
+  } catch (e) { }
 }
 
 function updateBotStatusIndicator(isEnabled) {
@@ -122,7 +122,7 @@ function renderBotPayload(message) {
     if (payload.template_type === 'generic' && payload.elements) {
       const carouselWrap = document.createElement('div');
       carouselWrap.className = 'chat-msg bot';
-      
+
       const carouselContainer = document.createElement('div');
       carouselContainer.className = 'carousel-container';
 
@@ -138,11 +138,11 @@ function renderBotPayload(message) {
             <div class="carousel-subtitle">${el.subtitle || ''}</div>
           </div>
           ${(el.buttons || []).map(btn => {
-            if (btn.type === 'web_url') {
-              return `<a href="${escapeHtml(btn.url)}" target="_blank" class="carousel-btn" style="text-align:center; text-decoration:none; display:block;">${escapeHtml(btn.title)}</a>`;
-            }
-            return `<button class="carousel-btn" onclick="sendSimulatedPayload('${btn.payload}')">${escapeHtml(btn.title)}</button>`;
-          }).join('')}
+          if (btn.type === 'web_url') {
+            return `<a href="${escapeHtml(btn.url)}" target="_blank" class="carousel-btn" style="text-align:center; text-decoration:none; display:block;">${escapeHtml(btn.title)}</a>`;
+          }
+          return `<button class="carousel-btn" onclick="sendSimulatedPayload('${btn.payload}')">${escapeHtml(btn.title)}</button>`;
+        }).join('')}
         `;
         carouselContainer.appendChild(card);
       });
