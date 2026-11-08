@@ -321,14 +321,50 @@ body.sidebar-collapsed .main-wrapper {
 }
 
 /* Kanban Order Board */
-.kanban-board {
+.kanban-board,
+.kanban-container,
+.kanban-board-wrapper {
   display: grid;
-  grid-template-columns: repeat(5, minmax(210px, 1fr));
+  grid-template-columns: repeat(5, minmax(300px, 1fr));
   gap: 16px;
   margin-top: 20px;
   min-height: 600px;
+  width: 100%;
+  max-width: 100%;
   overflow-x: auto;
-  padding-bottom: 14px;
+  overflow-y: hidden;
+  padding-bottom: 16px;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-subtle, rgba(212, 163, 115, 0.35)) transparent;
+}
+
+.kanban-board::-webkit-scrollbar,
+.kanban-container::-webkit-scrollbar,
+.kanban-board-wrapper::-webkit-scrollbar {
+  height: 8px;
+}
+
+.kanban-board::-webkit-scrollbar-track,
+.kanban-container::-webkit-scrollbar-track,
+.kanban-board-wrapper::-webkit-scrollbar-track {
+  background: rgba(25, 18, 12, 0.4);
+  border-radius: 4px;
+}
+
+.kanban-board::-webkit-scrollbar-thumb,
+.kanban-container::-webkit-scrollbar-thumb,
+.kanban-board-wrapper::-webkit-scrollbar-thumb {
+  background: var(--border-subtle, rgba(212, 163, 115, 0.35));
+  border-radius: 4px;
+}
+
+.kanban-board::-webkit-scrollbar-thumb:hover,
+.kanban-container::-webkit-scrollbar-thumb:hover,
+.kanban-board-wrapper::-webkit-scrollbar-thumb:hover {
+  background: var(--brand-primary, #d4a373);
 }
 
 .kanban-column {
@@ -338,6 +374,8 @@ body.sidebar-collapsed .main-wrapper {
   display: flex;
   flex-direction: column;
   max-height: 80vh;
+  min-width: 300px;
+  box-sizing: border-box;
 }
 
 .kanban-header {
@@ -347,6 +385,7 @@ body.sidebar-collapsed .main-wrapper {
   align-items: center;
   justify-content: space-between;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .kanban-cards {
@@ -356,6 +395,7 @@ body.sidebar-collapsed .main-wrapper {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  -webkit-overflow-scrolling: touch;
 }
 
 .order-card {
@@ -603,9 +643,6 @@ body.sidebar-collapsed .main-wrapper {
 
 /* Responsive adjustments */
 @media (max-width: 1100px) {
-  .kanban-board {
-    grid-template-columns: repeat(2, 1fr);
-  }
   .delivery-dispatcher-grid {
     grid-template-columns: 1fr;
   }
@@ -672,9 +709,6 @@ body.sidebar-collapsed .main-wrapper {
   .topbar-actions .btn {
     padding: 6px 12px;
     font-size: 0.8rem;
-  }
-  .kanban-board {
-    grid-template-columns: 1fr;
   }
   .content-body {
     padding: 16px;
