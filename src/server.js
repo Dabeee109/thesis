@@ -213,7 +213,7 @@ async function startServer() {
     console.log(`🌐 Application URL: ${config.appUrl || 'http://localhost:' + port}`);
     console.log(`📋 Admin Dashboard: /dashboard.html`);
     console.log(`🛵 Delivery Rider View: /rider.html`);
-    console.log(`💬 Messenger Simulator: /simulator.html`);
+    console.log(`📍 Delivery Zone Checker: /delivery-check.html`);
     console.log(`🔗 Webhook Endpoint: /webhook`);
     console.log(`================================================================`);
   });
