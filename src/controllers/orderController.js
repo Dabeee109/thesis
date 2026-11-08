@@ -16,7 +16,7 @@ async function getOrders(req, res) {
     return res.json({ success: true, count: orders.length, orders });
   } catch (err) {
     console.error('[Order List Error]', err);
-    return res.status(500).json({ success: false, message: 'Failed to retrieve orders.' });
+    return res.status(500).json({ success: false, message: `Failed to retrieve orders: ${err.message}`, error: err.message });
   }
 }
 

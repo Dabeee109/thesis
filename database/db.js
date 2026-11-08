@@ -16,6 +16,11 @@ function initSqliteFallback() {
     sqliteDb.pragma('journal_mode = WAL');
     sqliteDb.pragma('foreign_keys = ON');
 
+    // Register CONCAT function for cross-version SQLite compatibility
+    try {
+      sqliteDb.function('CONCAT', (...args) => args.filter(a => a !== null && a !== undefined).join(''));
+    } catch (fnErr) {}
+
     // Create tables in SQLite
     sqliteDb.exec(`
       CREATE TABLE IF NOT EXISTS customers (
@@ -112,6 +117,12 @@ function initSqliteFallback() {
         feedback_requested_at DATETIME DEFAULT NULL,
         gcash_ref TEXT DEFAULT NULL,
         receipt_url TEXT DEFAULT NULL,
+        void_status TEXT DEFAULT NULL,
+        void_requested_by TEXT DEFAULT NULL,
+        void_reason TEXT DEFAULT NULL,
+        void_requested_at DATETIME DEFAULT NULL,
+        customer_lat REAL DEFAULT NULL,
+        customer_lng REAL DEFAULT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
@@ -177,6 +188,8 @@ function initSqliteFallback() {
         estimated_time_min INTEGER NOT NULL DEFAULT 20,
         dispatched_at DATETIME,
         delivered_at DATETIME,
+        customer_lat REAL DEFAULT NULL,
+        customer_lng REAL DEFAULT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
@@ -530,6 +543,11 @@ async function initDatabase() {
         { table: 'orders', column: 'payment_status', type: "VARCHAR(50) DEFAULT 'Pending'" },
         { table: 'orders', column: 'customer_lat', type: 'DECIMAL(10, 7) NULL' },
         { table: 'orders', column: 'customer_lng', type: 'DECIMAL(10, 7) NULL' },
+        { table: 'orders', column: 'void_status', type: 'VARCHAR(50) NULL' },
+        { table: 'orders', column: 'void_requested_by', type: 'VARCHAR(100) NULL' },
+        { table: 'orders', column: 'void_reason', type: 'TEXT NULL' },
+        { table: 'orders', column: 'void_requested_at', type: 'DATETIME NULL' },
+        { table: 'payments', column: 'receipt_url', type: 'TEXT NULL' },
         { table: 'deliveries', column: 'customer_lat', type: 'DECIMAL(10, 7) NULL' },
         { table: 'deliveries', column: 'customer_lng', type: 'DECIMAL(10, 7) NULL' }
       ];

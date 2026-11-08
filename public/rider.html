@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -17,6 +18,7 @@
       display: flex;
       flex-direction: column;
     }
+
     .rider-header {
       background: var(--bg-surface);
       border: 1px solid var(--border-subtle);
@@ -28,11 +30,13 @@
       margin-bottom: 16px;
       box-shadow: var(--shadow-sm);
     }
+
     .rider-profile-bar {
       display: flex;
       align-items: center;
       gap: 12px;
     }
+
     .rider-badge {
       display: inline-flex;
       align-items: center;
@@ -44,6 +48,7 @@
       color: #2ecc71;
       font-weight: 600;
     }
+
     .trip-card {
       background: var(--bg-surface);
       border: 1px solid var(--border-subtle);
@@ -54,18 +59,22 @@
       box-shadow: var(--shadow-sm);
       transition: transform 0.15s ease, border-color 0.2s ease;
     }
+
     .trip-card.dispatched {
       border-left-color: #2ecc71;
       background: linear-gradient(180deg, rgba(46, 204, 113, 0.05) 0%, var(--bg-surface) 100%);
     }
+
     .trip-card.preparing {
       border-left-color: #f39c12;
       background: linear-gradient(180deg, rgba(243, 156, 18, 0.04) 0%, var(--bg-surface) 100%);
     }
+
     .trip-card.delivered {
       border-left-color: var(--status-success);
       opacity: 0.85;
     }
+
     .action-row {
       display: flex;
       flex-direction: column;
@@ -74,11 +83,13 @@
       padding-top: 12px;
       border-top: 1px dashed var(--border-subtle);
     }
+
     .action-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 10px;
     }
+
     .btn-nav-maps {
       display: flex;
       align-items: center;
@@ -95,10 +106,12 @@
       text-align: center;
       transition: all 0.2s ease;
     }
+
     .btn-nav-maps:hover {
       background: var(--brand-primary);
       color: #1a120b;
     }
+
     .btn-call {
       display: flex;
       align-items: center;
@@ -115,10 +128,12 @@
       text-align: center;
       transition: all 0.2s ease;
     }
+
     .btn-call:hover {
       border-color: var(--brand-primary);
       color: var(--brand-primary);
     }
+
     .btn-complete {
       width: 100%;
       padding: 11px;
@@ -130,6 +145,7 @@
       justify-content: center;
       gap: 8px;
     }
+
     .profile-card {
       background: var(--bg-surface);
       border: 1px solid var(--border-subtle);
@@ -137,6 +153,7 @@
       padding: 24px;
       margin-bottom: 20px;
     }
+
     .profile-row {
       display: flex;
       justify-content: space-between;
@@ -145,9 +162,11 @@
       border-bottom: 1px solid var(--border-subtle);
       font-size: 0.92rem;
     }
+
     .profile-row:last-child {
       border-bottom: none;
     }
+
     .audio-hint-pill {
       display: inline-flex;
       align-items: center;
@@ -162,12 +181,14 @@
       margin-bottom: 12px;
       user-select: none;
     }
+
     .audio-hint-pill:hover {
       color: var(--brand-primary);
       border-color: var(--brand-primary);
     }
   </style>
 </head>
+
 <body>
 
   <div class="rider-container">
@@ -180,12 +201,14 @@
             <h2 style="font-size: 1.1rem; margin: 0;" id="rider-name-display">Delivery Rider</h2>
             <span class="rider-badge" id="rider-status-pill">🟢 Online</span>
           </div>
-          <span style="font-size: 0.75rem; color: var(--brand-primary); font-weight: 600;" id="rider-vehicle-display">MOTORCYCLE (MC-7890-PH)</span>
+          <span style="font-size: 0.75rem; color: var(--brand-primary); font-weight: 600;"
+            id="rider-vehicle-display">MOTORCYCLE (MC-7890-PH)</span>
         </div>
       </div>
       <div>
         <!-- Logout strictly isolates rider from admin command interfaces -->
-        <button class="btn btn-secondary btn-sm" onclick="logoutRider()" style="color: #ff7b7b; border-color: rgba(239, 68, 68, 0.35);" title="Sign out of Rider Portal">
+        <button class="btn btn-secondary btn-sm" onclick="logoutRider()"
+          style="color: #ff7b7b; border-color: rgba(239, 68, 68, 0.35);" title="Sign out of Rider Portal">
           🚪 Logout
         </button>
       </div>
@@ -193,18 +216,22 @@
 
     <!-- Audio / Alert sound unlock badge for mobile browsers -->
     <div style="display: flex; justify-content: space-between; align-items: center;">
-      <div class="audio-hint-pill" id="audio-unlock-pill" onclick="unlockAudio()" title="Click to test & enable audio chimes">
+      <div class="audio-hint-pill" id="audio-unlock-pill" onclick="unlockAudio()"
+        title="Click to test & enable audio chimes">
         <span>🔔 Alerts Enabled (Audio: Ready)</span>
       </div>
       <span style="font-size: 0.75rem; color: var(--text-muted);" id="live-indicator">⚡ Live SSE Connected</span>
     </div>
 
     <!-- Navigation Tabs: Dedicated Rider Views Only -->
-    <nav style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+    <nav
+      style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
       <div style="display: flex; gap: 6px; flex-wrap: wrap;">
         <button id="tab-active" class="btn btn-primary btn-sm" onclick="setRiderView('active')">🛵 Active Queue</button>
-        <button id="tab-history" class="btn btn-secondary btn-sm" onclick="setRiderView('history')">📜 Delivered History</button>
-        <button id="tab-profile" class="btn btn-secondary btn-sm" onclick="setRiderView('profile')">👤 My Profile</button>
+        <button id="tab-history" class="btn btn-secondary btn-sm" onclick="setRiderView('history')">📜 Delivered
+          History</button>
+        <button id="tab-profile" class="btn btn-secondary btn-sm" onclick="setRiderView('profile')">👤 My
+          Profile</button>
       </div>
       <button class="btn btn-secondary btn-sm" onclick="loadRiderDeliveries()">🔄 Refresh</button>
     </nav>
@@ -308,7 +335,7 @@
             icon: '/favicon.ico',
             badge: '/favicon.ico'
           });
-        } catch (e) {}
+        } catch (e) { }
       }
     }
 
@@ -407,8 +434,8 @@
         const trips = res.orders || res.history || res.deliveries || [];
 
         if (trips.length === 0) {
-          const emptyMsg = currentRiderView === 'active' 
-            ? '🛵 No active orders in your dispatch queue right now.' 
+          const emptyMsg = currentRiderView === 'active'
+            ? '🛵 No active orders in your dispatch queue right now.'
             : '📜 No completed delivery history found.';
           container.innerHTML = `<div class="card" style="text-align: center; color: var(--text-muted); padding: 32px; font-size: 0.95rem;">${emptyMsg}</div>`;
           return;
@@ -570,4 +597,5 @@
     }
   </script>
 </body>
+
 </html>
