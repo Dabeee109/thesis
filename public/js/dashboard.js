@@ -316,6 +316,9 @@ function handleRealtimeEvent(eventType, data) {
     updateChatbotUI(data);
   }
   if (eventType === 'STORE_STATUS_CHANGED') {
+    if (data && data.trigger_type === 'AUTO_SCHEDULE_RESUME') {
+      API.toast(`⏰ Scheduled milestone reached. Manual override auto-reset: Store is now ${data.store_status}!`, 'info');
+    }
     loadStoreStatus();
   }
   if (eventType === 'OPERATING_HOURS_UPDATED') {
@@ -3153,14 +3156,15 @@ async function loadStoreStatus() {
     const res = await API.get('/settings/store-status');
     if (res && res.success) {
       currentStoreStatus = (res.store_status || 'OPEN').toUpperCase();
-      renderStoreStatusUI(currentStoreStatus, res.isOpen, res.operating_hours);
+      const hours = res.operating_hours || (res.schedule ? { open: res.schedule.store_open_time, close: res.schedule.store_close_time } : null);
+      renderStoreStatusUI(currentStoreStatus, res.isOpen, hours, res.is_manual_override, res.next_milestone);
     }
   } catch (err) {
     console.error('Failed to load store status:', err);
   }
 }
 
-function renderStoreStatusUI(status, isOpen, hours) {
+function renderStoreStatusUI(status, isOpen, hours, isOverride = false, nextMilestone = null) {
   const btn = document.getElementById('btn-store-status-toggle');
   const icon = document.getElementById('store-status-icon');
   const text = document.getElementById('store-status-text');
@@ -3168,6 +3172,8 @@ function renderStoreStatusUI(status, isOpen, hours) {
   const headline = document.getElementById('store-status-headline');
   const desc = document.getElementById('store-status-desc');
   const hoursEl = document.getElementById('overview-operating-hours');
+  const overrideBadge = document.getElementById('store-override-badge');
+  const overrideDetail = document.getElementById('store-override-detail');
 
   const isStoreOpen = (status === 'OPEN');
 
@@ -3207,6 +3213,24 @@ function renderStoreStatusUI(status, isOpen, hours) {
   if (hoursEl && hours) {
     hoursEl.innerText = `${formatTime12Hour(hours.open)} - ${formatTime12Hour(hours.close)} (PHT)`;
   }
+
+  // Requirement 3: Manual override badge indicator with auto-reset info
+  if (overrideBadge) {
+    if (isOverride) {
+      overrideBadge.style.display = 'block';
+      let resetInfo = 'next schedule milestone';
+      if (nextMilestone && nextMilestone.formatted) {
+        resetInfo = `${nextMilestone.formatted} (${nextMilestone.type === 'CLOSE' ? 'closing time' : 'opening time'})`;
+      } else if (hours) {
+        resetInfo = formatTime12Hour(isStoreOpen ? hours.close : hours.open);
+      }
+      if (overrideDetail) {
+        overrideDetail.innerText = `Will auto-reset on next schedule at ${resetInfo}`;
+      }
+    } else {
+      overrideBadge.style.display = 'none';
+    }
+  }
 }
 
 function formatTime12Hour(timeStr) {
@@ -3222,8 +3246,8 @@ function formatTime12Hour(timeStr) {
 async function toggleStoreOperationalStatus() {
   const newStatus = (currentStoreStatus === 'OPEN') ? 'CLOSED' : 'OPEN';
   const confirmMsg = newStatus === 'CLOSED'
-    ? 'Are you sure you want to mark the store as CLOSED? The Messenger bot will stop taking immediate live orders and notify customers that the store is closed.'
-    : 'Are you sure you want to OPEN the store? The Messenger bot will start accepting live customer orders.';
+    ? 'Are you sure you want to mark the store as CLOSED? Manual override will take effect immediately and will auto-reset when the next scheduled milestone is reached.'
+    : 'Are you sure you want to OPEN the store? Manual override will take effect immediately and will auto-reset when the next scheduled milestone is reached.';
   
   if (!confirm(confirmMsg)) {
     return;
@@ -3236,9 +3260,12 @@ async function toggleStoreOperationalStatus() {
     const res = await API.put('/settings/store-status', { store_status: newStatus });
     if (res && res.success) {
       currentStoreStatus = res.store_status;
-      renderStoreStatusUI(currentStoreStatus, res.isOpen, res.operating_hours);
+      const hours = res.operating_hours || (res.schedule ? { open: res.schedule.store_open_time, close: res.schedule.store_close_time } : null);
+      renderStoreStatusUI(currentStoreStatus, res.isOpen, hours, res.is_manual_override, res.next_milestone);
       API.toast(
-        currentStoreStatus === 'OPEN' ? '🟢 Store is now OPEN for live orders!' : '🔴 Store is now CLOSED (Pre-orders only).',
+        currentStoreStatus === 'OPEN' 
+          ? '🟢 Store manually set to OPEN (Will auto-reset on next schedule).' 
+          : '🔴 Store manually set to CLOSED (Will auto-reset on next schedule).',
         currentStoreStatus === 'OPEN' ? 'success' : 'warning'
       );
     } else {
@@ -3248,6 +3275,9 @@ async function toggleStoreOperationalStatus() {
     console.error('Error toggling store status:', err);
     API.toast(err.message || 'Failed to update store status.', 'error');
   } finally {
+    if (btn) btn.disabled = false;
+  }
+}
     if (btn) btn.disabled = false;
   }
 }

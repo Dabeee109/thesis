@@ -446,10 +446,22 @@ async function getStoreStatus(req, res) {
   try {
     const sys = await systemSettingsService.getSystemSettings();
     const schedule = systemSettingsService.isStoreOpen();
+    const nextMilestone = systemSettingsService.getNextScheduleMilestone();
+    const isOverride = (sys.is_manual_override === 1 || sys.is_manual_override === true);
+
     return res.json({
       success: true,
       store_status: sys.store_status || (schedule.isOpen ? 'OPEN' : 'CLOSED'),
       isOpen: schedule.isOpen,
+      is_manual_override: isOverride,
+      override_at: sys.override_at || null,
+      override_by: sys.override_by || null,
+      next_milestone: nextMilestone,
+      operating_hours: {
+        open: sys.store_open_time || '09:00:00',
+        close: sys.store_close_time || '21:00:00',
+        formatted: `${systemSettingsService.formatTime12h(sys.store_open_time || '09:00:00')} - ${systemSettingsService.formatTime12h(sys.store_close_time || '21:00:00')}`
+      },
       schedule
     });
   } catch (err) {
@@ -459,7 +471,7 @@ async function getStoreStatus(req, res) {
 }
 
 /**
- * Interactive Store Status Toggle
+ * Interactive Store Status Toggle (Manual Override Action)
  * (PUT /api/settings/store-status)
  */
 async function updateStoreStatus(req, res) {
@@ -477,26 +489,58 @@ async function updateStoreStatus(req, res) {
     }
 
     const user = req.user ? (req.user.name || req.user.email || 'Admin') : 'Admin';
+    const overrideAt = new Date().toISOString();
+    const prevSettings = systemSettingsService.getCachedSystemSettings();
 
+    // 1. Set manual override active and update store status
     const updated = await systemSettingsService.updateSystemSettings({
       store_status: targetStatus,
+      is_manual_override: 1,
+      override_at: overrideAt,
+      override_by: user,
       updated_by: user
     });
 
-    const schedule = systemSettingsService.isStoreOpen();
+    // 2. Record audit trail in database
+    await systemSettingsService.recordStoreStatusAudit({
+      previous_status: prevSettings.store_status,
+      new_status: targetStatus,
+      is_manual_override: 1,
+      trigger_type: 'MANUAL_OVERRIDE',
+      triggered_by: user,
+      details: `Manual override triggered by ${user}: Store status set to ${targetStatus}.`
+    });
 
+    const schedule = systemSettingsService.isStoreOpen();
+    const nextMilestone = systemSettingsService.getNextScheduleMilestone();
+
+    // 3. Broadcast real-time SSE event to all connected dashboards
     broadcastSSE('STORE_STATUS_CHANGED', {
       store_status: targetStatus,
       isOpen: schedule.isOpen,
+      is_manual_override: true,
+      override_at: overrideAt,
+      override_by: user,
+      next_milestone: nextMilestone,
+      trigger_type: 'MANUAL_OVERRIDE',
       schedule,
       updated_by: user
     });
 
     return res.json({
       success: true,
-      message: `Store status successfully updated to ${targetStatus}.`,
+      message: `Store status successfully updated to ${targetStatus} (Manual override active).`,
       store_status: targetStatus,
       isOpen: schedule.isOpen,
+      is_manual_override: true,
+      override_at: overrideAt,
+      override_by: user,
+      next_milestone: nextMilestone,
+      operating_hours: {
+        open: updated.store_open_time || '09:00:00',
+        close: updated.store_close_time || '21:00:00',
+        formatted: `${systemSettingsService.formatTime12h(updated.store_open_time || '09:00:00')} - ${systemSettingsService.formatTime12h(updated.store_close_time || '21:00:00')}`
+      },
       schedule
     });
   } catch (err) {

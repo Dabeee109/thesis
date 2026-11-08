@@ -269,7 +269,21 @@ function initSqliteFallback() {
         store_open_time TEXT DEFAULT '09:00:00',
         store_close_time TEXT DEFAULT '21:00:00',
         store_timezone TEXT DEFAULT 'Asia/Manila',
+        is_manual_override INTEGER DEFAULT 0,
+        override_at DATETIME DEFAULT NULL,
+        override_by TEXT DEFAULT NULL,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS store_status_audit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        previous_status TEXT,
+        new_status TEXT,
+        is_manual_override INTEGER DEFAULT 0,
+        trigger_type TEXT,
+        triggered_by TEXT DEFAULT 'System',
+        details TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
@@ -344,6 +358,9 @@ function initSqliteFallback() {
     try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN store_open_time TEXT DEFAULT '09:00:00';`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN store_close_time TEXT DEFAULT '21:00:00';`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN store_timezone TEXT DEFAULT 'Asia/Manila';`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN is_manual_override INTEGER DEFAULT 0;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN override_at DATETIME DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN override_by TEXT DEFAULT NULL;`); } catch (e) { }
 
     // Seed admin_gcash_transactions if empty
     try {
@@ -593,7 +610,10 @@ async function initDatabase() {
         { table: 'orders', column: 'void_requested_at', type: 'DATETIME NULL' },
         { table: 'payments', column: 'receipt_url', type: 'TEXT NULL' },
         { table: 'deliveries', column: 'customer_lat', type: 'DECIMAL(10, 7) NULL' },
-        { table: 'deliveries', column: 'customer_lng', type: 'DECIMAL(10, 7) NULL' }
+        { table: 'deliveries', column: 'customer_lng', type: 'DECIMAL(10, 7) NULL' },
+        { table: 'system_settings', column: 'is_manual_override', type: 'TINYINT(1) DEFAULT 0' },
+        { table: 'system_settings', column: 'override_at', type: 'DATETIME NULL' },
+        { table: 'system_settings', column: 'override_by', type: 'VARCHAR(100) NULL' }
       ];
       for (const c of cols) {
         const [rows] = await conn.query(
@@ -615,6 +635,19 @@ async function initDatabase() {
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           INDEX idx_admin_gcash_ref (reference_number),
           INDEX idx_admin_gcash_status (status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+
+      await conn.query(`
+        CREATE TABLE IF NOT EXISTS store_status_audit (
+          id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          previous_status VARCHAR(20),
+          new_status VARCHAR(20),
+          is_manual_override TINYINT(1) DEFAULT 0,
+          trigger_type VARCHAR(50),
+          triggered_by VARCHAR(100) DEFAULT 'System',
+          details TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
       `);
     } catch (migErr) {

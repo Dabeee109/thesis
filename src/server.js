@@ -230,6 +230,8 @@ async function startServer() {
   await initDatabase();
   const { startInactivityWorker } = require('./services/inactivityWorker');
   startInactivityWorker(60000);
+  const { startStoreScheduleWorker } = require('./services/systemSettingsService');
+  startStoreScheduleWorker(30000);
 
   const port = process.env.PORT ? parseInt(process.env.PORT, 10) : (config.port || 10000);
   const host = '0.0.0.0';
