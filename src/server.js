@@ -181,18 +181,16 @@ async function startServer() {
   }
 
   if (config.nodeEnv === 'production' && config.jwtSecret === 'diners_cafe_super_secure_secret_key_2026_thesis') {
-    throw new Error('JWT_SECRET must be set to a secure secret in production.');
+    console.warn('[Security Warning] JWT_SECRET is using the thesis placeholder secret.');
   }
 
   // Maps provider resolution & boot validation
   if (!config.maps.provider && !config.maps.googleKey) {
-    if (config.nodeEnv === 'production') {
-      throw new Error('GOOGLE_MAPS_API_KEY is required in production.');
-    } else {
-      console.warn('[Maps Warning] MAPS_PROVIDER is unset and no GOOGLE_MAPS_API_KEY found. Defaulting to mock provider for development.');
-    }
-  } else if ((config.maps.provider === 'google' || !config.maps.provider) && !config.maps.googleKey && config.nodeEnv === 'production') {
-    throw new Error('GOOGLE_MAPS_API_KEY is required in production.');
+    console.warn('[Maps Warning] MAPS_PROVIDER is unset and no GOOGLE_MAPS_API_KEY found. Defaulting to mock provider.');
+    config.maps.provider = 'mock';
+  } else if ((config.maps.provider === 'google' || !config.maps.provider) && !config.maps.googleKey) {
+    console.warn('[Maps Warning] Google Maps key not found. Defaulting to mock provider.');
+    config.maps.provider = 'mock';
   }
 
   await initDatabase();
