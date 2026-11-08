@@ -288,3 +288,18 @@ async function resetChat() {
   document.getElementById('chat-messages').innerHTML = '';
   await sendSimulatedPayload('RESET_SESSION');
 }
+
+async function testInactivity(minutes) {
+  try {
+    API.toast(`Simulating ${minutes} minutes of customer inactivity...`, 'info');
+    const res = await API.post('/chatbot/fast-forward-inactivity', {
+      psid: SIMULATOR_PSID,
+      minutes
+    });
+    if (res && res.success) {
+      API.toast(`Fast-forwarded to ${minutes} mins! Bot message should arrive shortly.`, 'success');
+    }
+  } catch (err) {
+    API.toast('Inactivity test error: ' + (err.message || 'Failed'), 'danger');
+  }
+}

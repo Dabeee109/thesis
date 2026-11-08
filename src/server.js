@@ -266,6 +266,18 @@ async function startServer() {
   const { startStoreScheduleWorker } = require('./services/systemSettingsService');
   startStoreScheduleWorker(30000);
 
+  // Keep Render service awake 24/7 by pinging /health every 8 minutes
+  if (process.env.RENDER_EXTERNAL_URL || (config.appUrl && !config.appUrl.includes('localhost') && !config.appUrl.includes('ngrok'))) {
+    const keepAliveUrl = `${(process.env.RENDER_EXTERNAL_URL || config.appUrl).replace(/\/+$/, '')}/health`;
+    console.log(`[KeepAlive] Starting cloud keep-alive worker targeting ${keepAliveUrl} (every 8 mins)...`);
+    const keepAliveTimer = setInterval(() => {
+      fetch(keepAliveUrl)
+        .then(r => console.log(`[KeepAlive] Pinged ${keepAliveUrl} (${r.status} ${r.statusText})`))
+        .catch(err => console.warn(`[KeepAlive] Ping warning:`, err.message));
+    }, 8 * 60 * 1000);
+    if (keepAliveTimer.unref) keepAliveTimer.unref();
+  }
+
   const port = process.env.PORT ? parseInt(process.env.PORT, 10) : (config.port || 10000);
   const host = '0.0.0.0';
 

@@ -99,6 +99,21 @@
         </button>
       </div>
 
+      <div style="padding-top: 12px; border-top: 1px solid var(--border-subtle);">
+        <label class="form-label" style="font-size: 0.8rem; text-transform: uppercase;">⏱️ Inactivity Timeout Tests (20m / 25m / 30m):</label>
+        <div style="display: flex; gap: 6px;">
+          <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="testInactivity(21)" title="Test 20-minute idle warning">
+            ⚠️ 20 Mins
+          </button>
+          <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="testInactivity(26)" title="Test 25-minute final follow-up">
+            ⚠️ 25 Mins
+          </button>
+          <button class="btn btn-danger btn-sm" style="flex: 1;" onclick="testInactivity(31)" title="Test 30-minute session & cart reset">
+            🗑️ 30 Mins
+          </button>
+        </div>
+      </div>
+
       <div style="display: flex; gap: 10px; margin-top: auto;">
         <button class="btn btn-outline btn-sm btn-block" onclick="resetChat()">
           🔄 Reset Chat Session

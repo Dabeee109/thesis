@@ -153,7 +153,10 @@ async function getSession(psid) {
     discount_info: extras.discount_info || null,
     chatHistory: Array.isArray(extras.chatHistory) ? extras.chatHistory.slice(-10) : [],
     failedAttempts: extras.failedAttempts || 0,
-    lastInteraction: extras.lastInteraction || Date.now()
+    lastInteraction: extras.lastInteraction || Date.now(),
+    warning20Sent: !!extras.warning20Sent,
+    warning25Sent: !!extras.warning25Sent,
+    purged30Sent: !!extras.purged30Sent
   };
 
   let _step = extras.current_step || customer?.conversation_state || 'IDLE';
@@ -220,7 +223,10 @@ async function saveSession(session) {
       geminiInteractionId: session.geminiInteractionId || null,
       dining_mode: session.dining_mode || session.orderType || null,
       discount_info: session.discount_info || null,
-      chatHistory: Array.isArray(session.chatHistory) ? session.chatHistory.slice(-10) : []
+      chatHistory: Array.isArray(session.chatHistory) ? session.chatHistory.slice(-10) : [],
+      warning20Sent: !!session.warning20Sent,
+      warning25Sent: !!session.warning25Sent,
+      purged30Sent: !!session.purged30Sent
     });
     const state = session.state || session.current_step || 'IDLE';
 

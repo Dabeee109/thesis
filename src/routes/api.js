@@ -114,6 +114,7 @@ router.post('/chatbot/simulate', chatbotController.simulateMessage);
 router.get('/chatbot/session', chatbotController.getSimulatorSession);
 router.get('/chatbot/status', chatbotController.getStatus);
 router.post('/chatbot/toggle', authController.authMiddleware, chatbotController.toggleStatus);
+router.post('/chatbot/fast-forward-inactivity', chatbotController.fastForwardInactivity);
 
 // 9. System Settings & Integration Routes
 router.get('/settings/facebook', authController.authMiddleware, authController.requireAdmin, settingsController.getFacebookSettings);

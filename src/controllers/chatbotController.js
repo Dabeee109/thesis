@@ -116,10 +116,59 @@ async function toggleStatus(req, res) {
   });
 }
 
+/**
+ * Fast-forward session inactivity timer for testing (FR5, FR6)
+ * Enables instant testing of 20M warning, 25M warning, or 30M reset without waiting in real time.
+ */
+async function fastForwardInactivity(req, res) {
+  try {
+    const { psid = 'PSID_SIMULATOR_USER', minutes = 20 } = req.body;
+    const { saveSession } = require('../services/sessionManager');
+    const { checkInactivity } = require('../services/inactivityWorker');
+
+    const session = await getSession(psid);
+    if (!session) {
+      return res.status(404).json({ success: false, message: 'Session not found for ' + psid });
+    }
+
+    const elapsedMs = Number(minutes) * 60 * 1000;
+    session.lastInteraction = Date.now() - elapsedMs;
+
+    if (minutes < 20) {
+      session.warning20Sent = false;
+      session.warning25Sent = false;
+      session.purged30Sent = false;
+    } else if (minutes < 25) {
+      session.warning20Sent = false;
+      session.warning25Sent = false;
+      session.purged30Sent = false;
+    } else if (minutes < 30) {
+      session.warning25Sent = false;
+      session.purged30Sent = false;
+    } else {
+      session.purged30Sent = false;
+    }
+
+    await saveSession(session);
+    const workerResult = await checkInactivity();
+
+    return res.json({
+      success: true,
+      message: `Fast-forwarded inactivity for ${psid} to ${minutes} minutes.`,
+      elapsedMinutes: minutes,
+      workerResult
+    });
+  } catch (err) {
+    console.error('[Fast-Forward Inactivity Error]', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+}
+
 module.exports = {
   getChatbotLogs,
   simulateMessage,
   getSimulatorSession,
   getStatus,
-  toggleStatus
+  toggleStatus,
+  fastForwardInactivity
 };

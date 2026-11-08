@@ -14,8 +14,11 @@ let workerTimer = null;
 
 const INACTIVITY_MESSAGES = {
   WARNING_20M: "Hello po! Active pa po ba kayo? Paalala lang po na ma-re-reset ang inyong chat session and cart kapag walang reply within 10 minutes.",
+  WARNING_20M_NOCART: "Hello po! Active pa po ba kayo? Paalala lang po na ma-re-reset ang inyong chat session kapag walang reply within 10 minutes.",
   WARNING_25M: "Hi po! Final follow-up lang po: ma-re-reset na po ang inyong order within 5 minutes kapag hindi po kayo nakapag-reply.",
-  RESET_30M: "Dahil walang naging response, na-reset na po ang inyong chat session at na-clear ang inyong cart. Mag-message lang po ulit kung handa na po kayong mag-order!"
+  WARNING_25M_NOCART: "Hi po! Final follow-up lang po: ma-re-reset na po ang inyong chat session within 5 minutes kapag hindi po kayo nakapag-reply.",
+  RESET_30M: "Dahil walang naging response, na-reset na po ang inyong chat session at na-clear ang inyong cart. Mag-message lang po ulit kung handa na po kayong mag-order!",
+  RESET_30M_NOCART: "Dahil walang naging response, na-reset na po ang inyong chat session. Mag-message lang po ulit kung may maitutulong kami o kung handa na po kayong mag-order!"
 };
 
 /**
@@ -37,7 +40,7 @@ async function checkInactivity(deps = {}) {
     const [dbCustomers] = await db.query(
       `SELECT psid FROM customers 
        WHERE psid IS NOT NULL 
-         AND (conversation_state NOT IN ('IDLE', 'idle') OR (cart_json IS NOT NULL AND cart_json != '[]'))`
+         AND (conversation_state NOT IN ('IDLE', 'idle') OR (cart_json IS NOT NULL AND cart_json != '[]') OR updated_at >= datetime('now', '-2 hours'))`
     );
     (dbCustomers || []).forEach(c => {
       if (c.psid) candidatePsids.add(String(c.psid));
@@ -60,10 +63,13 @@ async function checkInactivity(deps = {}) {
 
     if (!session) continue;
 
-    // Only process sessions that have an active draft order or state
+    // Process sessions that have an active draft order, active state, or recent chat interaction within 2 hours
     const hasCart = Array.isArray(session.cart) && session.cart.length > 0;
     const hasActiveState = session.state && session.state !== 'IDLE' && session.state !== 'idle';
-    if (!hasCart && !hasActiveState) {
+    const hasRecentInteraction = session.lastInteraction && (now - session.lastInteraction) < (120 * 60 * 1000);
+    const hasChatHistory = Array.isArray(session.chatHistory) && session.chatHistory.length > 0;
+
+    if (!hasCart && !hasActiveState && !(hasRecentInteraction && hasChatHistory)) {
       continue;
     }
 
@@ -75,7 +81,9 @@ async function checkInactivity(deps = {}) {
       if (!session.warning20Sent) {
         session.warning20Sent = true;
         warnings20++;
-        await sendFn(psid, INACTIVITY_MESSAGES.WARNING_20M).catch(e => console.warn('[Inactivity Warning 20M Err]', e.message));
+        const msg = hasCart ? INACTIVITY_MESSAGES.WARNING_20M : INACTIVITY_MESSAGES.WARNING_20M_NOCART;
+        console.log(`[InactivityWorker] Dispatching 20M warning to ${psid} (elapsed: ${elapsedMinutes.toFixed(1)}m, hasCart: ${hasCart})`);
+        await sendFn(psid, msg).catch(e => console.warn('[Inactivity Warning 20M Err]', e.message));
         await saveSession(session);
       }
     }
@@ -85,7 +93,9 @@ async function checkInactivity(deps = {}) {
       if (!session.warning25Sent) {
         session.warning25Sent = true;
         warnings25++;
-        await sendFn(psid, INACTIVITY_MESSAGES.WARNING_25M).catch(e => console.warn('[Inactivity Warning 25M Err]', e.message));
+        const msg = hasCart ? INACTIVITY_MESSAGES.WARNING_25M : INACTIVITY_MESSAGES.WARNING_25M_NOCART;
+        console.log(`[InactivityWorker] Dispatching 25M warning to ${psid} (elapsed: ${elapsedMinutes.toFixed(1)}m, hasCart: ${hasCart})`);
+        await sendFn(psid, msg).catch(e => console.warn('[Inactivity Warning 25M Err]', e.message));
         await saveSession(session);
       }
     }
@@ -121,7 +131,9 @@ async function checkInactivity(deps = {}) {
         session.purged30Sent = true;
 
         purges30++;
-        await sendFn(psid, INACTIVITY_MESSAGES.RESET_30M).catch(e => console.warn('[Inactivity Purge Err]', e.message));
+        const msg = hasCart ? INACTIVITY_MESSAGES.RESET_30M : INACTIVITY_MESSAGES.RESET_30M_NOCART;
+        console.log(`[InactivityWorker] Dispatching 30M purge/reset to ${psid} (elapsed: ${elapsedMinutes.toFixed(1)}m, hadCart: ${hasCart})`);
+        await sendFn(psid, msg).catch(e => console.warn('[Inactivity Purge Err]', e.message));
         await saveSession(session);
       }
     }
