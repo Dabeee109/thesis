@@ -56,6 +56,7 @@ router.get('/orders', authController.authMiddleware, orderController.getOrders);
 router.get('/orders/summary/kpis', authController.authMiddleware, orderController.getSummaryKPIs);
 router.get('/orders/:id', authController.authMiddleware, orderController.getOrder);
 router.patch('/orders/:id/status', authController.authMiddleware, orderController.changeOrderStatus);
+router.put('/orders/:id/status', authController.authMiddleware, orderController.changeOrderStatus);
 router.post('/orders', authController.authMiddleware, orderController.createManualOrder);
 router.post('/orders/manual', authController.authMiddleware, orderController.createManualOrder);
 router.post('/orders/:id/cancel', authController.authMiddleware, orderController.cancelOrder);

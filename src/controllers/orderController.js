@@ -42,7 +42,16 @@ async function getOrder(req, res) {
 async function changeOrderStatus(req, res) {
   try {
     const { id } = req.params;
-    const { status, riderId, cancellationReason } = req.body;
+    let { status, riderId, cancellationReason } = req.body;
+
+    if (typeof status === 'string') {
+      const s = status.trim().toLowerCase();
+      if (s === 'in_preparation' || s === 'in kitchen preparation' || s === 'preparing') status = 'preparing';
+      else if (s === 'dispatched' || s === 'on_delivery' || s === 'dispatched / on delivery') status = 'dispatched';
+      else if (s === 'delivered') status = 'delivered';
+      else if (s === 'cancelled' || s === 'canceled') status = 'cancelled';
+      else if (s === 'pending') status = 'pending';
+    }
 
     const validStatuses = ['pending', 'preparing', 'dispatched', 'delivered', 'cancelled'];
     if (!validStatuses.includes(status)) {

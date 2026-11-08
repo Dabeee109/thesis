@@ -295,6 +295,10 @@ function initSqliteFallback() {
     try { sqliteDb.exec(`ALTER TABLE store_settings ADD COLUMN gcash_account_name TEXT DEFAULT "Diner's Cafe";`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE store_settings ADD COLUMN gcash_account_number TEXT DEFAULT "09XXXXXXXXX";`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE store_settings ADD COLUMN gcash_qr_image_url TEXT DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN customer_lat REAL DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN customer_lng REAL DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE deliveries ADD COLUMN customer_lat REAL DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE deliveries ADD COLUMN customer_lng REAL DEFAULT NULL;`); } catch (e) { }
 
     // Seed admin_gcash_transactions if empty
     try {
@@ -523,7 +527,11 @@ async function initDatabase() {
         { table: 'orders', column: 'customer_phone', type: 'VARCHAR(50) NULL' },
         { table: 'orders', column: 'payment_proof_image', type: 'VARCHAR(500) NULL' },
         { table: 'orders', column: 'payment_ref_number', type: 'VARCHAR(100) NULL' },
-        { table: 'orders', column: 'payment_status', type: "VARCHAR(50) DEFAULT 'Pending'" }
+        { table: 'orders', column: 'payment_status', type: "VARCHAR(50) DEFAULT 'Pending'" },
+        { table: 'orders', column: 'customer_lat', type: 'DECIMAL(10, 7) NULL' },
+        { table: 'orders', column: 'customer_lng', type: 'DECIMAL(10, 7) NULL' },
+        { table: 'deliveries', column: 'customer_lat', type: 'DECIMAL(10, 7) NULL' },
+        { table: 'deliveries', column: 'customer_lng', type: 'DECIMAL(10, 7) NULL' }
       ];
       for (const c of cols) {
         const [rows] = await conn.query(

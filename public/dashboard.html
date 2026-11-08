@@ -9,6 +9,14 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/dashboard.css">
+  <script>
+    try {
+      const u = JSON.parse(localStorage.getItem('diners_user') || 'null');
+      if (u && (u.role === 'rider' || u.role === 'delivery_rider' || u.role === 'DELIVERY_RIDER')) {
+        window.location.replace('/rider-portal.html');
+      }
+    } catch (e) {}
+  </script>
 </head>
 <body>
 

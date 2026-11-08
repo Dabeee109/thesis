@@ -26,9 +26,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   } catch (e) {}
 
-  // 1. Verify User Authentication
+  // 1. Verify User Authentication & Role Isolation
   const user = API.getUser();
   if (user) {
+    const roleLower = (user.role || '').toLowerCase();
+    if (roleLower === 'rider' || roleLower === 'delivery_rider') {
+      window.location.replace('/rider-portal.html');
+      return;
+    }
     document.getElementById('user-display-name').innerText = user.name || 'Staff User';
     document.getElementById('user-display-role').innerText = user.role || 'Staff';
     const initials = (user.name || 'AD').split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();

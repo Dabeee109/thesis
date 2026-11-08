@@ -8,6 +8,7 @@ process.env.TZ = config.timezone || 'Asia/Manila';
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const jwt = require('jsonwebtoken');
 const { initDatabase } = require('../database/db');
 const { addSSEClient, broadcastSSE } = require('./services/notificationService');
 
@@ -41,6 +42,32 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Explicit Favicon handler to prevent 404 loops
 app.get('/favicon.ico', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/favicon.ico'));
+});
+
+// Router Guard: Strict Role-Based Isolation for Riders accessing Admin Dashboard
+app.use((req, res, next) => {
+  const p = req.path.toLowerCase();
+  if (p === '/dashboard.html' || p === '/dashboard') {
+    const authHeader = req.headers.authorization;
+    const token = (authHeader && authHeader.startsWith('Bearer '))
+      ? authHeader.split(' ')[1]
+      : (req.query && req.query.token ? req.query.token : null);
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, config.jwtSecret);
+        const role = (decoded.role || '').toLowerCase();
+        if (role === 'rider' || role === 'delivery_rider') {
+          return res.redirect('/rider-portal.html');
+        }
+      } catch (e) {}
+    }
+  }
+  next();
+});
+
+// Rider Portal Route Aliases (Supports /rider-portal.html and /rider.html)
+app.get(['/rider-portal.html', '/rider-portal'], (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/rider.html'));
 });
 
 // Serve static frontend assets

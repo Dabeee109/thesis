@@ -114,6 +114,7 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
   let effectiveDeliveryAddress = deliveryAddress;
   let deliveryFee = 0.00;
   let fareDetails = null;
+  let claims = null;
 
   if (orderType === 'delivery') {
     let effectiveQuoteToken = quoteToken;
@@ -138,7 +139,7 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
         }
       );
     }
-    const claims = verifyQuote(effectiveQuoteToken);
+    claims = verifyQuote(effectiveQuoteToken);
     effectiveDistanceKm = claims.distanceKm;
     effectiveVehicleType = claims.vehicleType;
     effectiveWeatherCondition = claims.weatherCondition;
@@ -212,6 +213,8 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
   const initialPaymentStatus = orderData.paymentStatus || orderData.payment_status || (paymentMethod === 'gcash' ? (referenceNo ? 'Pending Verification' : 'Pending') : 'Paid');
   const initialPaymentRef = orderData.paymentRefNumber || orderData.payment_ref_number || referenceNo || null;
   const initialPaymentProof = orderData.paymentProofImage || orderData.payment_proof_image || null;
+  const customerLat = (orderData.customer_lat !== undefined ? orderData.customer_lat : (orderData.customerLat !== undefined ? orderData.customerLat : (orderData.lat !== undefined ? orderData.lat : (claims && claims.lat ? claims.lat : null))));
+  const customerLng = (orderData.customer_lng !== undefined ? orderData.customer_lng : (orderData.customerLng !== undefined ? orderData.customerLng : (orderData.lng !== undefined ? orderData.lng : (claims && claims.lng ? claims.lng : null))));
 
   let orderResult = null;
   let orderNumber = '';
@@ -220,9 +223,9 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
     try {
       const [res] = await db.query(
         `INSERT INTO orders 
-         (order_number, customer_id, order_type, status, subtotal, delivery_fee, total_amount, delivery_address, customer_phone, distance_km, customer_notes, payment_status, payment_ref_number, payment_proof_image)
-         VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [orderNumber, customerId, orderType, subtotal, deliveryFee, totalAmount, effectiveDeliveryAddress, phone || null, effectiveDistanceKm, customerNotes, initialPaymentStatus, initialPaymentRef, initialPaymentProof]
+         (order_number, customer_id, order_type, status, subtotal, delivery_fee, total_amount, delivery_address, customer_phone, distance_km, customer_notes, payment_status, payment_ref_number, payment_proof_image, customer_lat, customer_lng)
+         VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [orderNumber, customerId, orderType, subtotal, deliveryFee, totalAmount, effectiveDeliveryAddress, phone || null, effectiveDistanceKm, customerNotes, initialPaymentStatus, initialPaymentRef, initialPaymentProof, customerLat, customerLng]
       );
       orderResult = res;
       break;
@@ -260,8 +263,8 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
   if (orderType === 'delivery') {
     const [delResult] = await db.query(
       `INSERT INTO deliveries 
-       (order_id, vehicle_type, distance_km, weather_condition, computed_fare, final_fare, status, estimated_time_min)
-       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
+       (order_id, vehicle_type, distance_km, weather_condition, computed_fare, final_fare, status, estimated_time_min, customer_lat, customer_lng)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
       [
         orderId,
         effectiveVehicleType,
@@ -269,7 +272,9 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
         effectiveWeatherCondition,
         fareDetails.rawFinalFare,
         fareDetails.finalFare,
-        effectiveVehicleType === 'motorcycle' ? 20 : 30
+        effectiveVehicleType === 'motorcycle' ? 20 : 30,
+        customerLat,
+        customerLng
       ]
     );
     deliveryId = delResult.insertId;
@@ -400,14 +405,53 @@ async function updateOrderStatus(orderId, newStatus, extraData = {}) {
     }
   }
 
+  // Look up assigned rider for targeted dispatch alerts
+  let assignedRiderId = null;
+  try {
+    const [delRows] = await db.query('SELECT rider_id FROM deliveries WHERE order_id = ?', [orderId]);
+    if (delRows && delRows.length > 0 && delRows[0].rider_id) {
+      assignedRiderId = delRows[0].rider_id;
+    }
+  } catch (err) {
+    console.warn('[orderService] Could not lookup assigned rider:', err.message);
+  }
+  if (!assignedRiderId && extraData && extraData.riderId) {
+    assignedRiderId = extraData.riderId;
+  }
+
+  // Generate standardized rider real-time notification alerts
+  const isPreparing = (newStatus === 'preparing' || newStatus === 'IN_PREPARATION' || newStatus === 'in kitchen preparation');
+  const isDispatched = (newStatus === 'dispatched' || newStatus === 'DISPATCHED' || newStatus === 'ON_DELIVERY');
+
+  let riderAlertMessage = null;
+  if (isPreparing) {
+    riderAlertMessage = `🍳 Order #${order.order_number} is now being prepared in the kitchen. Stand by for pickup.`;
+  } else if (isDispatched) {
+    riderAlertMessage = `🚀 Order #${order.order_number} is ready for dispatch! Please pick up the package and proceed to customer.`;
+  }
+
   // Broadcast status change to real-time dashboard and rider views
   broadcastSSE('ORDER_STATUS_CHANGED', {
     orderId,
     orderNumber: order.order_number,
     prevStatus,
     newStatus,
+    riderId: assignedRiderId,
+    alertMessage: riderAlertMessage,
     customerName: `${order.first_name || ''} ${order.last_name || ''}`.trim()
   });
+
+  // Dedicated Rider Real-Time Alert Event
+  if (riderAlertMessage) {
+    broadcastSSE('RIDER_ORDER_ALERT', {
+      orderId,
+      orderNumber: order.order_number,
+      riderId: assignedRiderId,
+      status: newStatus,
+      message: riderAlertMessage,
+      timestamp: new Date().toISOString()
+    });
+  }
 
   // Automated customer notifications based on status (Module 2.C)
   let notifMessage = '';

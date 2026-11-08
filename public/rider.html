@@ -12,7 +12,7 @@
     .rider-container {
       max-width: 600px;
       margin: 0 auto;
-      padding: 20px;
+      padding: 16px;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
@@ -21,85 +21,383 @@
       background: var(--bg-surface);
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-lg);
-      padding: 20px;
+      padding: 16px 20px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 20px;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow-sm);
+    }
+    .rider-profile-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .rider-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(46, 204, 113, 0.15);
+      color: #2ecc71;
+      font-weight: 600;
     }
     .trip-card {
       background: var(--bg-surface);
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-lg);
-      padding: 22px;
+      padding: 18px;
       margin-bottom: 16px;
       border-left: 4px solid var(--brand-accent);
       box-shadow: var(--shadow-sm);
+      transition: transform 0.15s ease, border-color 0.2s ease;
+    }
+    .trip-card.dispatched {
+      border-left-color: #2ecc71;
+      background: linear-gradient(180deg, rgba(46, 204, 113, 0.05) 0%, var(--bg-surface) 100%);
+    }
+    .trip-card.preparing {
+      border-left-color: #f39c12;
+      background: linear-gradient(180deg, rgba(243, 156, 18, 0.04) 0%, var(--bg-surface) 100%);
     }
     .trip-card.delivered {
       border-left-color: var(--status-success);
-      opacity: 0.75;
+      opacity: 0.85;
     }
     .action-row {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px dashed var(--border-subtle);
+    }
+    .action-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-top: 16px;
-      padding-top: 14px;
-      border-top: 1px dashed var(--border-subtle);
+      gap: 10px;
+    }
+    .btn-nav-maps {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      background: rgba(212, 163, 115, 0.16);
+      color: var(--brand-primary);
+      border: 1px solid var(--brand-primary);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.88rem;
+      padding: 9px 12px;
+      border-radius: var(--radius-md);
+      text-align: center;
+      transition: all 0.2s ease;
+    }
+    .btn-nav-maps:hover {
+      background: var(--brand-primary);
+      color: #1a120b;
+    }
+    .btn-call {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      background: var(--bg-surface-elevated);
+      color: var(--text-main);
+      border: 1px solid var(--border-subtle);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.88rem;
+      padding: 9px 12px;
+      border-radius: var(--radius-md);
+      text-align: center;
+      transition: all 0.2s ease;
+    }
+    .btn-call:hover {
+      border-color: var(--brand-primary);
+      color: var(--brand-primary);
+    }
+    .btn-complete {
+      width: 100%;
+      padding: 11px;
+      font-weight: 700;
+      font-size: 0.95rem;
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .profile-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+    .profile-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 0.92rem;
+    }
+    .profile-row:last-child {
+      border-bottom: none;
+    }
+    .audio-hint-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-subtle);
+      margin-bottom: 12px;
+      user-select: none;
+    }
+    .audio-hint-pill:hover {
+      color: var(--brand-primary);
+      border-color: var(--brand-primary);
     }
   </style>
 </head>
 <body>
 
   <div class="rider-container">
-    <div class="rider-header">
-      <div style="display: flex; align-items: center; gap: 12px;">
-        <div class="brand-icon" style="width: 40px; height: 40px; font-size: 1.2rem;">🛵</div>
+    <!-- Strict Role-Based Header (Admin Dashboard references completely removed) -->
+    <header class="rider-header">
+      <div class="rider-profile-bar">
+        <div class="brand-icon" style="width: 42px; height: 42px; font-size: 1.3rem;">🛵</div>
         <div>
-          <h2 style="font-size: 1.15rem;" id="rider-name-display">Marco Santos</h2>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <h2 style="font-size: 1.1rem; margin: 0;" id="rider-name-display">Delivery Rider</h2>
+            <span class="rider-badge" id="rider-status-pill">🟢 Online</span>
+          </div>
           <span style="font-size: 0.75rem; color: var(--brand-primary); font-weight: 600;" id="rider-vehicle-display">MOTORCYCLE (MC-7890-PH)</span>
         </div>
       </div>
       <div>
-        <a href="dashboard.html" class="btn btn-secondary btn-sm">Dashboard</a>
+        <!-- Logout strictly isolates rider from admin command interfaces -->
+        <button class="btn btn-secondary btn-sm" onclick="logoutRider()" style="color: #ff7b7b; border-color: rgba(239, 68, 68, 0.35);" title="Sign out of Rider Portal">
+          🚪 Logout
+        </button>
       </div>
+    </header>
+
+    <!-- Audio / Alert sound unlock badge for mobile browsers -->
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <div class="audio-hint-pill" id="audio-unlock-pill" onclick="unlockAudio()" title="Click to test & enable audio chimes">
+        <span>🔔 Alerts Enabled (Audio: Ready)</span>
+      </div>
+      <span style="font-size: 0.75rem; color: var(--text-muted);" id="live-indicator">⚡ Live SSE Connected</span>
     </div>
 
-    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
-      <div style="display: flex; gap: 8px;">
+    <!-- Navigation Tabs: Dedicated Rider Views Only -->
+    <nav style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+      <div style="display: flex; gap: 6px; flex-wrap: wrap;">
         <button id="tab-active" class="btn btn-primary btn-sm" onclick="setRiderView('active')">🛵 Active Queue</button>
         <button id="tab-history" class="btn btn-secondary btn-sm" onclick="setRiderView('history')">📜 Delivered History</button>
+        <button id="tab-profile" class="btn btn-secondary btn-sm" onclick="setRiderView('profile')">👤 My Profile</button>
       </div>
       <button class="btn btn-secondary btn-sm" onclick="loadRiderDeliveries()">🔄 Refresh</button>
-    </div>
+    </nav>
 
-    <div id="rider-trips-container" style="flex: 1;">
-      <!-- Populated via JS -->
-    </div>
+    <!-- Main Dynamic Feed Container -->
+    <main id="rider-trips-container" style="flex: 1;">
+      <!-- Populated via loadRiderDeliveries() or showProfile() -->
+    </main>
   </div>
 
   <script src="js/api.js"></script>
   <script>
     let currentRiderView = 'active';
+    let audioContext = null;
+    let audioUnlocked = false;
+    let currentUser = null;
 
-    document.addEventListener('DOMContentLoaded', () => {
-      loadRiderDeliveries();
-      API.connectSSE((eventType) => {
-        if (eventType === 'DELIVERY_ASSIGNED' || eventType === 'ORDER_STATUS_CHANGED') {
-          loadRiderDeliveries();
+    // -------------------------------------------------------------
+    // 1. Audio & Notification Engine (Web Audio API Synthesizer)
+    // -------------------------------------------------------------
+    function getAudioContext() {
+      if (!audioContext) {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (AudioCtx) {
+          audioContext = new AudioCtx();
         }
+      }
+      if (audioContext && audioContext.state === 'suspended') {
+        audioContext.resume();
+      }
+      return audioContext;
+    }
+
+    function unlockAudio() {
+      const ctx = getAudioContext();
+      audioUnlocked = true;
+      playRiderChime('preparing');
+      const pill = document.getElementById('audio-unlock-pill');
+      if (pill) {
+        pill.innerHTML = '<span>🔔 Alerts Sound: Active & Verified</span>';
+        pill.style.borderColor = 'var(--status-success)';
+        pill.style.color = 'var(--status-success)';
+      }
+      // Request browser notification permission if available
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+      }
+    }
+
+    /**
+     * Synthesize clean, zero-latency Web Audio chime tones
+     * - 'preparing': Two-tone pleasant chime (Kitchen Preparation alert)
+     * - 'dispatched': High-priority actionable fanfare (Ready for Dispatch alert)
+     */
+    function playRiderChime(type) {
+      try {
+        const ctx = getAudioContext();
+        if (!ctx) return;
+        const now = ctx.currentTime;
+
+        if (type === 'preparing') {
+          // Two-tone rising chime (D5: 587.33Hz -> A5: 880Hz)
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(587.33, now);
+          osc.frequency.exponentialRampToValueAtTime(880.00, now + 0.22);
+          gain.gain.setValueAtTime(0.28, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.45);
+        } else {
+          // Actionable 4-tone dispatch fanfare (C5: 523.25Hz -> E5: 659.25Hz -> G5: 783.99Hz -> C6: 1046.50Hz)
+          const notes = [523.25, 659.25, 783.99, 1046.50];
+          notes.forEach((freq, idx) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            const noteStart = now + (idx * 0.11);
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(freq, noteStart);
+            gain.gain.setValueAtTime(0.32, noteStart);
+            gain.gain.exponentialRampToValueAtTime(0.001, noteStart + 0.24);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(noteStart);
+            osc.stop(noteStart + 0.24);
+          });
+        }
+      } catch (err) {
+        console.warn('[Web Audio] Could not play synthesized chime:', err);
+      }
+    }
+
+    function triggerBrowserPush(title, message) {
+      if ('Notification' in window && Notification.permission === 'granted') {
+        try {
+          new Notification(title, {
+            body: message,
+            icon: '/favicon.ico',
+            badge: '/favicon.ico'
+          });
+        } catch (e) {}
+      }
+    }
+
+    // -------------------------------------------------------------
+    // 2. Lifecycle & Real-Time SSE Dispatch Listener
+    // -------------------------------------------------------------
+    document.addEventListener('DOMContentLoaded', () => {
+      // Auto unlock audio on any first user tap or click
+      document.body.addEventListener('click', () => {
+        if (!audioUnlocked) unlockAudio();
+      }, { once: true });
+
+      initRiderProfile();
+      loadRiderDeliveries();
+
+      // Connect to SSE real-time events
+      API.connectSSE((eventType, data) => {
+        handleRealtimeEvent(eventType, data);
       });
     });
 
+    function initRiderProfile() {
+      currentUser = API.getUser();
+      if (currentUser) {
+        document.getElementById('rider-name-display').innerText = currentUser.name || currentUser.full_name || 'Delivery Rider';
+        if (currentUser.vehicle_plate_no || currentUser.vehiclePlate) {
+          const vType = (currentUser.vehicle_type || 'MOTORCYCLE').toUpperCase();
+          const plate = currentUser.vehicle_plate_no || currentUser.vehiclePlate || 'MC-7890-PH';
+          document.getElementById('rider-vehicle-display').innerText = `${vType} (${plate})`;
+        }
+      }
+    }
+
+    function handleRealtimeEvent(eventType, data) {
+      if (!data) return;
+
+      const orderNumber = data.orderNumber || data.order_number || data.orderId || '';
+      const newStatus = (data.newStatus || data.status || '').toLowerCase();
+      const currentRiderId = currentUser ? (currentUser.riderId || currentUser.id) : null;
+
+      // Filter: if targeted to a specific rider, only trigger for that rider
+      if (data.riderId && currentRiderId && String(data.riderId) !== String(currentRiderId)) {
+        return;
+      }
+
+      // Requirement 1.1: Transition to 'IN_PREPARATION' (In Kitchen Preparation)
+      if (newStatus === 'preparing' || newStatus === 'in_preparation' || newStatus === 'in kitchen preparation') {
+        const msg = data.alertMessage || `🍳 Order #${orderNumber} is now being prepared in the kitchen. Stand by for pickup.`;
+        playRiderChime('preparing');
+        API.toast(msg, 'warning');
+        triggerBrowserPush('🍳 Kitchen Prep Alert', msg);
+        loadRiderDeliveries();
+      }
+      // Requirement 1.2: Transition to 'DISPATCHED' / 'ON_DELIVERY'
+      else if (newStatus === 'dispatched' || newStatus === 'on_delivery' || newStatus === 'dispatched / on delivery') {
+        const msg = data.alertMessage || `🚀 Order #${orderNumber} is ready for dispatch! Please pick up the package and proceed to customer.`;
+        playRiderChime('dispatched');
+        API.toast(msg, 'success');
+        triggerBrowserPush('🚀 Order Ready for Dispatch!', msg);
+        loadRiderDeliveries();
+      }
+      // General queue updates
+      else if (eventType === 'DELIVERY_ASSIGNED' || eventType === 'ORDER_STATUS_CHANGED') {
+        loadRiderDeliveries();
+      }
+    }
+
+    // -------------------------------------------------------------
+    // 3. Tab Navigation & View Management
+    // -------------------------------------------------------------
     function setRiderView(view) {
       currentRiderView = view;
       document.getElementById('tab-active').className = view === 'active' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm';
       document.getElementById('tab-history').className = view === 'history' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm';
-      loadRiderDeliveries();
+      document.getElementById('tab-profile').className = view === 'profile' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm';
+
+      if (view === 'profile') {
+        renderProfileView();
+      } else {
+        loadRiderDeliveries();
+      }
     }
 
+    // -------------------------------------------------------------
+    // 4. Data Loading & Dynamic Task Card Rendering
+    // -------------------------------------------------------------
     async function loadRiderDeliveries() {
+      if (currentRiderView === 'profile') return;
+
       try {
         const endpoint = currentRiderView === 'active' ? '/rider/orders/active' : '/rider/history';
         const res = await API.get(endpoint);
@@ -110,49 +408,82 @@
 
         if (trips.length === 0) {
           const emptyMsg = currentRiderView === 'active' 
-            ? 'No active orders in queue right now.' 
-            : 'No delivered history found.';
-          container.innerHTML = `<div class="card" style="text-align: center; color: var(--text-muted); padding: 28px;">${emptyMsg}</div>`;
+            ? '🛵 No active orders in your dispatch queue right now.' 
+            : '📜 No completed delivery history found.';
+          container.innerHTML = `<div class="card" style="text-align: center; color: var(--text-muted); padding: 32px; font-size: 0.95rem;">${emptyMsg}</div>`;
           return;
         }
 
         trips.forEach(del => {
-          const isDelivered = del.order_status === 'delivered' || del.status === 'delivered' || del.order_status === 'Delivered';
-          const isKitchen = del.order_status === 'preparing' || del.order_status === 'In Kitchen Preparation' || del.status === 'preparing';
-          const isDispatched = del.order_status === 'dispatched' || del.order_status === 'Dispatched / On Delivery' || del.status === 'dispatched';
+          const rawStatus = (del.raw_status || del.order_status || del.status || '').toLowerCase();
+          const isDelivered = rawStatus === 'delivered';
+          const isKitchen = rawStatus === 'preparing' || rawStatus === 'in kitchen preparation';
+          const isDispatched = rawStatus === 'dispatched' || rawStatus === 'dispatched / on delivery';
+
+          // Requirement 3: Build Google Maps Navigation URL
+          // If customer_lat and customer_lng exist, navigate by coordinates. Otherwise, use plaintext delivery_address.
+          let mapsUrl = '';
+          if (del.customer_lat && del.customer_lng) {
+            mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${del.customer_lat},${del.customer_lng}`;
+          } else {
+            mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(del.delivery_address || 'Metro Manila')}`;
+          }
 
           const card = document.createElement('div');
-          card.className = `trip-card ${isDelivered ? 'delivered' : ''}`;
+          card.className = `trip-card ${isDispatched ? 'dispatched' : isKitchen ? 'preparing' : isDelivered ? 'delivered' : ''}`;
           card.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-              <span style="font-weight: 700; font-size: 1.1rem; color: var(--brand-primary);">#${del.order_number}</span>
-              <span class="badge badge-${(del.raw_status || del.order_status || del.status || '').toLowerCase().replace(/[^a-z]/g, '')}">${del.order_status || del.status}</span>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <span style="font-weight: 800; font-size: 1.15rem; color: var(--brand-primary);">#${del.order_number}</span>
+              <span class="badge badge-${rawStatus.replace(/[^a-z]/g, '')}">
+                ${del.order_status || del.status}
+              </span>
             </div>
-            <div style="font-weight: 700; font-size: 1rem; margin-bottom: 4px;">👤 ${del.customer_name || 'Customer'}</div>
-            <div style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 6px;">📍 ${del.delivery_address || 'Store vicinity'}</div>
-            <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 10px;">
-              📏 Distance: <strong>${parseFloat(del.distance_km || 1).toFixed(1)} km</strong> &bull; Fare: <strong style="color: var(--brand-gold);">₱${parseFloat(del.final_fare || 0).toFixed(2)}</strong>
+
+            <div style="font-weight: 700; font-size: 1.02rem; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+              👤 <span>${del.customer_name || 'Customer'}</span>
             </div>
-            ${del.customer_notes ? `<div style="font-size: 0.82rem; padding: 6px 10px; background: var(--bg-surface-elevated); border-radius: 4px; color: var(--brand-crema); margin-bottom: 8px;">Note: "${del.customer_notes}"</div>` : ''}
+
+            <div style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 6px; line-height: 1.35;">
+              📍 <strong>Drop-off:</strong> ${del.delivery_address || 'Store vicinity'}
+            </div>
+
+            <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 10px; display: flex; gap: 14px; flex-wrap: wrap;">
+              <span>📏 Distance: <strong>${parseFloat(del.distance_km || 1).toFixed(1)} km</strong></span>
+              <span>🛵 Fare: <strong style="color: var(--brand-gold);">₱${parseFloat(del.final_fare || 0).toFixed(2)}</strong></span>
+            </div>
+
+            ${del.customer_notes ? `
+              <div style="font-size: 0.82rem; padding: 6px 10px; background: var(--bg-surface-elevated); border-radius: 6px; color: var(--brand-crema); margin-bottom: 10px; border-left: 2px solid var(--brand-primary);">
+                📝 <em>"${del.customer_notes}"</em>
+              </div>
+            ` : ''}
 
             ${!isDelivered ? `
               <div class="action-row">
-                <a href="tel:${del.customer_phone || ''}" class="btn btn-secondary btn-sm" style="text-align: center;">
-                  📞 Call Customer
-                </a>
+                <!-- Action Row Grid: Navigation & Calling -->
+                <div class="action-grid">
+                  <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" class="btn-nav-maps" title="Open GPS directions in Google Maps">
+                    🗺️ Open Navigation
+                  </a>
+                  <a href="tel:${del.customer_phone || ''}" class="btn-call" title="Call Customer">
+                    📞 Call Customer
+                  </a>
+                </div>
+
+                <!-- Primary Delivery Action -->
                 ${isKitchen ? `
-                  <button class="btn btn-secondary btn-sm" disabled style="opacity: 0.55; cursor: not-allowed;" title="Cannot complete delivery while order is still in kitchen preparation.">
-                    ⏳ In Kitchen Prep
+                  <button class="btn btn-secondary btn-complete" disabled style="opacity: 0.6; cursor: not-allowed; background: var(--bg-surface-elevated);" title="Order is currently in kitchen preparation. Stand by for dispatch.">
+                    ⏳ In Kitchen Prep &bull; Stand by for Pickup
                   </button>
                 ` : `
-                  <button class="btn btn-success btn-sm" onclick="markDelivered(${del.order_id})">
+                  <button class="btn btn-success btn-complete" onclick="markDelivered(${del.order_id})" title="Mark order as delivered">
                     ✅ Complete Delivery
                   </button>
                 `}
               </div>
             ` : `
-              <div style="margin-top: 10px; font-size: 0.82rem; color: var(--status-success); font-weight: 600;">
-                🎉 Delivered &bull; Customer feedback unlocked
+              <div style="margin-top: 8px; font-size: 0.84rem; color: var(--status-success); font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                🎉 Delivery Completed &bull; Customer feedback unlocked
               </div>
             `}
           `;
@@ -163,11 +494,15 @@
       }
     }
 
+    // -------------------------------------------------------------
+    // 5. Delivery Completion Gatekeeper
+    // -------------------------------------------------------------
     async function markDelivered(orderId) {
       try {
         const res = await API.post(`/rider/orders/${orderId}/complete`, {});
         if (res && res.success) {
-          API.toast('Delivery marked completed! Customer has been prompted for feedback.', 'success');
+          playRiderChime('preparing');
+          API.toast('🎉 Delivery marked completed! Customer prompt unlocked.', 'success');
           loadRiderDeliveries();
         } else {
           API.toast(res.message || 'Cannot complete delivery.', 'warning');
@@ -175,6 +510,62 @@
       } catch (err) {
         console.error('Mark delivered error:', err);
         API.toast(err.message || 'Cannot complete delivery.', 'error');
+      }
+    }
+
+    // -------------------------------------------------------------
+    // 6. Rider Profile View (Role-isolated, no admin analytics)
+    // -------------------------------------------------------------
+    function renderProfileView() {
+      const container = document.getElementById('rider-trips-container');
+      const u = API.getUser() || {};
+
+      container.innerHTML = `
+        <div class="profile-card">
+          <div style="text-align: center; margin-bottom: 18px;">
+            <div style="width: 64px; height: 64px; border-radius: 50%; background: rgba(212, 163, 115, 0.15); border: 2px solid var(--brand-primary); display: inline-flex; align-items: center; justify-content: center; font-size: 2rem; margin-bottom: 8px;">
+              🛵
+            </div>
+            <h3 style="margin: 0; font-size: 1.2rem;">${u.name || u.full_name || 'Marco Santos'}</h3>
+            <span style="font-size: 0.8rem; color: var(--brand-primary); font-weight: 600;">ACTIVE COURIER</span>
+          </div>
+
+          <div class="profile-row">
+            <span style="color: var(--text-muted);">Assigned Vehicle:</span>
+            <strong>${(u.vehicle_type || 'Motorcycle').toUpperCase()}</strong>
+          </div>
+          <div class="profile-row">
+            <span style="color: var(--text-muted);">Plate Number:</span>
+            <strong>${u.vehicle_plate_no || 'MC-7890-PH'}</strong>
+          </div>
+          <div class="profile-row">
+            <span style="color: var(--text-muted);">Contact Phone:</span>
+            <strong>${u.phone_number || '0917-555-0199'}</strong>
+          </div>
+          <div class="profile-row">
+            <span style="color: var(--text-muted);">Current Status:</span>
+            <span class="rider-badge">🟢 Online &bull; Available</span>
+          </div>
+          <div class="profile-row">
+            <span style="color: var(--text-muted);">Portal Access:</span>
+            <strong style="color: var(--brand-crema);">Courier Dispatch Only</strong>
+          </div>
+
+          <div style="margin-top: 24px; display: flex; flex-direction: column; gap: 10px;">
+            <button class="btn btn-secondary btn-block" onclick="unlockAudio()">
+              🔔 Test Audio Chime & Notifications
+            </button>
+            <button class="btn btn-outline btn-block" onclick="logoutRider()" style="color: #ff7b7b; border-color: rgba(239, 68, 68, 0.4);">
+              🚪 Sign Out of Rider Account
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    function logoutRider() {
+      if (confirm('Are you sure you want to log out of the Rider Portal?')) {
+        API.logout();
       }
     }
   </script>

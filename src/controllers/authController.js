@@ -147,14 +147,33 @@ async function getProfile(req, res) {
  */
 function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  let token = null;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
+  } else if (req.query && req.query.token) {
+    token = req.query.token;
+  }
+
+  if (!token) {
     return res.status(401).json({ success: false, message: 'Authentication required. Missing Bearer token.' });
   }
 
-  const token = authHeader.split(' ')[1];
   try {
     const decoded = jwt.verify(token, config.jwtSecret);
     req.user = decoded;
+
+    // Strict Role-Based Isolation: Reject riders attempting to access admin views or reports
+    const role = (decoded.role || '').toLowerCase();
+    if (role === 'rider' || role === 'delivery_rider') {
+      const fullPath = (req.baseUrl + req.path).toLowerCase();
+      if (fullPath.includes('/admin') || fullPath.includes('/reports')) {
+        return res.status(403).json({
+          success: false,
+          message: 'Forbidden: Delivery rider accounts cannot access administrative views or reports.'
+        });
+      }
+    }
+
     next();
   } catch (err) {
     return res.status(401).json({ success: false, message: 'Invalid or expired authentication token.' });
