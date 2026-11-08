@@ -132,7 +132,7 @@ function renderBotPayload(message) {
         card.className = 'carousel-card';
         const imgStyle = isSquare ? 'style="height: 220px; object-fit: contain; background: #0066f6;"' : '';
         card.innerHTML = `
-          <img src="${el.image_url || 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=500'}" alt="${el.title}" ${imgStyle}>
+          <img src="${el.image_url || 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=500'}" alt="${escapeHtml(el.title)}" onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1541167760496-1628856ab772?w=500';" ${imgStyle}>
           <div class="carousel-card-body">
             <div class="carousel-title">${el.title}</div>
             <div class="carousel-subtitle">${el.subtitle || ''}</div>

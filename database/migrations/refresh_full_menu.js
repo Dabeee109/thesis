@@ -19,14 +19,14 @@ const verifiedCategories = [
 
 const verifiedMenuItems = [
   // PREMIUM DRINKS
-  { category: 'Drinks & Milktea', name: 'Biscoff Cheesecake', description: 'Rich creamy cheesecake blend topped with crushed Lotus Biscoff', price: 169.00, stock: 30, image_url: 'https://images.unsplash.com/photo-1533134242443-d4fd215305ad?w=600&auto=format&fit=crop&q=80' },
+  { category: 'Drinks & Milktea', name: 'Biscoff Cheesecake', description: 'Rich creamy cheesecake blend topped with crushed Lotus Biscoff', price: 169.00, stock: 30, image_url: 'https://images.unsplash.com/photo-1572490122747-3968b75cc699?w=600&auto=format&fit=crop&q=80' },
   { category: 'Drinks & Milktea', name: 'Choco Java Chips', description: 'Decadent chocolate blend infused with premium java chips', price: 169.00, stock: 30 },
   { category: 'Drinks & Milktea', name: "Diner's Signature Drink", description: 'House-crafted specialty blend with signature flavor profile', price: 149.00, stock: 40 },
   { category: 'Drinks & Milktea', name: 'Oreo Blast', description: 'Creamy cookies and cream indulgence loaded with crushed Oreos', price: 149.00, stock: 35 },
   { category: 'Drinks & Milktea', name: 'Two Two', description: 'Dual-flavor specialty blend with layered sweetness', price: 149.00, stock: 25 },
   { category: 'Drinks & Milktea', name: 'Purple Alcapone', description: 'Ube-infused creamy beverage with white chocolate undertones', price: 149.00, stock: 25 },
-  { category: 'Drinks & Milktea', name: 'Strawberries & Cream', description: 'Fresh strawberry puree layered over smooth velvety cream', price: 149.00, stock: 30 },
-  { category: 'Drinks & Milktea', name: 'Blueberries & Cream', description: 'Luscious blueberry reduction with chilled creamy base', price: 149.00, stock: 30 },
+  { category: 'Drinks & Milktea', name: 'Strawberries & Cream', description: 'Fresh strawberry puree layered over smooth velvety cream', price: 149.00, stock: 30, image_url: 'https://images.unsplash.com/photo-1553530666-ba11a7da3888?w=600&auto=format&fit=crop&q=80' },
+  { category: 'Drinks & Milktea', name: 'Blueberries & Cream', description: 'Luscious blueberry reduction with chilled creamy base', price: 149.00, stock: 30, image_url: 'https://images.unsplash.com/photo-1570696516188-ade861b84a49?w=600&auto=format&fit=crop&q=80' },
   { category: 'Drinks & Milktea', name: 'Caramel Macchiato', description: 'Espresso marked with velvety milk and rich caramel drizzle', price: 149.00, stock: 40 },
 
   // MILK TEA (LARGE)

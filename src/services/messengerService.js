@@ -180,27 +180,32 @@ async function sendQuickReplies(psid, text, quickReplies = [], options = {}) {
 
 const FALLBACK_MENU_IMAGES = {
   // Specific item signatures
-  'biscoff cheesecake': 'https://images.unsplash.com/photo-1533134242443-d4fd215305ad?w=600&auto=format&fit=crop&q=80',
+  'biscoff cheesecake': 'https://images.unsplash.com/photo-1572490122747-3968b75cc699?w=600&auto=format&fit=crop&q=80',
   'choco java chips': 'https://images.unsplash.com/photo-1572490122747-3968b75cc699?w=600&auto=format&fit=crop&q=80',
   "diner's signature drink": 'https://images.unsplash.com/photo-1517256064527-09c73fc73e38?w=600&auto=format&fit=crop&q=80',
   'oreo blast': 'https://images.unsplash.com/photo-1582293041079-7814c2f12063?w=600&auto=format&fit=crop&q=80',
   'two two': 'https://images.unsplash.com/photo-1579954115545-a95591f28bfc?w=600&auto=format&fit=crop&q=80',
   'purple alcapone': 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=600&auto=format&fit=crop&q=80',
   'strawberries & cream': 'https://images.unsplash.com/photo-1553530666-ba11a7da3888?w=600&auto=format&fit=crop&q=80',
-  'blueberries & cream': 'https://images.unsplash.com/photo-1553530666-ba11a7da3888?w=600&auto=format&fit=crop&q=80',
+  'blueberries & cream': 'https://images.unsplash.com/photo-1570696516188-ade861b84a49?w=600&auto=format&fit=crop&q=80',
   'caramel macchiato': 'https://images.unsplash.com/photo-1485808191679-5f86510681a2?w=600&auto=format&fit=crop&q=80',
 
-  // Category signatures
-  'drinks & milktea': 'https://images.unsplash.com/photo-1558857563-b371f32a76f2?w=600&auto=format&fit=crop&q=80',
+  // Beverage Category signatures
+  'drinks & milktea': 'https://images.unsplash.com/photo-1525385133512-2f3bdd039054?w=600&auto=format&fit=crop&q=80',
+  'milktea': 'https://images.unsplash.com/photo-1525385133512-2f3bdd039054?w=600&auto=format&fit=crop&q=80',
+  'fruit tea': 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=600&auto=format&fit=crop&q=80',
+  'yakult': 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=600&auto=format&fit=crop&q=80',
+
+  // Food Category signatures
   'burgers & sandwiches': 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&auto=format&fit=crop&q=80',
-  'starters & fries': 'https://images.unsplash.com/photo-1576107232684-1279f3908594?w=600&auto=format&fit=crop&q=80',
+  'starters & fries': 'https://images.unsplash.com/photo-1573080496219-bb080dd4f877?w=600&auto=format&fit=crop&q=80',
   'pizza & flat bread': 'https://images.unsplash.com/photo-1513104890138-7c749659a591?w=600&auto=format&fit=crop&q=80',
   'meals & steaks': 'https://images.unsplash.com/photo-1544025162-d76694265947?w=600&auto=format&fit=crop&q=80',
-  'pasta & platters': 'https://images.unsplash.com/photo-1621996346565-e3d5d6281699?w=600&auto=format&fit=crop&q=80',
-  'chicken wings & boneless': 'https://images.unsplash.com/photo-1527477378378-43d9646b9a67?w=600&auto=format&fit=crop&q=80',
-  'add-ons': 'https://images.unsplash.com/photo-1586190848861-99aa4a171e90?w=600&auto=format&fit=crop&q=80',
+  'pasta & platters': 'https://images.unsplash.com/photo-1551183053-bf91a1d81141?w=600&auto=format&fit=crop&q=80',
+  'chicken wings & boneless': 'https://images.unsplash.com/photo-1567620832903-9fc6debc209f?w=600&auto=format&fit=crop&q=80',
+  'add-ons': 'https://images.unsplash.com/photo-1525385133512-2f3bdd039054?w=600&auto=format&fit=crop&q=80',
 
-  // Universal Default
+  // Universal Default (clean cafe espresso cup matching admin default)
   'default': 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=600&auto=format&fit=crop&q=80'
 };
 
@@ -211,7 +216,7 @@ function getFallbackFoodImageUrl(meta = {}) {
   const name = String(meta.name || meta.title || '').toLowerCase().trim();
   const category = String(meta.category || meta.category_name || meta.subtitle || '').toLowerCase().trim();
 
-  // 1. Direct name match or partial match
+  // 1. Direct name match or exact item match
   for (const [key, url] of Object.entries(FALLBACK_MENU_IMAGES)) {
     if (key !== 'default' && (name === key || (name.length > 3 && name.includes(key)))) {
       return url;
@@ -222,25 +227,40 @@ function getFallbackFoodImageUrl(meta = {}) {
   if (name.includes('cheesecake') || name.includes('biscoff')) {
     return FALLBACK_MENU_IMAGES['biscoff cheesecake'];
   }
-  if (name.includes('burger') || name.includes('sandwich')) {
+  if (name.includes('blueberries') || name.includes('blueberry')) {
+    return FALLBACK_MENU_IMAGES['blueberries & cream'];
+  }
+  if (name.includes('strawberries') || name.includes('strawberry')) {
+    return FALLBACK_MENU_IMAGES['strawberries & cream'];
+  }
+  if (name.includes('macchiato') || name.includes('caramel')) {
+    return FALLBACK_MENU_IMAGES['caramel macchiato'];
+  }
+  if (name.includes('yakult') || name.includes('fruit tea')) {
+    return FALLBACK_MENU_IMAGES['fruit tea'];
+  }
+  if (name.includes('milktea') || name.includes('milk tea')) {
+    return FALLBACK_MENU_IMAGES['milktea'];
+  }
+  if (name.includes('burger') || name.includes('sandwich') || name.includes('dog')) {
     return FALLBACK_MENU_IMAGES['burgers & sandwiches'];
   }
   if (name.includes('pizza') || name.includes('flat bread')) {
     return FALLBACK_MENU_IMAGES['pizza & flat bread'];
   }
-  if (name.includes('wings') || name.includes('chicken')) {
+  if (name.includes('wing') || name.includes('wings') || name.includes('chicken') || name.includes('sisig')) {
     return FALLBACK_MENU_IMAGES['chicken wings & boneless'];
   }
-  if (name.includes('fries') || name.includes('nachos') || name.includes('starter')) {
+  if (name.includes('fries') || name.includes('nachos') || name.includes('starter') || name.includes('nugget') || name.includes('quesadilla') || name.includes('stick')) {
     return FALLBACK_MENU_IMAGES['starters & fries'];
   }
-  if (name.includes('pasta') || name.includes('spaghetti') || name.includes('carbonara')) {
+  if (name.includes('pasta') || name.includes('spaghetti') || name.includes('carbonara') || name.includes('lasagna') || name.includes('macaroni') || name.includes('platter')) {
     return FALLBACK_MENU_IMAGES['pasta & platters'];
   }
-  if (name.includes('steak') || name.includes('meal') || name.includes('rice')) {
+  if (name.includes('steak') || name.includes('meal') || name.includes('rice') || name.includes('cheelog') || name.includes('ribs') || name.includes('bowl') || name.includes('lunch pack')) {
     return FALLBACK_MENU_IMAGES['meals & steaks'];
   }
-  if (name.includes('tea') || name.includes('coffee') || name.includes('drink') || name.includes('yakult')) {
+  if (name.includes('tea') || name.includes('coffee') || name.includes('drink') || name.includes('brew')) {
     return FALLBACK_MENU_IMAGES['drinks & milktea'];
   }
 
@@ -255,10 +275,11 @@ function getFallbackFoodImageUrl(meta = {}) {
 }
 
 /**
- * Resolves any item image URL into a verified, secure absolute HTTPS URL for Facebook Messenger.
+ * Resolves any item image URL into a verified, secure URL for Facebook Messenger or Webhook Simulator.
  * Protects against relative paths (/uploads/...), empty/null values, and ngrok-free interstitial blocks.
  */
-function resolveMessengerImageUrl(rawUrl, meta = {}) {
+function resolveMessengerImageUrl(rawUrl, meta = {}, options = {}) {
+  const isSimulator = !!(options.isSimulator || meta.isSimulator || (typeof meta.psid === 'string' && meta.psid.startsWith('sim_')));
   const fallback = getFallbackFoodImageUrl(meta);
 
   if (!rawUrl || typeof rawUrl !== 'string' || !rawUrl.trim() || rawUrl.trim() === 'null') {
@@ -267,7 +288,16 @@ function resolveMessengerImageUrl(rawUrl, meta = {}) {
 
   let url = rawUrl.trim();
 
-  // If already a valid public HTTPS URL (e.g. Unsplash, Cloudinary, AWS S3, etc.)
+  // If in simulator mode (browser running on user machine):
+  // Preserve uploaded / local images exactly as they are so the simulator displays the exact Menu Catalog picture!
+  if (isSimulator) {
+    if (url.startsWith('/')) {
+      return url;
+    }
+    return url;
+  }
+
+  // If already a valid public HTTPS URL (e.g. Unsplash, Imgur, Cloudinary, AWS S3, etc.)
   if (url.startsWith('https://')) {
     // If it points to ngrok-free or localhost, external crawlers/mobile clients cannot render it
     // because ngrok-free intercepts with ERR_NGROK_6024 HTML warning page.
@@ -308,13 +338,16 @@ function resolveMessengerImageUrl(rawUrl, meta = {}) {
  * Send Generic Template Carousel (Menu browsing / Best sellers)
  */
 async function sendGenericTemplate(psid, elements = [], options = {}) {
+  const isSimulator = !!(options.isSimulator || (typeof psid === 'string' && psid.startsWith('sim_')));
   const cleanedElements = elements.slice(0, 10).map(el => {
     const finalImageUrl = resolveMessengerImageUrl(el.image_url, {
       name: el.title,
       category: el.subtitle,
       title: el.title,
-      subtitle: el.subtitle
-    });
+      subtitle: el.subtitle,
+      psid,
+      isSimulator
+    }, { isSimulator });
 
     return {
       ...el,

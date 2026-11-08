@@ -2870,11 +2870,14 @@ async function sendFullMenu(psid, session) {
     }
     subtitle = subtitle.substring(0, 80);
 
+    const isSimulator = typeof psid === 'string' && psid.startsWith('sim_');
     const imageUrl = resolveMessengerImageUrl(it.image_url, {
       name: it.name,
       category: it.category_name,
-      subtitle: it.description
-    });
+      subtitle: it.description,
+      psid,
+      isSimulator
+    }, { isSimulator });
 
     return {
       title,
@@ -2925,11 +2928,14 @@ async function sendCategoryMenu(psid, slug) {
   }
 
   const elements = items.slice(0, 10).map(it => {
+    const isSimulator = typeof psid === 'string' && psid.startsWith('sim_');
     const imageUrl = resolveMessengerImageUrl(it.image_url, {
       name: it.name,
       category: it.category_name,
-      subtitle: it.description
-    });
+      subtitle: it.description,
+      psid,
+      isSimulator
+    }, { isSimulator });
     return {
       title: `${it.name} · ${peso(it.price)}`.substring(0, 80),
       subtitle: String(it.description || '').substring(0, 80),
