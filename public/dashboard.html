@@ -11,13 +11,52 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/dashboard.css">
+  <!-- Immediate Strict Frontend Auth Guard (Requirement 4) -->
   <script>
-    try {
-      const u = JSON.parse(localStorage.getItem('diners_user') || 'null');
-      if (u && (u.role === 'rider' || u.role === 'delivery_rider' || u.role === 'DELIVERY_RIDER')) {
+    (function () {
+      function getAuthToken() {
+        return localStorage.getItem('diners_token') || sessionStorage.getItem('diners_token');
+      }
+      function getAuthUser() {
+        try {
+          return JSON.parse(localStorage.getItem('diners_user') || sessionStorage.getItem('diners_user') || 'null');
+        } catch (e) {
+          return null;
+        }
+      }
+      function isTokenValid(token) {
+        if (!token || typeof token !== 'string') return false;
+        try {
+          const parts = token.split('.');
+          if (parts.length !== 3) return false;
+          const payload = JSON.parse(atob(parts[1]));
+          if (payload.exp && Date.now() >= payload.exp * 1000) {
+            return false;
+          }
+          return true;
+        } catch (e) {
+          return false;
+        }
+      }
+
+      const token = getAuthToken();
+      const user = getAuthUser();
+
+      if (!token || !user || !isTokenValid(token)) {
+        localStorage.removeItem('diners_token');
+        localStorage.removeItem('diners_user');
+        sessionStorage.removeItem('diners_token');
+        sessionStorage.removeItem('diners_user');
+        window.location.replace('/login.html?redirect=' + encodeURIComponent(window.location.pathname));
+        return;
+      }
+
+      // Role isolation: Delivery riders cannot access administrative dashboard
+      const role = (user.role || '').toLowerCase();
+      if (role === 'rider' || role === 'delivery_rider') {
         window.location.replace('/rider-portal.html');
       }
-    } catch (e) {}
+    })();
   </script>
 </head>
 <body>
@@ -84,12 +123,12 @@
     <div class="main-wrapper" id="mainContent">
       <!-- Topbar -->
       <header class="topbar">
-        <div style="display: flex; align-items: center; gap: 14px;">
-          <button id="sidebarToggle" class="sidebar-toggle-btn" onclick="toggleSidebar()" aria-label="Toggle Sidebar" title="Toggle Sidebar">
+        <div class="topbar-left" style="display: flex; align-items: center; gap: 14px; min-width: 0; flex: 1;">
+          <button id="sidebarToggle" class="sidebar-toggle-btn" aria-label="Toggle Sidebar" title="Toggle Sidebar">
             ☰
           </button>
-          <div class="topbar-title">
-            <h1 style="font-size: 1.35rem;" id="page-title">Operational Overview</h1>
+          <div class="topbar-title" style="min-width: 0; overflow: hidden;">
+            <h1 style="font-size: 1.35rem; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" id="page-title">Operational Overview</h1>
             <div class="live-indicator">
               <span class="live-dot"></span>
               <span>Live Stream Active</span>

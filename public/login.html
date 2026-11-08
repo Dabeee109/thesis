@@ -139,8 +139,12 @@
           API.toast(`Welcome back, ${res.user.name}!`, 'success');
 
           setTimeout(() => {
-            if (res.user.role === 'rider') {
-              window.location.href = '/rider.html';
+            const params = new URLSearchParams(window.location.search);
+            const redirectUrl = params.get('redirect');
+            if (redirectUrl && !redirectUrl.includes('login')) {
+              window.location.href = redirectUrl;
+            } else if (res.user.role === 'rider') {
+              window.location.href = '/rider-portal.html';
             } else {
               window.location.href = '/dashboard.html';
             }

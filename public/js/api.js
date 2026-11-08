@@ -25,9 +25,47 @@ const API = {
     localStorage.setItem('diners_user', JSON.stringify(user));
   },
 
+  isAuthenticated() {
+    const token = this.getToken();
+    const user = this.getUser();
+    if (!token || !user) return false;
+    try {
+      const parts = token.split('.');
+      if (parts.length !== 3) return false;
+      const payload = JSON.parse(atob(parts[1]));
+      if (payload.exp && Date.now() >= payload.exp * 1000) {
+        this.logout();
+        return false;
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  },
+
+  requireAuth(options = {}) {
+    if (!this.isAuthenticated()) {
+      const currentPath = window.location.pathname;
+      window.location.replace('/login.html?redirect=' + encodeURIComponent(currentPath));
+      return false;
+    }
+    const user = this.getUser();
+    if (options.role && user && user.role !== options.role) {
+      if (user.role === 'rider') {
+        window.location.replace('/rider-portal.html');
+      } else {
+        window.location.replace('/dashboard.html');
+      }
+      return false;
+    }
+    return true;
+  },
+
   logout() {
     localStorage.removeItem('diners_token');
     localStorage.removeItem('diners_user');
+    sessionStorage.removeItem('diners_token');
+    sessionStorage.removeItem('diners_user');
     window.location.href = '/login.html';
   },
 

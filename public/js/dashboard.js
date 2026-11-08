@@ -19,9 +19,12 @@ function escapeHtml(str) {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // 0. Strict Authentication Guard (Requirement 4)
+  if (!API.requireAuth()) return;
+
   // Restore desktop sidebar collapsed preference (Module 4)
   try {
-    if (window.innerWidth > 768 && localStorage.getItem('sidebar_collapsed') === 'true') {
+    if (window.innerWidth > 1024 && localStorage.getItem('sidebar_collapsed') === 'true') {
       document.body.classList.add('sidebar-collapsed');
     }
   } catch (e) {}
@@ -40,8 +43,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('user-avatar-initials').innerText = initials;
   }
 
-  // 2. Setup Navigation Tabs
+  // 2. Setup Navigation Tabs & Responsive Sidebar Toggle
   setupNavigation();
+  initSidebarToggle();
 
   // 3. Initial Data Load
   await refreshAllData();
@@ -97,10 +101,61 @@ function setupNavigation() {
   });
 }
 
-// Sidebar Collapsible Controller (Module 4)
+// Sidebar Collapsible & Mobile/Tablet Drawer Controller (Requirement 1)
+function initSidebarToggle() {
+  const toggleBtn = document.getElementById('sidebarToggle');
+  const backdrop = document.getElementById('sidebarBackdrop');
+
+  if (toggleBtn) {
+    let lastTime = 0;
+    const handleToggle = (e) => {
+      const now = Date.now();
+      if (now - lastTime < 280) {
+        if (e) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        return;
+      }
+      lastTime = now;
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      toggleSidebar();
+    };
+
+    toggleBtn.addEventListener('click', handleToggle);
+    toggleBtn.addEventListener('touchend', handleToggle, { passive: false });
+  }
+
+  if (backdrop) {
+    const handleClose = (e) => {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      toggleSidebar(false);
+    };
+    backdrop.addEventListener('click', handleClose);
+    backdrop.addEventListener('touchend', handleClose, { passive: false });
+  }
+
+  // Automatically close mobile/tablet drawer when any navigation tab is clicked
+  document.querySelectorAll('.nav-item').forEach(item => {
+    const closeOnNav = () => {
+      if (window.innerWidth <= 1024) {
+        toggleSidebar(false);
+      }
+    };
+    item.addEventListener('click', closeOnNav);
+    item.addEventListener('touchend', closeOnNav, { passive: true });
+  });
+}
+
 function toggleSidebar(forceState) {
-  const isMobile = window.innerWidth <= 768;
-  if (isMobile) {
+  const isMobileOrTablet = window.innerWidth <= 1024;
+  if (isMobileOrTablet) {
     if (typeof forceState === 'boolean') {
       document.body.classList.toggle('sidebar-mobile-open', forceState);
     } else {
@@ -115,6 +170,7 @@ function toggleSidebar(forceState) {
     } catch (e) {}
   }
 }
+window.toggleSidebar = toggleSidebar;
 
 // Web Audio API Order Chime Alert (Module 2.B)
 function playOrderChime() {
@@ -154,7 +210,7 @@ function playOrderChime() {
 }
 
 function switchTab(tabId) {
-  if (window.innerWidth <= 768) {
+  if (window.innerWidth <= 1024) {
     toggleSidebar(false);
   }
 

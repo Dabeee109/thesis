@@ -2,14 +2,18 @@
   "name": "Diner's Cafe Ordering & Delivery",
   "short_name": "Diner's Cafe",
   "description": "AI-Powered Cafe Ordering, Operations & Smart Delivery Mobile App for Phone & Tablet",
-  "id": "/index.html",
-  "start_url": "/index.html",
+  "id": "/login.html",
+  "start_url": "/login.html",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#0f0b08",
   "theme_color": "#d4a373",
-  "categories": ["food", "shopping", "business"],
+  "categories": [
+    "food",
+    "shopping",
+    "business"
+  ],
   "icons": [
     {
       "src": "/assets/icon-192.svg",
@@ -32,25 +36,28 @@
   ],
   "shortcuts": [
     {
+      "name": "Staff Portal Login",
+      "short_name": "Login",
+      "description": "Sign in to Diner's Cafe Operations",
+      "url": "/login.html",
+      "icons": [
+        {
+          "src": "/assets/icon-192.svg",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
       "name": "Delivery Radius Checker",
       "short_name": "Delivery Zone",
       "description": "Check 3km delivery radius and calculate fares",
       "url": "/delivery-check.html",
-      "icons": [{ "src": "/assets/icon-192.svg", "sizes": "192x192" }]
-    },
-    {
-      "name": "Delivery Rider Portal",
-      "short_name": "Rider View",
-      "description": "Active delivery tasks and real-time navigation",
-      "url": "/rider.html",
-      "icons": [{ "src": "/assets/icon-192.svg", "sizes": "192x192" }]
-    },
-    {
-      "name": "Admin Operations Command",
-      "short_name": "Admin Dashboard",
-      "description": "Live order Kanban and kitchen preparation",
-      "url": "/dashboard.html",
-      "icons": [{ "src": "/assets/icon-192.svg", "sizes": "192x192" }]
+      "icons": [
+        {
+          "src": "/assets/icon-192.svg",
+          "sizes": "192x192"
+        }
+      ]
     }
   ]
 }

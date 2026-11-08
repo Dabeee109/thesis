@@ -10,6 +10,46 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="css/style.css">
+  <!-- Immediate Strict Frontend Auth Guard (Requirement 4) -->
+  <script>
+    (function () {
+      function getAuthToken() {
+        return localStorage.getItem('diners_token') || sessionStorage.getItem('diners_token');
+      }
+      function getAuthUser() {
+        try {
+          return JSON.parse(localStorage.getItem('diners_user') || sessionStorage.getItem('diners_user') || 'null');
+        } catch (e) {
+          return null;
+        }
+      }
+      function isTokenValid(token) {
+        if (!token || typeof token !== 'string') return false;
+        try {
+          const parts = token.split('.');
+          if (parts.length !== 3) return false;
+          const payload = JSON.parse(atob(parts[1]));
+          if (payload.exp && Date.now() >= payload.exp * 1000) {
+            return false;
+          }
+          return true;
+        } catch (e) {
+          return false;
+        }
+      }
+
+      const token = getAuthToken();
+      const user = getAuthUser();
+
+      if (!token || !user || !isTokenValid(token)) {
+        localStorage.removeItem('diners_token');
+        localStorage.removeItem('diners_user');
+        sessionStorage.removeItem('diners_token');
+        sessionStorage.removeItem('diners_user');
+        window.location.replace('/login.html?redirect=' + encodeURIComponent(window.location.pathname));
+      }
+    })();
+  </script>
   <style>
     .rider-container {
       max-width: 600px;
