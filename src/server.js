@@ -157,12 +157,19 @@ app.get('/pay/gcash', (req, res) => {
 </html>`);
 });
 
+// Health check endpoint for cloud hosting / Render
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
+
 // Catch-all route to serve portal
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api') || req.path === '/webhook' || req.path.startsWith('/pay')) {
     return next();
   }
-  res.sendFile(path.join(__dirname, '../public/index.html'));
+  res.sendFile(path.join(__dirname, '../public/index.html'), (err) => {
+    if (err) next(err);
+  });
 });
 
 // Error handling middleware
@@ -197,14 +204,17 @@ async function startServer() {
   const { startInactivityWorker } = require('./services/inactivityWorker');
   startInactivityWorker(60000);
 
-  app.listen(config.port, () => {
+  const port = process.env.PORT ? parseInt(process.env.PORT, 10) : (config.port || 10000);
+  const host = '0.0.0.0';
+
+  app.listen(port, host, () => {
     console.log(`================================================================`);
-    console.log(`☕ Diner's Cafe Ordering & Delivery System is running!`);
-    console.log(`🌐 Application URL: ${config.appUrl}`);
-    console.log(`📋 Admin Dashboard: ${config.appUrl}/dashboard.html`);
-    console.log(`🛵 Delivery Rider View: ${config.appUrl}/rider.html`);
-    console.log(`💬 Messenger Simulator: ${config.appUrl}/simulator.html`);
-    console.log(`🔗 Webhook Endpoint: ${config.appUrl}/webhook`);
+    console.log(`☕ Diner's Cafe Ordering & Delivery System is running on ${host}:${port}!`);
+    console.log(`🌐 Application URL: ${config.appUrl || 'http://localhost:' + port}`);
+    console.log(`📋 Admin Dashboard: /dashboard.html`);
+    console.log(`🛵 Delivery Rider View: /rider.html`);
+    console.log(`💬 Messenger Simulator: /simulator.html`);
+    console.log(`🔗 Webhook Endpoint: /webhook`);
     console.log(`================================================================`);
   });
 }
