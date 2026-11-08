@@ -1019,7 +1019,7 @@
         <h3 id="modal-menu-title">Add Menu Item</h3>
         <button class="modal-close" onclick="closeModal('modal-menu-item')">&times;</button>
       </div>
-      <form id="menu-item-form" onsubmit="handleMenuItemSubmit(event)">
+      <form id="menu-item-form" novalidate onsubmit="handleMenuItemSubmit(event)">
         <input type="hidden" id="menu-item-id">
 
         <div class="form-group">
@@ -1094,7 +1094,7 @@
                 Or enter an image URL
               </a>
               <div id="menu-url-container" style="display: none; margin-top: 8px;">
-                <input type="url" id="menu-img-input" class="form-control" placeholder="https://images.unsplash.com/..." oninput="handleManualImageUrl(this.value)">
+                <input type="text" id="menu-img-input" class="form-control" placeholder="https://images.unsplash.com/... or /uploads/..." oninput="handleManualImageUrl(this.value)">
               </div>
             </div>
           </div>
@@ -1104,7 +1104,7 @@
 
         <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
           <button type="button" class="btn btn-secondary" onclick="closeModal('modal-menu-item')">Cancel</button>
-          <button type="submit" class="btn btn-primary" id="menu-save-btn">Save Item</button>
+          <button type="submit" class="btn btn-primary" id="menu-save-btn" onclick="handleMenuItemSubmit(event)">Save Item</button>
         </div>
       </form>
     </div>

@@ -1322,22 +1322,45 @@ function openEditMenuItemModal(itemId) {
 
   const select = document.getElementById('menu-cat-select');
   select.innerHTML = allMenuCategories.map(c => `
-    <option value="${c.id}" ${c.id === targetItem.category_id ? 'selected' : ''}>${c.name}</option>
+    <option value="${c.id}" ${Number(c.id) === Number(targetItem.category_id) ? 'selected' : ''}>${c.name}</option>
   `).join('');
 
   openModal('modal-menu-item');
 }
 
 async function handleMenuItemSubmit(e) {
-  e.preventDefault();
+  if (e && e.preventDefault) {
+    e.preventDefault();
+  }
+
   const id = document.getElementById('menu-item-id').value;
-  const categoryId = document.getElementById('menu-cat-select').value;
-  const name = document.getElementById('menu-name-input').value;
-  const description = document.getElementById('menu-desc-input').value;
-  const price = document.getElementById('menu-price-input').value;
-  const prepTimeMin = document.getElementById('menu-prep-input').value;
-  let imageUrl = document.getElementById('menu-img-input').value;
-  
+  let categoryId = document.getElementById('menu-cat-select').value;
+  const name = (document.getElementById('menu-name-input').value || '').trim();
+  const description = (document.getElementById('menu-desc-input').value || '').trim();
+  const priceInput = document.getElementById('menu-price-input').value;
+  const price = parseFloat(priceInput);
+  const prepTimeMin = parseInt(document.getElementById('menu-prep-input').value, 10) || 10;
+  let imageUrl = (document.getElementById('menu-img-input').value || '').trim();
+
+  // Validate required fields
+  if (!name) {
+    API.toast('Please enter the item name.', 'warning');
+    const nameInput = document.getElementById('menu-name-input');
+    if (nameInput) nameInput.focus();
+    return;
+  }
+
+  if (isNaN(price) || price < 0) {
+    API.toast('Please enter a valid price.', 'warning');
+    const priceEl = document.getElementById('menu-price-input');
+    if (priceEl) priceEl.focus();
+    return;
+  }
+
+  if (!categoryId && allMenuCategories.length > 0) {
+    categoryId = allMenuCategories[0].id;
+  }
+
   // Stock and Availability values
   const stockQuantity = parseInt(document.getElementById('menu-stock-input').value, 10) || 0;
   const availSelect = document.getElementById('menu-availability-input');
@@ -1377,7 +1400,7 @@ async function handleMenuItemSubmit(e) {
         stock_quantity: stockQuantity,
         is_available: isAvailable
       });
-      API.toast('Menu item updated!', 'success');
+      API.toast('Menu item updated successfully!', 'success');
     } else {
       await API.post('/menu', { 
         categoryId, 
@@ -1391,12 +1414,13 @@ async function handleMenuItemSubmit(e) {
         is_available: isAvailable,
         unit 
       });
-      API.toast('Menu item created!', 'success');
+      API.toast('Menu item created successfully!', 'success');
     }
     closeModal('modal-menu-item');
     loadMenu();
   } catch (err) {
     console.error('Menu submit error:', err);
+    API.toast(err.message || 'Failed to save menu item. Please try again.', 'danger');
   } finally {
     if (saveBtn) {
       saveBtn.disabled = false;
