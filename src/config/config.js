@@ -40,15 +40,15 @@ module.exports = {
   timezone: process.env.TZ_NAME || 'Asia/Manila',
 
   store: {
-    name: process.env.STORE_NAME || "Diner's Cafe",
+    name: process.env.STORE_NAME || "Diner's Cafe - Main Branch",
     phone: process.env.STORE_PHONE || '+63 912 345 6789',
     address: process.env.STORE_ADDRESS || '123 Academic Hub Ave., University District',
     gcashName: process.env.STORE_GCASH_NAME || "Diner's Cafe Official",
     gcashNumber: process.env.STORE_GCASH_NUMBER || '0912-345-6789',
     hours: process.env.STORE_HOURS || 'Monday - Sunday: 8:00 AM - 9:00 PM',
     maxDeliveryKm: parseFloat(process.env.STORE_MAX_DELIVERY_KM || '3.0'),
-    lat: parseFloat(process.env.STORE_LAT),
-    lng: parseFloat(process.env.STORE_LNG)
+    lat: Number.isFinite(parseFloat(process.env.STORE_LAT)) ? parseFloat(process.env.STORE_LAT) : 14.6143686,
+    lng: Number.isFinite(parseFloat(process.env.STORE_LNG)) ? parseFloat(process.env.STORE_LNG) : 120.9642334
   },
 
   maps: {

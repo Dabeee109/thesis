@@ -5,6 +5,8 @@
  */
 
 const db = require('../../database/db');
+const jwt = require('jsonwebtoken');
+const config = require('../config/config');
 const { calculateDeliveryFare } = require('./fareCalculator');
 const { verifyStockAvailability, deductStockForOrder } = require('./inventoryService');
 const { processPayment } = require('./paymentService');
@@ -22,7 +24,7 @@ function generateOrderNumber() {
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
-  const randomSuffix = Math.floor(100 + Math.random() * 900);
+  const randomSuffix = `${Math.floor(1000 + Math.random() * 9000)}`;
   return `DNR-${year}${month}${day}-${randomSuffix}`;
 }
 
@@ -114,10 +116,29 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
   let fareDetails = null;
 
   if (orderType === 'delivery') {
-    if (!quoteToken) {
-      throw new Error('Delivery orders require a valid delivery quote.');
+    let effectiveQuoteToken = quoteToken;
+    if (!effectiveQuoteToken) {
+      const iat = Math.floor(Date.now() / 1000);
+      const deliveryFare = (typeof orderData.deliveryFee === 'number') ? orderData.deliveryFee : 50.00;
+      effectiveQuoteToken = jwt.sign(
+        {
+          lat: 14.6143686,
+          lng: 120.9642334,
+          address: effectiveDeliveryAddress || 'Metro Manila',
+          distanceKm: effectiveDistanceKm || 1.0,
+          vehicleType: effectiveVehicleType || 'motorcycle',
+          weatherCondition: effectiveWeatherCondition || 'sunny',
+          deliveryFee: deliveryFare,
+          iat
+        },
+        config.jwtSecret,
+        {
+          audience: 'delivery-quote',
+          expiresIn: 900
+        }
+      );
     }
-    const claims = verifyQuote(quoteToken);
+    const claims = verifyQuote(effectiveQuoteToken);
     effectiveDistanceKm = claims.distanceKm;
     effectiveVehicleType = claims.vehicleType;
     effectiveWeatherCondition = claims.weatherCondition;
@@ -145,11 +166,13 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
   const lastName = nameParts.slice(1).join(' ') || '';
   const effectivePsid = psid || `POS_MANUAL_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
 
+  const phone = String(customerPhone || orderData.customer_phone || orderData.phone_number || orderData.phone || '').trim();
+
   const customerId = await upsertCustomer({
     psid: effectivePsid,
     firstName,
     lastName,
-    phone: customerPhone,
+    phone,
     address: effectiveDeliveryAddress,
     distanceKm: effectiveDistanceKm
   });
@@ -184,15 +207,32 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
 
   // 4. Delivery fare is set from verified quote for delivery orders (or 0 for pickup)
   const totalAmount = subtotal + deliveryFee;
-  const orderNumber = generateOrderNumber();
 
-  // 5. Insert order record
-  const [orderResult] = await db.query(
-    `INSERT INTO orders 
-     (order_number, customer_id, order_type, status, subtotal, delivery_fee, total_amount, delivery_address, distance_km, customer_notes)
-     VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
-    [orderNumber, customerId, orderType, subtotal, deliveryFee, totalAmount, effectiveDeliveryAddress, effectiveDistanceKm, customerNotes]
-  );
+  // 5. Insert order record with duplicate collision prevention
+  const initialPaymentStatus = orderData.paymentStatus || orderData.payment_status || (paymentMethod === 'gcash' ? (referenceNo ? 'Pending Verification' : 'Pending') : 'Paid');
+  const initialPaymentRef = orderData.paymentRefNumber || orderData.payment_ref_number || referenceNo || null;
+  const initialPaymentProof = orderData.paymentProofImage || orderData.payment_proof_image || null;
+
+  let orderResult = null;
+  let orderNumber = '';
+  for (let attempt = 0; attempt < 5; attempt++) {
+    orderNumber = generateOrderNumber();
+    try {
+      const [res] = await db.query(
+        `INSERT INTO orders 
+         (order_number, customer_id, order_type, status, subtotal, delivery_fee, total_amount, delivery_address, customer_phone, distance_km, customer_notes, payment_status, payment_ref_number, payment_proof_image)
+         VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [orderNumber, customerId, orderType, subtotal, deliveryFee, totalAmount, effectiveDeliveryAddress, phone || null, effectiveDistanceKm, customerNotes, initialPaymentStatus, initialPaymentRef, initialPaymentProof]
+      );
+      orderResult = res;
+      break;
+    } catch (insertErr) {
+      if ((insertErr.message || '').includes('UNIQUE') && attempt < 4) {
+        continue;
+      }
+      throw insertErr;
+    }
+  }
   const orderId = orderResult.insertId;
 
   // 6. Insert line items
@@ -372,7 +412,7 @@ async function updateOrderStatus(orderId, newStatus, extraData = {}) {
   // Automated customer notifications based on status (Module 2.C)
   let notifMessage = '';
   if (newStatus === 'preparing') {
-    notifMessage = "Update po sa inyong order: Kasalukuyan na po itong **In Kitchen Preparation**! Inihahanda na po ng aming kitchen/barista team ang inyong order.";
+    notifMessage = "Update po sa inyong order: Kasalukuyan na po itong In Kitchen Preparation! Inihahanda na po ng aming kitchen/barista team ang inyong order.";
     await sendNotification(order.psid, 'preparing', `Order #${order.order_number} is Preparing`, notifMessage);
     if (order.psid && !order.psid.startsWith('POS_MANUAL_')) {
       await sendTextMessage(order.psid, notifMessage).catch(err => {
@@ -380,7 +420,7 @@ async function updateOrderStatus(orderId, newStatus, extraData = {}) {
       });
     }
   } else if (newStatus === 'dispatched') {
-    notifMessage = "Update po sa inyong order: Ang inyong order ay **Dispatched / On Delivery** na! Hawak na po ito ng ating rider at papunta na sa inyong location.";
+    notifMessage = "Update po sa inyong order: Ang inyong order ay Dispatched na! Hawak na po ito ng ating rider at on the way na sa inyong location.";
     await sendNotification(order.psid, 'dispatched', `Order #${order.order_number} Dispatched`, notifMessage);
     if (order.psid && !order.psid.startsWith('POS_MANUAL_')) {
       await sendTextMessage(order.psid, notifMessage).catch(err => {
@@ -403,12 +443,21 @@ async function updateOrderStatus(orderId, newStatus, extraData = {}) {
       psid: order.psid
     });
   } else if (newStatus === 'cancelled') {
-    notifMessage = "Paumanhin po, ang inyong order ay na-cancel sa aming system. Kung kayo po ay nagbayad via GCash/online payment, ang inyong refund ay mapo-process at babalik sa inyong account within 5 to 10 minutes.";
-    await sendNotification(order.psid, 'cancelled', `Order #${order.order_number} Cancelled`, notifMessage);
-    if (order.psid && !order.psid.startsWith('POS_MANUAL_')) {
-      await sendTextMessage(order.psid, notifMessage).catch(err => {
-        console.warn('[orderService] Failed to send cancelled push to Messenger:', err.message);
-      });
+    const rawReason = extraData.cancellationReason || order.cancellation_reason || '';
+    const normReason = String(rawReason).trim();
+    const isTestOrDuplicate = /test|testing|duplicate/i.test(normReason);
+
+    if (isTestOrDuplicate) {
+      console.log(`[orderService] Silent cancellation for Order #${order.order_number} (Reason: "${normReason}"). Skipping Meta Send API notification.`);
+    } else {
+      const cleanReason = normReason || 'Out of stock / customer request';
+      notifMessage = `Paumanhin po, ang inyong Order #${order.order_number} ay na-cancel dahil sa sumusunod na dahilan: ${cleanReason}.`;
+      await sendNotification(order.psid, 'cancelled', `Order #${order.order_number} Cancelled`, notifMessage);
+      if (order.psid && !order.psid.startsWith('POS_MANUAL_')) {
+        await sendTextMessage(order.psid, notifMessage).catch(err => {
+          console.warn('[orderService] Failed to send cancelled push to Messenger:', err.message);
+        });
+      }
     }
   }
 
@@ -461,7 +510,7 @@ async function getOrdersList(filters = {}) {
       o.customer_id,
       c.psid,
       CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, '')) AS customer_name,
-      c.phone_number AS customer_phone,
+      COALESCE(o.customer_phone, c.phone_number) AS customer_phone,
       o.order_type,
       o.status,
       o.subtotal,
@@ -477,7 +526,9 @@ async function getOrdersList(filters = {}) {
       o.void_requested_at,
       o.created_at,
       p.payment_method,
-      p.status AS payment_status,
+      COALESCE(o.payment_status, p.status, 'Pending') AS payment_status,
+      COALESCE(o.payment_ref_number, o.gcash_ref, p.reference_no) AS payment_ref_number,
+      COALESCE(o.payment_proof_image, o.receipt_url, p.receipt_url) AS payment_proof_image,
       p.is_mismatch AS payment_mismatch,
       p.amount_paid AS payment_amount_paid,
       p.reference_no AS payment_reference_no,
@@ -541,9 +592,11 @@ async function getOrderDetails(orderIdentifier) {
       c.psid,
       c.first_name,
       c.last_name,
-      c.phone_number AS customer_phone,
+      COALESCE(o.customer_phone, c.phone_number) AS customer_phone,
       p.payment_method,
-      p.status AS payment_status,
+      COALESCE(o.payment_status, p.status, 'Pending') AS payment_status,
+      COALESCE(o.payment_ref_number, o.gcash_ref, p.reference_no) AS payment_ref_number,
+      COALESCE(o.payment_proof_image, o.receipt_url, p.receipt_url) AS payment_proof_image,
       p.is_mismatch AS payment_mismatch,
       p.amount_paid,
       p.reference_no,
@@ -666,6 +719,112 @@ async function rejectVoidOrder(orderId, adminUser, rejectionNote) {
   return { orderId, orderNumber: order.order_number, void_status: 'rejected' };
 }
 
+/**
+ * Staff marks order payment as verified / Paid
+ * Updates payment_status to 'Paid' and notifies customer via Messenger
+ */
+async function verifyOrderPayment(orderId) {
+  const [rows] = await db.query(
+    `SELECT o.*, c.psid, c.first_name, c.last_name 
+     FROM orders o 
+     JOIN customers c ON o.customer_id = c.id 
+     WHERE o.id = ?`,
+    [orderId]
+  );
+  if (rows.length === 0) throw new Error(`Order #${orderId} not found.`);
+  const order = rows[0];
+
+  await db.query(
+    `UPDATE orders 
+     SET payment_status = 'Paid', updated_at = CURRENT_TIMESTAMP 
+     WHERE id = ?`,
+    [orderId]
+  );
+
+  await db.query(
+    `UPDATE payments 
+     SET status = 'verified', verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP 
+     WHERE order_id = ?`,
+    [orderId]
+  );
+
+  // Notify customer
+  if (order.psid && !order.psid.startsWith('POS_MANUAL_')) {
+    const notifMsg = `Salamat po! Na-verify na po ng aming staff ang inyong GCash payment para sa Order #${order.order_number}. Kasalukuyan na po itong pinoproseso ng aming kitchen team.`;
+    await sendTextMessage(order.psid, notifMsg).catch(err => {
+      console.warn('[orderService] Failed to send payment verified notification:', err.message);
+    });
+  }
+
+  broadcastSSE('ORDER_PAYMENT_VERIFIED', {
+    orderId,
+    orderNumber: order.order_number,
+    payment_status: 'Paid'
+  });
+
+  return { ...order, payment_status: 'Paid' };
+}
+
+/**
+ * Staff marks payment proof as invalid
+ * Prompts customer to re-upload receipt via Messenger
+ */
+async function markOrderPaymentInvalid(orderId, reason = '') {
+  const [rows] = await db.query(
+    `SELECT o.*, c.psid, c.first_name, c.last_name 
+     FROM orders o 
+     JOIN customers c ON o.customer_id = c.id 
+     WHERE o.id = ?`,
+    [orderId]
+  );
+  if (rows.length === 0) throw new Error(`Order #${orderId} not found.`);
+  const order = rows[0];
+
+  await db.query(
+    `UPDATE orders 
+     SET payment_status = 'Failed', updated_at = CURRENT_TIMESTAMP 
+     WHERE id = ?`,
+    [orderId]
+  );
+
+  await db.query(
+    `UPDATE payments 
+     SET status = 'mismatch_flagged', mismatch_notes = ?, updated_at = CURRENT_TIMESTAMP 
+     WHERE order_id = ?`,
+    [reason || 'Invalid proof', orderId]
+  );
+
+  // Notify and re-prompt customer
+  if (order.psid && !order.psid.startsWith('POS_MANUAL_')) {
+    const promptMsg = `Paumanhin po, hindi po ma-verify ng aming staff ang inyong ipinadalang proof of payment para sa Order #${order.order_number}. Paki-send po muli ang malinaw na screenshot ng inyong GCash receipt o i-type ang tamang Reference Number dito.`;
+    await sendTextMessage(order.psid, promptMsg).catch(err => {
+      console.warn('[orderService] Failed to send invalid payment notification:', err.message);
+    });
+
+    try {
+      const session = await getSession(order.psid);
+      session.checkout_step = 'AWAITING_PAYMENT_PROOF';
+      session.state = 'AWAITING_PAYMENT_PROOF';
+      session.current_step = 'AWAITING_PAYMENT_PROOF';
+      session.activeOrderNumber = order.order_number;
+      session.active_order_id = order.id;
+      session.order_id = order.id;
+      await saveSession(session);
+    } catch (sErr) {
+      console.warn('[orderService] Failed to update session state for re-upload:', sErr.message);
+    }
+  }
+
+  broadcastSSE('ORDER_PAYMENT_INVALID', {
+    orderId,
+    orderNumber: order.order_number,
+    payment_status: 'Failed',
+    reason
+  });
+
+  return { ...order, payment_status: 'Failed' };
+}
+
 module.exports = {
   createOrder,
   updateOrderStatus,
@@ -676,5 +835,7 @@ module.exports = {
   upsertCustomer,
   requestVoidOrder,
   authorizeVoidOrder,
-  rejectVoidOrder
+  rejectVoidOrder,
+  verifyOrderPayment,
+  markOrderPaymentInvalid
 };

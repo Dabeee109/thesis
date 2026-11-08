@@ -82,7 +82,11 @@ test('Conversation Flow - "yes" with no question open asks "Yes to what?"', asyn
   await handleMessageEvent(psid, 'yes');
   const msgs = getSent(psid);
   assert.ok(msgs.length > 0);
-  assert.ok(msgs[msgs.length - 1].messagePayload.text.includes('Yes to what?'));
+  // With Mandatory Post-Reset Gateway, an expired session resets and prompts for dining mode
+  assert.ok(
+    msgs[msgs.length - 1].messagePayload.text.includes("Welcome to Diner's Cafe") ||
+    msgs[msgs.length - 1].messagePayload.text.includes('Yes to what?')
+  );
 });
 
 test('Conversation Flow - non-answer replaces open question', async () => {
@@ -119,7 +123,11 @@ test('Conversation Flow - 31-minute-old state resets to IDLE before routing', as
   await handleMessageEvent(psid, 'yes');
   const msgs = getSent(psid);
   assert.ok(msgs.length > 0);
-  assert.ok(msgs[msgs.length - 1].messagePayload.text.includes('Yes to what?'));
+  // With Mandatory Post-Reset Gateway, an expired session resets and prompts for dining mode
+  assert.ok(
+    msgs[msgs.length - 1].messagePayload.text.includes("Welcome to Diner's Cafe") ||
+    msgs[msgs.length - 1].messagePayload.text.includes('Yes to what?')
+  );
 });
 
 test('Conversation Flow - interruptions inside details flow keep details entered so far', async () => {

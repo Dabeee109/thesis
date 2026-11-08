@@ -28,9 +28,9 @@ async function getMenu(req, res) {
         m.is_available,
         m.is_bestseller,
         m.preparation_time_min,
-        i.stock_quantity,
-        i.low_stock_threshold,
-        i.unit
+        COALESCE(m.stock_quantity, i.stock_quantity, 0) AS stock_quantity,
+        COALESCE(i.low_stock_threshold, 10) AS low_stock_threshold,
+        COALESCE(i.unit, 'servings') AS unit
       FROM menu_items m
       LEFT JOIN inventory i ON m.id = i.menu_item_id
       WHERE COALESCE(m.is_deleted, 0) = 0
@@ -57,42 +57,77 @@ async function createMenuItem(req, res) {
   try {
     const {
       categoryId,
+      category_id,
       name,
       description = '',
       price,
       imageUrl = '',
-      isAvailable = 1,
+      image_url = '',
+      isAvailable,
+      is_available,
       isBestseller = 0,
+      is_bestseller = 0,
       prepTimeMin = 15,
-      initialStock = 20,
+      preparation_time_min,
+      initialStock,
+      stock_quantity,
+      stockQuantity,
       unit = 'servings'
     } = req.body;
 
-    if (!categoryId || !name || price === undefined) {
+    const catId = categoryId || category_id;
+    if (!catId || !name || price === undefined) {
       return res.status(400).json({ success: false, message: 'Category, item name, and price are required.' });
     }
 
+    let finalStock = stock_quantity !== undefined ? parseInt(stock_quantity, 10) : (stockQuantity !== undefined ? parseInt(stockQuantity, 10) : (initialStock !== undefined ? parseInt(initialStock, 10) : 25));
+    if (isNaN(finalStock) || finalStock < 0) finalStock = 0;
+
+    let finalAvail = is_available !== undefined ? is_available : (isAvailable !== undefined ? isAvailable : 1);
+    if (finalStock <= 0) {
+      finalAvail = 0;
+    } else {
+      finalAvail = (finalAvail === 1 || finalAvail === true || finalAvail === '1' || finalAvail === 'true') ? 1 : 0;
+    }
+
+    const finalImage = imageUrl || image_url || '';
+    const finalPrep = prepTimeMin !== undefined ? parseInt(prepTimeMin, 10) : (preparation_time_min !== undefined ? parseInt(preparation_time_min, 10) : 15);
+    const finalBest = isBestseller || is_bestseller ? 1 : 0;
+
     const [result] = await db.query(
-      `INSERT INTO menu_items (category_id, name, description, price, image_url, is_available, is_bestseller, preparation_time_min)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [categoryId, name.trim(), description.trim(), parseFloat(price), imageUrl.trim(), isAvailable ? 1 : 0, isBestseller ? 1 : 0, parseInt(prepTimeMin, 10)]
+      `INSERT INTO menu_items (category_id, name, description, price, image_url, is_available, is_bestseller, preparation_time_min, stock_quantity)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [catId, name.trim(), description.trim(), parseFloat(price), finalImage.trim(), finalAvail, finalBest, finalPrep, finalStock]
     );
 
     const menuItemId = result.insertId;
 
     // Create corresponding inventory record
-    await db.query(
-      `INSERT INTO inventory (menu_item_id, stock_quantity, low_stock_threshold, unit, last_restocked_at)
-       VALUES (?, ?, 10, ?, CURRENT_TIMESTAMP)`,
-      [menuItemId, parseInt(initialStock, 10), unit.trim()]
-    );
+    try {
+      await db.query(
+        `INSERT INTO inventory (menu_item_id, stock_quantity, low_stock_threshold, unit, last_restocked_at)
+         VALUES (?, ?, 10, ?, CURRENT_TIMESTAMP)`,
+        [menuItemId, finalStock, unit.trim()]
+      );
+    } catch (e) {}
 
-    broadcastSSE('MENU_UPDATED', { action: 'CREATED', menuItemId, name });
+    // Fetch created item
+    const [createdRows] = await db.query(
+      `SELECT m.*, COALESCE(m.stock_quantity, i.stock_quantity, 0) AS stock_quantity
+       FROM menu_items m
+       LEFT JOIN inventory i ON m.id = i.menu_item_id
+       WHERE m.id = ?`,
+      [menuItemId]
+    );
+    const createdItem = createdRows && createdRows[0] ? createdRows[0] : null;
+
+    broadcastSSE('MENU_UPDATED', { action: 'CREATED', menuItemId, name, item: createdItem });
 
     return res.status(201).json({
       success: true,
       message: 'Menu item created successfully.',
-      menuItemId
+      menuItemId,
+      item: createdItem
     });
   } catch (err) {
     console.error('[Menu Create Error]', err);
@@ -101,40 +136,99 @@ async function createMenuItem(req, res) {
 }
 
 /**
- * Update an existing menu item
+ * Update an existing menu item (Requirement 2)
+ * Accepts stock_quantity and is_available. If stock_quantity <= 0, automatically sets is_available = false.
+ * Returns updated item object on success.
  */
 async function updateMenuItem(req, res) {
   try {
     const { id } = req.params;
     const {
       categoryId,
+      category_id,
       name,
       description,
       price,
       imageUrl,
+      image_url,
       isAvailable,
+      is_available,
       isBestseller,
-      prepTimeMin
+      is_bestseller,
+      prepTimeMin,
+      preparation_time_min,
+      stockQuantity,
+      stock_quantity
     } = req.body;
+
+    const [existing] = await db.query('SELECT * FROM menu_items WHERE id = ?', [id]);
+    if (!existing || existing.length === 0) {
+      return res.status(404).json({ success: false, message: 'Menu item not found.' });
+    }
+    const current = existing[0];
+
+    const finalCatId = categoryId !== undefined ? categoryId : (category_id !== undefined ? category_id : current.category_id);
+    const finalName = name !== undefined ? name.trim() : current.name;
+    const finalDesc = description !== undefined ? description : current.description;
+    const finalPrice = price !== undefined ? parseFloat(price) : current.price;
+    const finalImg = imageUrl !== undefined ? imageUrl : (image_url !== undefined ? image_url : current.image_url);
+    const finalPrep = prepTimeMin !== undefined ? parseInt(prepTimeMin, 10) : (preparation_time_min !== undefined ? parseInt(preparation_time_min, 10) : current.preparation_time_min);
+    const finalBest = isBestseller !== undefined ? (isBestseller ? 1 : 0) : (is_bestseller !== undefined ? (is_bestseller ? 1 : 0) : current.is_bestseller);
+
+    // Stock quantity handling
+    let finalStock = stock_quantity !== undefined ? parseInt(stock_quantity, 10) : (stockQuantity !== undefined ? parseInt(stockQuantity, 10) : (current.stock_quantity !== undefined ? current.stock_quantity : 0));
+    if (isNaN(finalStock) || finalStock < 0) finalStock = 0;
+
+    // Availability status: If stock_quantity <= 0, automatically set is_available = false / 0
+    let finalAvail;
+    if (finalStock <= 0) {
+      finalAvail = 0;
+    } else {
+      const availInput = is_available !== undefined ? is_available : (isAvailable !== undefined ? isAvailable : current.is_available);
+      finalAvail = (availInput === 1 || availInput === true || availInput === '1' || availInput === 'true') ? 1 : 0;
+    }
 
     await db.query(
       `UPDATE menu_items 
-       SET category_id = COALESCE(?, category_id),
-           name = COALESCE(?, name),
-           description = COALESCE(?, description),
-           price = COALESCE(?, price),
-           image_url = COALESCE(?, image_url),
-           is_available = COALESCE(?, is_available),
-           is_bestseller = COALESCE(?, is_bestseller),
-           preparation_time_min = COALESCE(?, preparation_time_min),
+       SET category_id = ?,
+           name = ?,
+           description = ?,
+           price = ?,
+           image_url = ?,
+           is_available = ?,
+           is_bestseller = ?,
+           preparation_time_min = ?,
+           stock_quantity = ?,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
-      [categoryId, name, description, price, imageUrl, isAvailable, isBestseller, prepTimeMin, id]
+      [finalCatId, finalName, finalDesc, finalPrice, finalImg, finalAvail, finalBest, finalPrep, finalStock, id]
     );
 
-    broadcastSSE('MENU_UPDATED', { action: 'UPDATED', menuItemId: id, name });
+    // Sync inventory table if present
+    try {
+      await db.query(
+        `UPDATE inventory SET stock_quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE menu_item_id = ?`,
+        [finalStock, id]
+      );
+    } catch (e) {}
 
-    return res.json({ success: true, message: 'Menu item updated successfully.' });
+    // Fetch and return the updated item object
+    const [updatedRows] = await db.query(
+      `SELECT m.*, COALESCE(m.stock_quantity, i.stock_quantity, 0) AS stock_quantity
+       FROM menu_items m
+       LEFT JOIN inventory i ON m.id = i.menu_item_id
+       WHERE m.id = ?`,
+      [id]
+    );
+    const updatedItem = updatedRows && updatedRows[0] ? updatedRows[0] : null;
+
+    broadcastSSE('MENU_UPDATED', { action: 'UPDATED', menuItemId: id, name: finalName, item: updatedItem });
+
+    return res.json({
+      success: true,
+      message: 'Menu item updated successfully.',
+      item: updatedItem
+    });
   } catch (err) {
     console.error('[Menu Update Error]', err);
     return res.status(500).json({ success: false, message: 'Failed to update menu item.' });

@@ -141,9 +141,11 @@ function getGenAIClient() {
  */
 function buildBaristaSystemInstruction(session = {}, menuItems = [], userMessage = '') {
   const menuCatalogString = menuItems.length > 0
-    ? menuItems.map(m =>
-        `- [ID: ${m.id}] ${m.name} (₱${parseFloat(m.price).toFixed(2)}) | Category: ${m.category_name || 'Cafe'} | ${m.description || 'Handcrafted cafe specialty'}`
-      ).join('\n')
+    ? menuItems.map(m => {
+        const isSoldOut = (m.stock_quantity !== undefined && m.stock_quantity <= 0) || m.is_available === 0 || m.is_available === false;
+        const stockStatus = isSoldOut ? ' [SOLD OUT / OUT OF STOCK]' : ` [In Stock: ${m.stock_quantity || 10}]`;
+        return `- [ID: ${m.id}] ${m.name} (₱${parseFloat(m.price).toFixed(2)})${stockStatus} | Category: ${m.category_name || 'Cafe'} | ${m.description || 'Handcrafted cafe specialty'}`;
+      }).join('\n')
     : '- Menu catalog is loaded dynamically; invite the customer to tap Menu if they want the full list.';
 
   const currentCartString = Array.isArray(session.cart) && session.cart.length > 0
@@ -181,22 +183,47 @@ ORDER STATUS INTEGRITY & ANTI-HALLUCINATION RULES:
 - Never fabricate an order number or claim an order is "on the way" or "kasama na ni rider sa biyahe" unless its confirmed status is 'dispatched'.
 - If the customer asks for status and Active Order Number is 'None' or order is pending, tell them it is currently pending approval / being prepared in the kitchen (30-45 mins typical delivery time) or invite them to check back.
 
-STAGE PIPELINE DISCIPLINE:
-- Stage 1 (Dining Mode Slot Locking): If Selected Dining Mode is already established (Dine In, Take Out, or Delivery), this slot is PERMANENTLY LOCKED for this session. DO NOT ask Stage 1 again! NEVER loop back or re-inquire about dining mode. Proceed directly to Stage 2 (customizations), Stage 3 (discounts), or Stage 4/5. Only ask Stage 1 if Selected Dining Mode is 'Pending Stage 1 Selection'.
-- Stage 2: When items are named, check all mandatory customizations (size, sweetness/sugar level, milk type, hot/iced for drinks; egg style/sides for food) before moving to checkout.
-- Stage 3: Inquire for Senior Citizen or PWD discount. Check verification rules (in-store counter presentation for Cash vs remote clear photo requirement for GCash).
-- Stage 4: Collect Name, Payment Method (GCash or Cash), and Location based on Dining Mode.
-- Stage 5: Output the EXACT summary receipt format with every field on its own line separated by \n:
-Eto po ang summary ng inyong order:
+STAGE PIPELINE DISCIPLINE (Strict 6-Stage Process):
+- Stage 1: Initial Filter (Dining Mode):
+  - If Dining Mode is not yet established, greet warmly and ask:
+    "Hello po! Welcome to Diner's Cafe! Ask ko lang po muna bago tayo magsimula, will this be for **Dine In**, **Delivery**, or **Take Out**?"
+  - Lock dining_mode in session. Once selected, NEVER re-ask or loop back!
+    - Dine In: Direct them to open seating (free seating, do NOT ask for table number).
+    - Delivery: Note that an address will be required later.
+    - Take Out: Note order will be prepared for counter pickup.
+- Stage 2: Menu Dispatch, Upsell & Customization:
+  - Immediately send/recommend menu items.
+  - Multi-Item Taking: Collect single or multiple items with quantities.
+  - Cross-Sell / Upsell Suggestion: Suggest exactly ONE complementary item by name:
+    - If coffee ordered: Suggest a pastry or meal by name (e.g., "Gusto niyo po bang subukan i-pair sa aming freshly baked Croissant or Cheesy Beef Lasagna?").
+    - If food ordered: Suggest a signature beverage by name (e.g., "Bagay po yan i-pair sa aming Iced Spanish Latte!").
+  - Mandatory Customizations:
+    - Drinks: Size (16oz / 22oz), sweetness/sugar level (100%, 50%, 0%), milk type (Dairy / Oat Milk), Hot or Iced.
+    - Food: Egg style (Sunny-side up / Scrambled).
+- Stage 3: Senior Citizen / PWD Discount Check:
+  - Once items & modifications are set, ask:
+    "May Senior Citizen or PWD discount po ba tayong ia-apply sa order na ito?"
+  - If YES: Ask: "Paki-send po rito ang clear photo ng inyong valid Senior Citizen / PWD ID kasama ang buong pangalan ng cardholder."
+    (20% discount + 12% VAT exemption applies to cardholder's portion; Cash at counter can present physical card upon arrival; GCash requires ID photo before discounted total).
+  - If NO: Set discount to 0.00 and proceed directly to Stage 4.
+- Stage 4: Customer Details & Payment Mode:
+  - Collect: Full Name, Phone Number, Location (Delivery address, or auto-fill "Inside Cafe (Open Seating / Counter Pickup)" for Dine In, or "Store Counter Pickup" for Take Out), and Payment Mode (Cash or GCash).
+- Stage 5: Final Summary Receipt & Confirmation:
+  - Output the EXACT structure with every field on its own new line separated by \n:
 Name: [Customer Name]
-Location: [Address or Pickup / Seating]
+Phone Number: [Contact Number]
+Location: [Delivery Address OR "Inside Cafe (Open Seating / Counter Pickup)" OR "Store Counter Pickup"]
 Payment option: [GCash or Cash]
-Dining mode: [Dine In, Take Out, or Delivery]
-Discount: [Discount breakdown]
-Order: - [Items with quantity and price]
-Total: [Total breakdown]
-Tama po ba lahat ng details? Reply **YES** to confirm and proceed, o sabihin lang po kung may gustong palitan!
-NOTE: Never squash these onto a single line. Separate each field with a newline (\n).
+Dining mode: [Dine In, Delivery, or Take Out]
+Discount: [₱0.00 (None) OR ₱XX.XX (Senior/PWD Discount)]
+Order: 
+- [Quantity]x [Item Name] ([Size, Customizations, Add-ons]) - ₱[Line Total]
+Total: ₱[Final Total Amount] ([Calculation breakdown: Subtotal - Discount + Delivery Fee if applicable])
+
+Tama po ba lahat ng details? Reply YES to confirm, o sabihin lang po kung may gustong palitan!
+
+- Stage 6: Payment & Order Submission:
+  - Handled by system upon customer replying "YES" (Branch A for Cash, Branch B for GCash).
 
 MULTI-ITEM BATCH EXTRACTION RULES (Feature 4):
 - When the customer specifies multiple items (separated by commas, bullets, line breaks, 'tsaka', 'tapos', 'and', 'plus', 'pati', 'at'), extract ALL items into the "items" array.
@@ -212,6 +239,7 @@ MULTI-ITEM BATCH EXTRACTION RULES (Feature 4):
       "specialInstructions": string
     }
 - Populate both "items" and "extractedItems" with all extracted items. Set intent to "ADD_TO_CART" whenever items are requested.
+- If a requested item is marked [SOLD OUT / OUT OF STOCK], do NOT extract it to the cart and inform the customer: "Pasensya na po, sold out / out of stock na po ang {Item Name} sa ngayon."
 - If the customer asks a question, greeting, or complaint without ordering items, leave "items" and "extractedItems" empty ([]).
 
 FEW-SHOT TRAINING EXAMPLES (Follow this exact tone, language mirroring, natural Taglish flow, "po"/"opo" warmth, and brevity):
@@ -371,6 +399,7 @@ function formatOrderSummaryReceipt(text) {
 
     // 2. Separate each key field onto its own line
     formatted = formatted.replace(/\s*(Name\s*:)/gi, '\n$1');
+    formatted = formatted.replace(/\s*(Phone(?:\s*Number)?\s*:)/gi, '\nPhone number:');
     formatted = formatted.replace(/\s*(Location\s*:)/gi, '\n$1');
     formatted = formatted.replace(/\s*(Payment option\s*:)/gi, '\n$1');
     formatted = formatted.replace(/\s*(Dining mode\s*:)/gi, '\n$1');

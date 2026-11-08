@@ -73,6 +73,7 @@ CREATE TABLE `menu_items` (
   `name` VARCHAR(150) NOT NULL,
   `description` TEXT DEFAULT NULL,
   `price` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  `stock_quantity` INT NOT NULL DEFAULT 0,
   `image_url` VARCHAR(500) DEFAULT NULL,
   `is_available` TINYINT(1) NOT NULL DEFAULT 1,
   `is_bestseller` TINYINT(1) NOT NULL DEFAULT 0,
@@ -124,6 +125,10 @@ CREATE TABLE `orders` (
   `delivery_fee` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
   `total_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
   `delivery_address` TEXT DEFAULT NULL,
+  `customer_phone` VARCHAR(50) DEFAULT NULL,
+  `payment_proof_image` VARCHAR(500) DEFAULT NULL,
+  `payment_ref_number` VARCHAR(100) DEFAULT NULL,
+  `payment_status` ENUM('Pending', 'Pending Verification', 'Paid', 'Failed') NOT NULL DEFAULT 'Pending',
   `distance_km` DECIMAL(4,2) DEFAULT 1.00,
   `customer_notes` TEXT DEFAULT NULL,
   `cancellation_reason` VARCHAR(255) DEFAULT NULL,
@@ -267,3 +272,40 @@ CREATE TABLE `chatbot_logs` (
   INDEX `idx_chat_psid` (`psid`),
   INDEX `idx_detected_intent` (`detected_intent`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 15. Promotions & Events Table (Campaign perks, cafe events & mass Messenger broadcasts)
+CREATE TABLE IF NOT EXISTS `promotions` (
+  `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `title` VARCHAR(255) NOT NULL,
+  `promo_type` ENUM('Product Discount', 'Bundle / BOGO', 'Cafe Event') NOT NULL DEFAULT 'Product Discount',
+  `banner_image_url` VARCHAR(500) DEFAULT NULL,
+  `perk_description` VARCHAR(255) NOT NULL,
+  `applicable_scope` VARCHAR(255) DEFAULT 'All Menu Items',
+  `start_date` DATE DEFAULT NULL,
+  `end_date` DATE DEFAULT NULL,
+  `description` TEXT DEFAULT NULL,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `broadcast_count` INT UNSIGNED NOT NULL DEFAULT 0,
+  `last_broadcast_at` TIMESTAMP NULL DEFAULT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_promo_active` (`is_active`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 16. Store Settings Table (Branch profile, GPS coordinates & dispatch boundaries)
+CREATE TABLE IF NOT EXISTS `store_settings` (
+  `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `gcash_account_name` VARCHAR(255) NOT NULL DEFAULT 'Diner\\'s Cafe',
+  `gcash_account_number` VARCHAR(20) NOT NULL DEFAULT '09XXXXXXXXX',
+  `gcash_qr_image_url` VARCHAR(500) DEFAULT NULL,
+  `store_name` VARCHAR(255) NOT NULL DEFAULT 'Diner\\'s Cafe - Main Branch',
+  `store_address` TEXT NOT NULL,
+  `store_latitude` DECIMAL(10,8) NOT NULL DEFAULT 14.57940000,
+  `store_longitude` DECIMAL(11,8) NOT NULL DEFAULT 121.03590000,
+  `max_delivery_radius_km` DECIMAL(4,2) NOT NULL DEFAULT 3.00,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO `store_settings` (`id`, `gcash_account_name`, `gcash_account_number`, `gcash_qr_image_url`, `store_name`, `store_address`, `store_latitude`, `store_longitude`, `max_delivery_radius_km`)
+VALUES (1, 'Diner\\'s Cafe - Tondo Branch', '09171234567', '/uploads/qr/gcash_qr_CHECKOUT.png', 'Diner\\'s Cafe Tondo', 'Diner\\'s Cafe, Tondo, Manila', 14.61436860, 120.96423340, 3.00)
+ON DUPLICATE KEY UPDATE `id` = `id`;

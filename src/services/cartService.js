@@ -9,11 +9,18 @@ const { peso } = require('./textMatch');
 /**
  * Add an item to the session cart
  * @param {Array} cart 
- * @param {Object} item - { id, name, price }
+ * @param {Object} item - { id, name, price, stock_quantity, is_available }
  * @param {number} qty 
- * @returns {Object} line item
+ * @returns {Object} line item or { outOfStock: true, name }
  */
 function addToCart(cart, item, qty = 1) {
+  // Guard: Verify stock quantity and availability before adding (Requirement 4)
+  const stock = item.stock_quantity !== undefined ? item.stock_quantity : 999;
+  const isAvail = item.is_available === undefined || item.is_available === 1 || item.is_available === true;
+  if (stock <= 0 || !isAvail) {
+    return { outOfStock: true, name: item.name };
+  }
+
   const quantity = Math.max(1, parseInt(qty, 10) || 1);
   const idx = cart.findIndex(c => c.menuItemId === item.id);
 
@@ -79,12 +86,56 @@ function getCartRemoveButtons(cart) {
 }
 
 /**
- * Calculate cart total from session lines without DB query
+ * Calculate line total for an individual cart item
+ * Item Line Total = (Base Price + Add-ons/Upgrades) * Quantity
+ * @param {Object} item 
+ * @returns {number}
+ */
+function calculateItemLineTotal(item) {
+  if (!item) return 0;
+  const basePrice = parseFloat(item.price || item.unitPrice || 0.0);
+  let addOnsPrice = parseFloat(item.addOnsPrice || item.customizationPrice || 0.0);
+
+  if (Array.isArray(item.addOns)) {
+    addOnsPrice = item.addOns.reduce((sum, a) => sum + (parseFloat(a.price) || 0.0), 0.0);
+  } else if (item.customizations && typeof item.customizations === 'object') {
+    if (item.customizations.size === '22oz' && !addOnsPrice) addOnsPrice += 20.0;
+    if (String(item.customizations.milk || '').toLowerCase().includes('oat') && !addOnsPrice) addOnsPrice += 40.0;
+    if (String(item.customizations.foam || '').toLowerCase().includes('sea salt') && !addOnsPrice) addOnsPrice += 30.0;
+  }
+
+  const effectiveUnitPrice = basePrice + addOnsPrice;
+  const quantity = Math.max(1, parseInt(item.quantity, 10) || 1);
+  return Math.round(effectiveUnitPrice * quantity * 100) / 100;
+}
+
+/**
+ * Calculate cart subtotal from session lines
+ * Subtotal = Sum of Item Line Totals
  * @param {Array} cart 
  * @returns {number}
  */
 function calculateCartSubtotal(cart) {
-  return (cart || []).reduce((sum, item) => sum + (parseFloat(item.price) || 0) * (item.quantity || 1), 0);
+  if (!cart || !Array.isArray(cart) || cart.length === 0) return 0.0;
+  const sum = cart.reduce((total, item) => total + calculateItemLineTotal(item), 0.0);
+  return Math.round(sum * 100) / 100;
+}
+
+/**
+ * Calculate final order total
+ * Final Total = Subtotal - Senior/PWD Discount + Delivery Fee
+ * @param {Object} params
+ * @param {number} params.subtotal
+ * @param {number} [params.discount=0]
+ * @param {number} [params.deliveryFee=0]
+ * @returns {number}
+ */
+function calculateFinalTotal({ subtotal, discount = 0, deliveryFee = 0 }) {
+  const sub = Math.max(0, parseFloat(subtotal) || 0.0);
+  const disc = Math.max(0, parseFloat(discount) || 0.0);
+  const fee = Math.max(0, parseFloat(deliveryFee) || 0.0);
+  const finalTotal = Math.max(0, sub - disc + fee);
+  return Math.round(finalTotal * 100) / 100;
 }
 
 /**
@@ -169,6 +220,8 @@ module.exports = {
   addToCart,
   removeFromCart,
   getCartRemoveButtons,
+  calculateItemLineTotal,
   calculateCartSubtotal,
+  calculateFinalTotal,
   priceCart
 };

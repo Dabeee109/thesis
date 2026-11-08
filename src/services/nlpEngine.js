@@ -5,16 +5,34 @@
  * automatic post-delivery feedback, short reply understanding, and cart item removal.
  */
 
+const fs = require('fs');
+const path = require('path');
 const db = require('../../database/db');
 const config = require('../config/config');
+const storeSettingsService = require('./storeSettingsService');
 const jwt = require('jsonwebtoken');
 const { createOrder } = require('./orderService');
 const {
   sendTextMessage,
   sendImageAttachment,
   sendQuickReplies,
-  sendGenericTemplate
+  sendGenericTemplate,
+  sendButtonTemplate
 } = require('./messengerService');
+const {
+  isRemovalIntent,
+  matchCartItem,
+  parseRemovalRequests,
+  executeMultiItemRemoval,
+  formatRemovalResponse
+} = require('./removalService');
+const {
+  isBatchAddIntent,
+  isBatchRemoveIntent,
+  executeBatchAdd,
+  executeBatchRemove,
+  formatUpdatedCartResponse
+} = require('./batchCartService');
 const notificationService = require('./notificationService');
 const { queryWitAi, localNluParse } = require('./witAiService');
 const { getSession, saveSession, clearSessionCart } = require('./sessionManager');
@@ -32,6 +50,8 @@ const {
 const maps = require('./maps');
 const { haversineKm } = require('./maps');
 const { quoteForAddress, FALLBACK_KM } = require('./deliveryFeeAdapter');
+const { calculateDeliveryFee, computeDeliveryFee, getStoreOrigin } = require('./deliveryFeeCalculator');
+const { geocodeCustomerAddress, sanitizeCustomerAddress } = require('./customerGeocodingService');
 const {
   addToCart,
   removeFromCart,
@@ -66,56 +86,108 @@ function setChatbotStatus(enabled, user = 'Admin') {
   return getChatbotStatus();
 }
 
+const STORE_ADDRESS = "Diner's Cafe - Store Main Branch, Mandaluyong City";
+
+function getStoreAddress() {
+  try {
+    const settings = storeSettingsService.getCachedStoreSettings();
+    return settings.store_address || STORE_ADDRESS;
+  } catch (e) {
+    return STORE_ADDRESS;
+  }
+}
+
+function isDeliveryDiningMode(diningMode) {
+  if (!diningMode) return true;
+  return /delivery/i.test(String(diningMode).trim());
+}
+
+/**
+ * Conditional Checkout Information Prompt (Slot-Filling)
+ * CASE A: Delivery -> Name, Phone number, Address, Payment mode
+ * CASE B: Dine In / Pick-up -> Name, Phone number, Payment mode
+ */
+function getCheckoutInfoPrompt(session) {
+  const mode = session?.dining_mode || (session?.orderType === 'delivery' ? 'Delivery' : 'Dine In');
+  if (isDeliveryDiningMode(mode)) {
+    return `Pakibigay po ang sumusunod para sa inyong order:
+Name:
+Phone number:
+Address:
+Payment mode: (Cash or GCash)`;
+  } else {
+    return `Pakibigay po ang sumusunod para sa inyong order:
+Name:
+Phone number:
+Payment mode: (Cash or GCash)`;
+  }
+}
+
 /**
  * Parse Customer Info (Address, Name, Contact/Landmark) from customer input
  * @param {string} rawText 
- * @returns {{ address: string, name: string, contact: string }}
+ * @param {string} [diningMode]
+ * @returns {{ address: string, name: string, contact: string, paymentMode: string }}
  */
-function parseCustomerInfo(rawText) {
+function parseCustomerInfo(rawText, diningMode) {
   let address = '';
   let name = '';
   let contact = '';
+  let paymentMode = 'Cash';
 
   const clean = String(rawText || '').trim();
+  const isDelivery = diningMode ? isDeliveryDiningMode(diningMode) : true;
 
   // 1. Labeled pattern matching
-  const addressMatch = clean.match(/(?:address|tirahan)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\bname\b|\bpangalan\b|\bcontact\b|\blandmark\b|\bphone\b|\bmobile\b|$))/i);
-  const nameMatch = clean.match(/(?:name|pangalan)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\btirahan\b|\bcontact\b|\blandmark\b|\bphone\b|\bmobile\b|$))/i);
-  const contactMatch = clean.match(/(?:contact(?:\s*number)?(?:\s*or\s*landmark)?|landmark|phone|mobile|cellphone)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\btirahan\b|\bname\b|\bpangalan\b|$))/i);
+  const addressMatch = clean.match(/(?:address|tirahan|location|table|counter)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\bname\b|\bpangalan\b|\bcontact\b|\bphone\b|\bmobile\b|\bpayment\b|\bmode\b|$))/i);
+  const nameMatch = clean.match(/(?:name|pangalan)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\btirahan\b|\bcontact\b|\bphone\b|\bmobile\b|\bpayment\b|\bmode\b|$))/i);
+  const contactMatch = clean.match(/(?:contact(?:\s*number)?(?:\s*or\s*landmark)?|phone(?:\s*number)?|mobile|cellphone)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\btirahan\b|\bname\b|\bpangalan\b|\bpayment\b|\bmode\b|$))/i);
+  const payMatch = clean.match(/(?:payment(?:\s*mode|\s*option)?|mode\s*of\s*payment|bayad)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\bname\b|\bcontact\b|\bphone\b|$))/i);
 
   if (addressMatch) address = addressMatch[1].trim();
   if (nameMatch) name = nameMatch[1].trim();
   if (contactMatch) contact = contactMatch[1].trim();
+  if (payMatch) {
+    paymentMode = /gcash|g-cash/i.test(payMatch[1]) ? 'GCash' : 'Cash';
+  } else if (/\b(?:gcash|g-cash)\b/i.test(clean)) {
+    paymentMode = 'GCash';
+  } else if (/\b(?:cash|cod|kaliwaan)\b/i.test(clean)) {
+    paymentMode = 'Cash';
+  }
 
   // 2. Multiline or delimiter-based fallback
-  if (!address || !name) {
+  const needsAddress = isDelivery;
+  if ((needsAddress && !address) || !name || !contact) {
     const rawLines = clean.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     const lines = [...rawLines];
 
     for (let i = lines.length - 1; i >= 0; i--) {
       const line = lines[i];
-      if (/^(?:address|tirahan)[:=-]?\s*/i.test(line) && !address) {
-        address = line.replace(/^(?:address|tirahan)[:=-]?\s*/i, '').trim();
+      if (/^(?:address|tirahan|location)[:=-]?\s*/i.test(line) && !address) {
+        address = line.replace(/^(?:address|tirahan|location)[:=-]?\s*/i, '').trim();
         lines.splice(i, 1);
       } else if (/^(?:name|pangalan)[:=-]?\s*/i.test(line) && !name) {
         name = line.replace(/^(?:name|pangalan)[:=-]?\s*/i, '').trim();
         lines.splice(i, 1);
-      } else if (/^(?:contact(?:\s*number)?(?:\s*or\s*landmark)?|landmark|phone|mobile)[:=-]?\s*/i.test(line) && !contact) {
-        contact = line.replace(/^(?:contact(?:\s*number)?(?:\s*or\s*landmark)?|landmark|phone|mobile)[:=-]?\s*/i, '').trim();
+      } else if (/^(?:contact(?:\s*number)?|phone(?:\s*number)?|mobile)[:=-]?\s*/i.test(line) && !contact) {
+        contact = line.replace(/^(?:contact(?:\s*number)?|phone(?:\s*number)?|mobile)[:=-]?\s*/i, '').trim();
+        lines.splice(i, 1);
+      } else if (/^(?:payment(?:\s*mode|\s*option)?|bayad)[:=-]?\s*/i.test(line)) {
+        paymentMode = /gcash|g-cash/i.test(line) ? 'GCash' : 'Cash';
         lines.splice(i, 1);
       }
     }
 
     if (!contact) {
-      const phoneIdx = lines.findIndex(l => /\b09\d{9}\b|\b\+?63\d{10}\b|\blandmark\b/i.test(l));
+      const phoneIdx = lines.findIndex(l => /\b09\d{9}\b|\b\+?63\d{10}\b/i.test(l));
       if (phoneIdx !== -1) {
         contact = lines[phoneIdx];
         lines.splice(phoneIdx, 1);
       }
     }
 
-    if (!address) {
-      const addrIdx = lines.findIndex(l => /\d+|st\b|street|ave\b|avenue|brgy|barangay|city|manila|road|rd\b|blk|lot/i.test(l));
+    if (needsAddress && !address) {
+      const addrIdx = lines.findIndex(l => /\d+|st\b|street|ave\b|avenue|brgy|barangay|city|manila|road|rd\b|blk|lot|table|counter/i.test(l));
       if (addrIdx !== -1) {
         address = lines[addrIdx];
         lines.splice(addrIdx, 1);
@@ -127,64 +199,253 @@ function parseCustomerInfo(rawText) {
       lines.splice(0, 1);
     }
 
-    if (!address && lines.length > 0) {
+    if (needsAddress && !address && lines.length > 0) {
       address = lines[0];
     }
   }
 
-  if (!address && clean.length > 5) {
+  if (needsAddress && !address && clean.length > 5) {
     address = clean;
   }
 
   return {
     address: address.trim(),
     name: name.trim(),
-    contact: contact.trim()
+    contact: contact.trim(),
+    paymentMode
   };
 }
 
 /**
- * Calculate distance from Diner's Cafe and delivery fee based on distance
- * Formula: Base fee ₱50 + ₱10 per km beyond 2 km
- * @param {string} addressText
- * @returns {Promise<{ distanceKm: number, deliveryFee: number, formattedAddress: string }>}
+ * Plaintext Order Summary Layout (Requirement 2 & Requirement 3)
  */
-async function calculateDeliveryDistanceAndFee(addressText) {
-  const storeLat = Number.isFinite(config.store?.lat) ? config.store.lat : 14.6042;
-  const storeLng = Number.isFinite(config.store?.lng) ? config.store.lng : 120.9822;
-  const origin = { lat: storeLat, lng: storeLng };
+function formatPlaintextOrderSummary({
+  name,
+  phone,
+  diningMode = 'Delivery',
+  address,
+  discountType = 'None',
+  paymentMode = 'Cash',
+  cart = [],
+  subtotal = 0,
+  discountAmount = 0,
+  deliveryFee = 0,
+  total = 0
+}) {
+  let formattedDiningMode = diningMode;
+  if (/dine[\s-]*in/i.test(diningMode)) formattedDiningMode = 'Dine In';
+  else if (/pick[\s-]*up|pickup|take[\s-]*out|takeout/i.test(diningMode)) formattedDiningMode = 'Pick-up';
+  else formattedDiningMode = 'Delivery';
 
-  const geocoded = await maps.geocode(addressText);
-  if (!geocoded || !geocoded.lat || !geocoded.lng) {
-    const err = new Error(`Address '${addressText}' not found.`);
-    err.code = 'GEO_NOT_FOUND';
-    throw err;
+  let formattedAddress = address;
+  const currentStoreAddress = getStoreAddress();
+  if (formattedDiningMode === 'Dine In' || formattedDiningMode === 'Pick-up') {
+    formattedAddress = currentStoreAddress;
+  } else if (!formattedAddress || /inside cafe|open seating|counter pickup|store counter/i.test(formattedAddress)) {
+    formattedAddress = currentStoreAddress;
   }
 
-  const dest = { lat: geocoded.lat, lng: geocoded.lng };
-  let distanceKm = 1.0;
+  const orderLines = (cart || []).map(item => {
+    const qty = item.quantity || 1;
+    const unitPrice = parseFloat(item.price || 0);
+    const lineTotal = (qty * unitPrice).toFixed(2);
+    return `- ${qty}x ${item.name} (₱${lineTotal})`;
+  }).join('\n');
 
-  try {
-    const route = await maps.routeDistance(origin, dest);
-    distanceKm = Math.round(route.km * 10) / 10;
-  } catch (routeErr) {
-    const straight = haversineKm(origin.lat, origin.lng, dest.lat, dest.lng);
-    distanceKm = Math.round(straight * 1.25 * 10) / 10;
+  const formattedSubtotal = Number(subtotal || 0).toFixed(2);
+  const formattedDiscount = Number(discountAmount || 0).toFixed(2);
+  const formattedDeliveryFee = Number(formattedDiningMode === 'Delivery' ? (deliveryFee || 0) : 0).toFixed(2);
+  const formattedTotal = Number(total || 0).toFixed(2);
+
+  return `--- ORDER SUMMARY ---
+Name: ${name}
+Phone number: ${phone}
+Dining-mode: ${formattedDiningMode}
+Address: ${formattedAddress}
+Discount: ${discountType}
+Payment Mode: ${paymentMode}
+
+Orders:
+${orderLines}
+
+Subtotal: ₱${formattedSubtotal}
+Discount: ₱${formattedDiscount}
+Delivery Fee: ₱${formattedDeliveryFee}
+TOTAL AMOUNT DUE: ₱${formattedTotal}`;
+}
+
+const formatPlaintextSummaryReceipt = formatPlaintextOrderSummary;
+
+/**
+ * Finalize Order Summary, send receipt, and initiate payment (Cash/GCash)
+ */
+async function finalizeOrderSummaryAndPayment(psid, session) {
+  const subtotal = session.order_subtotal || (session.cart ? calculateCartSubtotal(session.cart) : 0);
+  const discountAmount = session.discount_amount || session.discount?.amount || 0;
+  const discountType = (session.discount && session.discount.applied) ? (session.discount.type || 'Senior Citizen / PWD 20%') : 'None';
+
+  let diningMode = session.dining_mode || (session.orderType === 'delivery' ? 'Delivery' : 'Dine In');
+  if (/pick[\s-]*up|pickup|take[\s-]*out|takeout/i.test(diningMode)) diningMode = 'Pick-up';
+  else if (/dine[\s-]*in/i.test(diningMode)) diningMode = 'Dine In';
+  else diningMode = 'Delivery';
+
+  session.dining_mode = diningMode;
+
+  const isDelivery = diningMode === 'Delivery';
+  const deliveryFee = isDelivery ? (Number.isFinite(session.delivery_fee) ? session.delivery_fee : (Number.isFinite(session.deliveryFee) ? session.deliveryFee : 40.00)) : 0;
+  const grandTotal = Math.max(0, Math.round((subtotal - discountAmount + deliveryFee) * 100) / 100);
+
+  session.order_total = grandTotal;
+  session.delivery_fee = deliveryFee;
+  session.deliveryFee = deliveryFee;
+
+  let addressStr = session.delivery_address || session.address || '';
+  const currentStoreAddr = getStoreAddress();
+  if (diningMode === 'Dine In' || diningMode === 'Pick-up') {
+    addressStr = currentStoreAddr;
+    session.address = currentStoreAddr;
+    session.delivery_address = currentStoreAddr;
   }
 
-  if (distanceKm < 0.1) distanceKm = 0.5;
+  const paymentMode = session.payment_mode || 'Cash';
+  const customerName = session.customer_name || 'Customer';
+  const contactNumber = session.contact_number || '';
 
-  // Base fee ₱50 + ₱10 bawat km paglampas ng 2km
-  let deliveryFee = 50.00;
-  if (distanceKm > 2.0) {
-    deliveryFee = 50.00 + (distanceKm - 2.0) * 10.00;
+  // Requirement 3: Standardized Plaintext Order Summary
+  const summaryReceipt = formatPlaintextOrderSummary({
+    name: customerName,
+    phone: contactNumber,
+    diningMode: diningMode,
+    address: addressStr,
+    discountType: discountType,
+    paymentMode: paymentMode,
+    cart: session.cart || [],
+    subtotal: subtotal,
+    discountAmount: discountAmount,
+    deliveryFee: deliveryFee,
+    total: grandTotal
+  });
+
+  await sendTextMessage(psid, summaryReceipt);
+
+  if (paymentMode === 'Cash') {
+    try {
+      const order = await createOrder(psid, {
+        customerName,
+        customerPhone: contactNumber,
+        deliveryAddress: addressStr,
+        orderType: isDelivery ? 'delivery' : 'pickup',
+        paymentMethod: 'cash',
+        amountPaid: 0,
+        items: (session.cart || []).map(c => ({ menuItemId: c.menuItemId || c.id, quantity: c.quantity || 1 })),
+        deliveryFee,
+        totalAmount: grandTotal,
+        discountAmount
+      });
+
+      const orderNum = order.orderNumber || order.order_number;
+      session.activeOrderNumber = orderNum;
+      session.cart = [];
+      await clearSessionCart(psid);
+      session.state = 'IDLE';
+      session.current_step = 'IDLE';
+      await saveSession(session);
+
+      const cashConfirmation = `Salamat po, ${customerName}! Na-receive na po namin ang inyong order #${orderNum} under Cash Payment. Ang inyong order ay Pending Approval. I-notify po namin kayo kapag approved na ng kitchen!`;
+      await sendTextMessage(psid, cashConfirmation);
+      return { intent: 'ORDER_PLACED_CASH', confidence: 1.0, replyLog: cashConfirmation, orderNumber: orderNum };
+    } catch (err) {
+      console.error('[Cash Order Placement Error]', err);
+      const errMsg = 'Paumanhin, nagkaroon ng error sa pag-record ng order. Pakisubukan muli o tumawag sa cafe.';
+      await sendTextMessage(psid, errMsg);
+      return { intent: 'ORDER_ERROR', confidence: 1.0 };
+    }
+  } else {
+    // GCash Flow (Manual GCash Proof of Payment Workflow)
+    let orderNum = null;
+    let orderId = null;
+    try {
+      const order = await createOrder(psid, {
+        customerName,
+        customerPhone: contactNumber,
+        deliveryAddress: addressStr,
+        orderType: isDelivery ? 'delivery' : 'pickup',
+        paymentMethod: 'gcash',
+        amountPaid: 0,
+        items: (session.cart || []).map(c => ({ menuItemId: c.menuItemId || c.id, quantity: c.quantity || 1 })),
+        deliveryFee,
+        totalAmount: grandTotal,
+        discountAmount,
+        paymentStatus: 'Pending'
+      });
+      orderNum = order.orderNumber || order.order_number;
+      orderId = order.orderId || order.id;
+      session.activeOrderNumber = orderNum;
+      session.active_order_id = orderId;
+      session.order_id = orderId;
+    } catch (ordErr) {
+      console.warn('[GCash Order Pre-creation Warning]', ordErr.message);
+    }
+
+    session.pendingGCashOrder = {
+      orderId,
+      orderNumber: orderNum,
+      customerName,
+      contactNumber,
+      address: addressStr,
+      deliveryFee,
+      subtotal,
+      discount: discountAmount,
+      grandTotal,
+      isPickupOrDineIn: deliveryFee === 0,
+      items: [...(session.cart || [])]
+    };
+
+    // Requirement 1: Set user session state: session.checkout_step = 'AWAITING_PAYMENT_PROOF'
+    session.checkout_step = 'AWAITING_PAYMENT_PROOF';
+    session.state = 'AWAITING_PAYMENT_PROOF';
+    session.current_step = 'AWAITING_PAYMENT_PROOF';
+    await saveSession(session);
+
+    const currentSettings = storeSettingsService.getCachedStoreSettings();
+    const gcashNumber = currentSettings.gcash_account_number || config.store?.gcashNumber || '0928 176 2895';
+    const gcashName = currentSettings.gcash_account_name || config.store?.gcashName || "Diner's Cafe";
+    const qrImageUrl = currentSettings.gcash_qr_image_url || '/assets/gcash_qr.png';
+    const baseAppUrl = (config.appUrl || 'http://localhost:3000').replace(/\/+$/, '');
+    const fullQrUrl = qrImageUrl.startsWith('http') ? qrImageUrl : `${baseAppUrl}${qrImageUrl.startsWith('/') ? '' : '/'}${qrImageUrl}`;
+
+    // Message 1: Send the cafe's GCash QR Code as an image attachment
+    try {
+      await sendImageAttachment(psid, fullQrUrl);
+    } catch (qrErr) {
+      console.warn('[GCash Checkout] Could not dispatch QR code image:', qrErr.message);
+    }
+
+    // Message 2: Send formatted text instructions (no external webview URL buttons)
+    const detailsMsg = `💳 GCASH PAYMENT DETAILS:\nAccount Name: ${gcashName}\nAccount Number: ${gcashNumber}\nTotal Amount to Pay: ₱${grandTotal.toFixed(2)}\n\n📌 Paalala:\nI-save o i-scan ang QR code sa itaas gamit ang inyong GCash app. \nPagkatapos magbayad, paki-send po rito ang SCREENSHOT ng resibo o i-type ang 13-digit Reference Number upang maihanda na ang inyong order.`;
+    await sendTextMessage(psid, detailsMsg);
+
+    return { intent: 'AWAITING_PAYMENT_PROOF', confidence: 1.0, replyLog: detailsMsg, orderNumber: orderNum };
   }
-  deliveryFee = Math.round(deliveryFee * 100) / 100;
+}
 
+/**
+ * Calculate distance from Diner's Cafe and delivery fee based on distance
+ * Formula: Base fee ₱40.00 (first 2 km) + ₱12.00 per km beyond 2 km (rounded up to nearest km)
+ * @param {string|Object} addressOrCoords
+ * @returns {Promise<{ distanceKm: number, deliveryFee: number, formattedAddress: string, isBeyondRadius: boolean, maxRadiusKm: number }>}
+ */
+async function calculateDeliveryDistanceAndFee(addressOrCoords) {
+  const result = await calculateDeliveryFee(addressOrCoords);
   return {
-    distanceKm,
-    deliveryFee,
-    formattedAddress: geocoded.formattedAddress || addressText
+    distanceKm: result.distanceKm,
+    deliveryFee: result.deliveryFee,
+    formattedAddress: result.formattedAddress || (typeof addressOrCoords === 'string' ? addressOrCoords : ''),
+    isBeyondRadius: result.isBeyondRadius,
+    isDeliverable: result.isDeliverable,
+    radiusLimitKm: result.radiusLimitKm,
+    maxRadiusKm: result.maxRadiusKm,
+    destination: result.destination
   };
 }
 
@@ -304,6 +565,42 @@ function macroState(session) {
 }
 
 /**
+ * Completely purge all session and cached order data on reset (Issue 4)
+ * @param {Object} session
+ */
+function purgeSessionData(session) {
+  if (!session) return;
+  session.name = null;
+  session.phone_number = null;
+  session.address = null;
+  session.dining_mode = null;
+  session.orderType = null;
+  session.order_type = null;
+  session.cart = [];
+  session.ordered_items = [];
+  session.discount = null;
+  session.discount_info = null;
+  session.state = 'INITIAL_GREETING';
+  session.current_step = 'INITIAL_GREETING';
+  session.details = null;
+  session.customer_name = null;
+  session.contact_number = null;
+  session.delivery_address = null;
+  session.quote = null;
+  session.checkout = null;
+  session.order_subtotal = null;
+  session.order_total = null;
+  session.pendingStage5 = null;
+  session.pendingItem = null;
+  session.pending_suggestion = null;
+  session.pendingAction = null;
+  session.failedAttempts = 0;
+  session.warning20Sent = false;
+  session.warning25Sent = false;
+  session.purged30Sent = true;
+}
+
+/**
  * Expire stale waiting state after NLP_STATE_TTL_MIN minutes of inactivity (Decision 4)
  * @param {Object} session 
  */
@@ -313,11 +610,233 @@ function expireStaleState(session) {
   const lastTime = session.lastInteraction || now;
   const elapsedMin = (now - lastTime) / (60 * 1000);
 
-  if (elapsedMin > NLP_STATE_TTL_MIN && session.state !== 'IDLE') {
+  if (elapsedMin > NLP_STATE_TTL_MIN) {
+    purgeSessionData(session);
+  }
+}
+
+/**
+ * Save incoming payment proof image to /public/uploads/payments/
+ * @param {string|Buffer|Object} fileSource - Image URL, base64 data URI, or local path
+ * @param {string|number} orderId - Associated order ID
+ * @returns {Promise<string>} Saved relative public path (e.g. /uploads/payments/payment_proof_123_1794.jpg)
+ */
+async function savePaymentProofImage(fileSource, orderId) {
+  const uploadDir = path.join(__dirname, '../../public/uploads/payments');
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+
+  const timestamp = Date.now();
+  let ext = 'jpg';
+  let buffer = null;
+
+  if (Buffer.isBuffer(fileSource)) {
+    buffer = fileSource;
+  } else if (typeof fileSource === 'string') {
+    if (fileSource.startsWith('data:image/')) {
+      const matches = fileSource.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+      if (matches) {
+        ext = matches[1].includes('png') ? 'png' : (matches[1].includes('webp') ? 'webp' : 'jpg');
+        buffer = Buffer.from(matches[2], 'base64');
+      }
+    } else if (fileSource.startsWith('http://') || fileSource.startsWith('https://')) {
+      try {
+        const res = await fetch(fileSource);
+        if (res.ok) {
+          const arrayBuf = await res.arrayBuffer();
+          buffer = Buffer.from(arrayBuf);
+          const contentType = res.headers.get('content-type') || '';
+          if (contentType.includes('png')) ext = 'png';
+          else if (contentType.includes('webp')) ext = 'webp';
+        }
+      } catch (fErr) {
+        console.warn('[savePaymentProofImage] Fetch failed, writing fallback placeholder:', fErr.message);
+      }
+    } else if (fs.existsSync(fileSource)) {
+      buffer = fs.readFileSync(fileSource);
+      ext = path.extname(fileSource).replace('.', '') || 'jpg';
+    }
+  }
+
+  const filename = `payment_proof_${orderId || 'ord'}_${timestamp}.${ext}`;
+  const targetPath = path.join(uploadDir, filename);
+
+  if (buffer) {
+    fs.writeFileSync(targetPath, buffer);
+  } else {
+    fs.writeFileSync(targetPath, Buffer.from('mock_payment_proof_receipt_image'));
+  }
+
+  return `/uploads/payments/${filename}`;
+}
+
+/**
+ * Handle incoming image attachment when session.checkout_step === 'AWAITING_PAYMENT_PROOF'
+ */
+async function handlePaymentProofUpload(psid, session, imgAttachment) {
+  let orderId = session.active_order_id || session.order_id;
+  if (!orderId && session.activeOrderNumber) {
+    const [rows] = await db.query('SELECT id FROM orders WHERE order_number = ?', [session.activeOrderNumber]);
+    if (rows && rows.length > 0) orderId = rows[0].id;
+  }
+  if (!orderId) {
+    const [cRows] = await db.query('SELECT id FROM customers WHERE psid = ?', [psid]);
+    if (cRows && cRows.length > 0) {
+      const [oRows] = await db.query('SELECT id, order_number FROM orders WHERE customer_id = ? ORDER BY id DESC LIMIT 1', [cRows[0].id]);
+      if (oRows && oRows.length > 0) {
+        orderId = oRows[0].id;
+        session.activeOrderNumber = oRows[0].order_number;
+      }
+    }
+  }
+
+  if (!orderId && session.pendingGCashOrder) {
+    const pending = session.pendingGCashOrder;
+    const newOrder = await createOrder(psid, {
+      customerName: pending.customerName || session.customer_name || 'Customer',
+      customerPhone: pending.contactNumber || session.contact_number || session.phone_number,
+      deliveryAddress: pending.address || session.delivery_address || 'Store Pickup',
+      orderType: pending.deliveryFee > 0 ? 'delivery' : 'pickup',
+      paymentMethod: 'gcash',
+      amountPaid: 0,
+      items: (pending.items || session.cart || []).map(c => ({ menuItemId: c.menuItemId || c.id, quantity: c.quantity || 1 })),
+      deliveryFee: pending.deliveryFee || 0,
+      totalAmount: pending.grandTotal || session.order_total || 0,
+      paymentStatus: 'Pending Verification'
+    });
+    orderId = newOrder.orderId || newOrder.id;
+    session.activeOrderNumber = newOrder.orderNumber || newOrder.order_number;
+  }
+
+  const rawUrl = imgAttachment?.payload?.url || (typeof imgAttachment === 'string' ? imgAttachment : (imgAttachment?.url || null));
+  const savedFilename = await savePaymentProofImage(rawUrl, orderId);
+
+  if (orderId) {
+    await db.query(`
+      UPDATE orders 
+      SET payment_proof_image = ?, 
+          payment_status = 'Pending Verification',
+          updated_at = CURRENT_TIMESTAMP 
+      WHERE id = ?
+    `, [savedFilename, orderId]);
+
+    await db.query(`
+      UPDATE payments 
+      SET receipt_url = ?, 
+          status = 'pending', 
+          updated_at = CURRENT_TIMESTAMP 
+      WHERE order_id = ?
+    `, [savedFilename, orderId]);
+  }
+
+  const confirmMsg = "Natanggap po namin ang proof of payment! I-verify po ito ng staff saglit.";
+  await sendTextMessage(psid, confirmMsg);
+
+  session.checkout_step = null;
+  session.state = 'IDLE';
+  session.current_step = 'IDLE';
+  session.cart = [];
+  await clearSessionCart(psid);
+  await saveSession(session);
+
+  notificationService.broadcastSSE('ORDER_PAYMENT_PROOF_SUBMITTED', {
+    orderId,
+    orderNumber: session.activeOrderNumber,
+    payment_status: 'Pending Verification',
+    payment_proof_image: savedFilename
+  });
+
+  return { intent: 'AWAITING_PAYMENT_PROOF', confidence: 1.0, replyLog: confirmMsg, filename: savedFilename };
+}
+
+/**
+ * Handle incoming text when session.checkout_step === 'AWAITING_PAYMENT_PROOF'
+ */
+async function handlePaymentProofTextInput(psid, session, rawText) {
+  const cleanRaw = (rawText || '').trim();
+  const refMatch = cleanRaw.match(/\b\d{9,13}\b/) || cleanRaw.replace(/\s+/g, '').match(/\b\d{9,13}\b/);
+
+  if (refMatch) {
+    const refNum = refMatch[0].replace(/\s+/g, '');
+
+    let orderId = session.active_order_id || session.order_id;
+    if (!orderId && session.activeOrderNumber) {
+      const [rows] = await db.query('SELECT id FROM orders WHERE order_number = ?', [session.activeOrderNumber]);
+      if (rows && rows.length > 0) orderId = rows[0].id;
+    }
+    if (!orderId) {
+      const [cRows] = await db.query('SELECT id FROM customers WHERE psid = ?', [psid]);
+      if (cRows && cRows.length > 0) {
+        const [oRows] = await db.query('SELECT id, order_number FROM orders WHERE customer_id = ? ORDER BY id DESC LIMIT 1', [cRows[0].id]);
+        if (oRows && oRows.length > 0) {
+          orderId = oRows[0].id;
+          session.activeOrderNumber = oRows[0].order_number;
+        }
+      }
+    }
+
+    if (!orderId && session.pendingGCashOrder) {
+      const pending = session.pendingGCashOrder;
+      const newOrder = await createOrder(psid, {
+        customerName: pending.customerName || session.customer_name || 'Customer',
+        customerPhone: pending.contactNumber || session.contact_number || session.phone_number,
+        deliveryAddress: pending.address || session.delivery_address || 'Store Pickup',
+        orderType: pending.deliveryFee > 0 ? 'delivery' : 'pickup',
+        paymentMethod: 'gcash',
+        amountPaid: 0,
+        referenceNo: refNum,
+        items: (pending.items || session.cart || []).map(c => ({ menuItemId: c.menuItemId || c.id, quantity: c.quantity || 1 })),
+        deliveryFee: pending.deliveryFee || 0,
+        totalAmount: pending.grandTotal || session.order_total || 0,
+        paymentStatus: 'Pending Verification'
+      });
+      orderId = newOrder.orderId || newOrder.id;
+      session.activeOrderNumber = newOrder.orderNumber || newOrder.order_number;
+    }
+
+    if (orderId) {
+      await db.query(`
+        UPDATE orders 
+        SET payment_ref_number = ?, 
+            payment_status = 'Pending Verification',
+            gcash_ref = COALESCE(gcash_ref, ?),
+            updated_at = CURRENT_TIMESTAMP 
+        WHERE id = ?
+      `, [refNum, refNum, orderId]);
+
+      await db.query(`
+        UPDATE payments 
+        SET reference_no = ?, 
+            status = 'pending', 
+            updated_at = CURRENT_TIMESTAMP 
+        WHERE order_id = ?
+      `, [refNum, orderId]);
+    }
+
+    const confirmMsg = "Natanggap po namin ang proof of payment! I-verify po ito ng staff saglit.";
+    await sendTextMessage(psid, confirmMsg);
+
+    session.checkout_step = null;
     session.state = 'IDLE';
-    session.pendingItem = null;
-    session.pendingAction = null;
-    session.failedAttempts = 0;
+    session.current_step = 'IDLE';
+    session.cart = [];
+    await clearSessionCart(psid);
+    await saveSession(session);
+
+    notificationService.broadcastSSE('ORDER_PAYMENT_PROOF_SUBMITTED', {
+      orderId,
+      orderNumber: session.activeOrderNumber,
+      payment_status: 'Pending Verification',
+      payment_ref_number: refNum
+    });
+
+    return { intent: 'AWAITING_PAYMENT_PROOF', confidence: 1.0, replyLog: confirmMsg, referenceNumber: refNum };
+  } else {
+    // If not a 9-13 digit number and not an image
+    const retryMsg = "Kapag tapos na po magbayad, paki-send dito ang screenshot ng resibo o i-type ang Reference Number.";
+    await sendTextMessage(psid, retryMsg);
+    return { intent: 'AWAITING_PAYMENT_PROOF_RETRY', confidence: 1.0, replyLog: retryMsg };
   }
 }
 
@@ -332,16 +851,43 @@ async function handleMessageEvent(psid, incomingText = '', payload = null, locat
   // Expire waiting state if stale
   expireStaleState(session);
   session.lastInteraction = Date.now();
+  session.warning20Sent = false;
+  session.warning25Sent = false;
+  session.purged30Sent = false;
 
   let detectedIntent = 'UNKNOWN';
   let confidence = 1.0;
   let botReplyLog = '';
 
   try {
-    // 0a. Handle Attachments (Receipt images for OCR)
+    // 0a. Handle Attachments (Receipt images for OCR or Senior/PWD ID proof)
     if (attachments && attachments.length > 0) {
       const imgAttachment = attachments.find(a => a.type === 'image');
       if (imgAttachment) {
+        if (session.state === 'AWAITING_DISCOUNT_PROOF' || session.current_step === 'AWAITING_DISCOUNT_PROOF') {
+          const subtotal = session.order_subtotal || calculateCartSubtotal(session.cart) || 0;
+          const computedDiscount = Math.round((subtotal * 0.20) * 100) / 100;
+          session.discount = {
+            applied: true,
+            type: 'Senior Citizen / PWD 20%',
+            amount: computedDiscount,
+            idNumber: 'Senior/PWD ID Photo Attached'
+          };
+          session.discount_amount = computedDiscount;
+          return await finalizeOrderSummaryAndPayment(psid, session);
+        }
+
+        // Requirement 2: Handle Payment Proof Image when AWAITING_PAYMENT_PROOF
+        if (
+          session.checkout_step === 'AWAITING_PAYMENT_PROOF' ||
+          session.state === 'AWAITING_PAYMENT_PROOF' ||
+          session.current_step === 'AWAITING_PAYMENT_PROOF'
+        ) {
+          detectedIntent = 'PAYMENT_PROOF_IMAGE';
+          const proofRes = await handlePaymentProofUpload(psid, session, imgAttachment);
+          return { intent: 'AWAITING_PAYMENT_PROOF', confidence: 1.0, replyLog: proofRes?.replyLog };
+        }
+
         detectedIntent = 'RECEIPT_IMAGE_ATTACHMENT';
         const imgInput = imgAttachment.payload?.url || imgAttachment.payload || imgAttachment;
 
@@ -482,9 +1028,42 @@ async function handlePayload(psid, session, payload) {
     return;
   }
 
-  // Start Checkout
   if (payload === 'CONFIRM_CHECKOUT') {
-    await startCheckoutFlow(psid, session);
+    if (session.dining_mode) {
+      session.state = 'COLLECTING_CUSTOMER_INFO';
+      session.current_step = 'COLLECTING_CUSTOMER_INFO';
+      await saveSession(session);
+      const prompt = getCheckoutInfoPrompt(session);
+      await sendTextMessage(psid, prompt);
+      return;
+    }
+    session.state = 'AWAITING_ORDER_TYPE';
+    const otMsg = botMessages.orderType();
+    await sendQuickReplies(psid, otMsg.text, otMsg.quickReplies);
+    return;
+  }
+
+  if (payload === 'CONFIRM_ADDRESS_YES') {
+    return handleTextInput(psid, session, '1');
+  }
+
+  if (payload === 'CONFIRM_ADDRESS_NO') {
+    return handleTextInput(psid, session, '2');
+  }
+
+  if (payload === 'DISCOUNT_YES') {
+    session.state = 'AWAITING_DISCOUNT_PROOF';
+    session.current_step = 'AWAITING_DISCOUNT_PROOF';
+    await saveSession(session);
+    const askProofMsg = 'Paki-send po ang picture ng inyong Senior Citizen o PWD ID o i-type ang inyong ID Number para ma-apply ang 20% discount.';
+    await sendTextMessage(psid, askProofMsg);
+    return;
+  }
+
+  if (payload === 'DISCOUNT_NO') {
+    session.discount = { applied: false, type: 'None', amount: 0 };
+    session.discount_amount = 0;
+    await finalizeOrderSummaryAndPayment(psid, session);
     return;
   }
 
@@ -683,6 +1262,40 @@ async function handlePayload(psid, session, payload) {
     return;
   }
 
+  // Stage 1: Dining Mode Selection Payloads
+  if (payload === 'DINING_MODE_DINE_IN' || payload === 'DINE_IN') {
+    session.dining_mode = 'Dine In';
+    session.orderType = 'dine_in';
+    session.state = 'ORDERING';
+    await saveSession(session);
+    const msg = `Copy po sa Dine In! Free seating po tayo sa open seating area kaya feel free to find any available seat pagdating niyo.\n\nEto po ang aming menu para makapili kayo ng inyong drinks and meals:`;
+    await sendTextMessage(psid, msg);
+    await sendFullMenu(psid, session);
+    return;
+  }
+
+  if (payload === 'DINING_MODE_DELIVERY' || payload === 'DELIVERY') {
+    session.dining_mode = 'Delivery';
+    session.orderType = 'delivery';
+    session.state = 'ORDERING';
+    await saveSession(session);
+    const msg = `Noted po sa Delivery! Ihahatid po namin ito sa inyong address (hihingin po namin ang complete delivery address mamaya sa checkout).\n\nEto po ang aming menu para makapili kayo:`;
+    await sendTextMessage(psid, msg);
+    await sendFullMenu(psid, session);
+    return;
+  }
+
+  if (payload === 'DINING_MODE_TAKE_OUT' || payload === 'TAKE_OUT') {
+    session.dining_mode = 'Pick-up';
+    session.orderType = 'pickup';
+    session.state = 'ORDERING';
+    await saveSession(session);
+    const msg = `Copy po sa Take Out! Ihahanda po natin ito agad para sa counter pickup pagdaan ninyo sa cafe.\n\nEto po ang aming menu para makapili kayo:`;
+    await sendTextMessage(psid, msg);
+    await sendFullMenu(psid, session);
+    return;
+  }
+
   // Natural-language quick-reply suggestions delegate to free-text handler
   if (!/^[A-Z0-9_]+$/.test(payload)) {
     await handleTextInput(psid, session, payload);
@@ -719,7 +1332,7 @@ async function handleTextInput(psid, session, rawText) {
           newStatus: 'pending',
           paymentStatus: 'verified'
         });
-        const reply = `Natanggap at verified na po namin ang inyong GCash payment para sa Order #${session.activeOrderNumber}!\nNa-forward na po sa aming dispatch at kitchen team ang inyong delivery order. Maraming salamat po sa pag-order sa Diner's Cafe! Hintayin na lang po natin dumating si kuya rider.`;
+        const reply = `Natanggap na po namin ang inyong GCash payment! Ang inyong order (#${session.activeOrderNumber}) ay submitted na for Pending Approval.`;
         await sendTextMessage(psid, reply);
         session.state = 'AWAITING_DELIVERY';
         session.current_step = 'AWAITING_DELIVERY';
@@ -823,6 +1436,25 @@ async function handleTextInput(psid, session, rawText) {
       const price = parseFloat(pending?.price) || 0;
 
       if (pending) {
+        // Stock & Availability Guard (Requirement 4)
+        const targetItemId = pending.id || pending.menuItemId || 1;
+        const [stockRows] = await db.query(
+          `SELECT is_available, COALESCE(stock_quantity, 0) AS stock_quantity FROM menu_items WHERE id = ?`,
+          [targetItemId]
+        );
+        if (stockRows.length > 0) {
+          const s = stockRows[0].stock_quantity;
+          const a = stockRows[0].is_available;
+          if (s <= 0 || !a) {
+            session.pending_suggestion = null;
+            session.pendingItem = null;
+            await saveSession(session);
+            const soldOutMsg = `Pasensya na po, sold out / out of stock na po ang ${addedName} sa ngayon.`;
+            await sendTextMessage(psid, soldOutMsg);
+            return { intent: 'ORDER_ITEM_OUT_OF_STOCK', handled: true };
+          }
+        }
+
         if (!session.cart) session.cart = [];
         const itemToAdd = {
           menuItemId: pending.id || pending.menuItemId || 1,
@@ -898,7 +1530,8 @@ async function handleTextInput(psid, session, rawText) {
   const isCancelTrigger = !isDetailsStateCheck && (
     cancelTriggerPhrases.some(p => norm === p || norm.includes(p)) ||
     /\b(?:pa[-\s]?cancel|i[-\s]?cancel|kanselahin|refund|pa[-\s]?refund)\b/i.test(rawText) ||
-    /\b(?:cancel(?:led)?\s+(?:the\s+|my\s+|ang\s+)?order)\b/i.test(rawText) ||
+    /\bcancel\b.*?\b(?:order|food|delivery|kape|drink|ko)\b/i.test(rawText) ||
+    /\b(?:order|food|delivery)\b.*?\bcancel\b/i.test(rawText) ||
     /^(?:cancel|pa[-\s]?cancel|kanselahin|refund)$/i.test(norm)
   );
 
@@ -997,20 +1630,139 @@ async function handleTextInput(psid, session, rawText) {
     session.cart = [];
     session.current_step = 'idle';
     session.state = 'idle';
+    session.name = null;
+    session.customer_name = null;
+    session.phone_number = null;
+    session.contact_number = null;
+    session.address = null;
+    session.delivery_address = null;
+    session.dining_mode = null;
+    session.discount = null;
     session.order_type = null;
     session.orderType = null;
-    session.delivery_address = null;
     session.gcash_ref = null;
     session.partial_paid = null;
     session.details = null;
     session.pendingItem = null;
     session.pending_suggestion = null;
     session.pendingAction = null;
+    session.pendingGCashOrder = null;
     session.quote = null;
     session.checkout = null;
+    session.order_subtotal = 0;
+    session.order_total = 0;
+    await clearSessionCart(psid);
+    await saveSession(session);
     const resetMsg = 'Na-reset na ang iyong session. Paano kita matutulungan ngayon?';
     await sendTextMessage(psid, resetMsg);
     return { intent: 'RESET_SESSION', confidence: 1.0, replyLog: resetMsg };
+  }
+
+  // Requirement 1: Mandatory Post-Reset Gateway & Initial Greeting
+  // Whenever session is in RESET, EXPIRED, INITIAL, INITIAL_GREETING, AWAITING_DINING_MODE, or when dining_mode is not yet selected
+  const isPostResetState = ['RESET', 'EXPIRED', 'INITIAL', 'INITIAL_GREETING', 'AWAITING_DINING_MODE'].includes(session.state) ||
+    ['RESET', 'EXPIRED', 'INITIAL', 'INITIAL_GREETING', 'AWAITING_DINING_MODE'].includes(session.current_step) ||
+    (session.state === 'idle' && !session.dining_mode);
+
+  if (isPostResetState && !session.dining_mode) {
+    if (/\b(?:dine\s*in|sa\s*loob|table)\b/i.test(norm)) {
+      session.dining_mode = 'Dine In';
+      session.orderType = 'dine_in';
+      session.state = 'ORDERING';
+      session.current_step = 'ORDERING';
+      await saveSession(session);
+      const msg = `Copy po sa Dine In! Free seating po tayo sa open seating area kaya feel free to find any available seat pagdating niyo.\n\nEto po ang aming menu para makapili kayo ng inyong drinks and meals:`;
+      await sendTextMessage(psid, msg);
+      await sendFullMenu(psid, session);
+      return { intent: 'DINING_MODE_DINE_IN', confidence: 1.0, replyLog: msg };
+    }
+    if (/\b(?:take[\s-]*out|takeout|pick[\s-]*up|pickup|daanan)\b/i.test(norm)) {
+      session.dining_mode = 'Pick-up';
+      session.orderType = 'pickup';
+      session.state = 'ORDERING';
+      session.current_step = 'ORDERING';
+      await saveSession(session);
+      const msg = `Copy po sa Take Out! Ihahanda po natin ito agad para sa counter pickup pagdaan ninyo sa cafe.\n\nEto po ang aming menu para makapili kayo:`;
+      await sendTextMessage(psid, msg);
+      await sendFullMenu(psid, session);
+      return { intent: 'DINING_MODE_TAKE_OUT', confidence: 1.0, replyLog: msg };
+    }
+    if (/\b(?:delivery|deliver|padeliver|pa-deliver)\b/i.test(norm)) {
+      session.dining_mode = 'Delivery';
+      session.orderType = 'delivery';
+      session.state = 'ORDERING';
+      session.current_step = 'ORDERING';
+      await saveSession(session);
+      const msg = `Noted po sa Delivery! Ihahatid po namin ito sa inyong address (hihingin po namin ang complete delivery address mamaya sa checkout).\n\nEto po ang aming menu para makapili kayo:`;
+      await sendTextMessage(psid, msg);
+      await sendFullMenu(psid, session);
+      return { intent: 'DINING_MODE_DELIVERY', confidence: 1.0, replyLog: msg };
+    }
+
+    // Customer has NOT chosen dining mode yet: lock progression and reply ONLY with the exact Welcome Greeting
+    session.state = 'AWAITING_DINING_MODE';
+    session.current_step = 'AWAITING_DINING_MODE';
+    await saveSession(session);
+
+    const greetingMsg = "Hello po! Welcome to Diner's Cafe! Ask ko lang po muna bago tayo magsimula, will this be for Dine In, Delivery, or Take Out?";
+    await sendQuickReplies(psid, greetingMsg, [
+      { title: 'Dine In', payload: 'DINING_MODE_DINE_IN' },
+      { title: 'Delivery', payload: 'DINING_MODE_DELIVERY' },
+      { title: 'Take Out', payload: 'DINING_MODE_TAKE_OUT' }
+    ]);
+    return { intent: 'AWAITING_DINING_MODE_GATEWAY', confidence: 1.0, replyLog: greetingMsg };
+  }
+
+  // Requirement 2: Silent & Atomic Batch Cart Mutation (Add & Remove Multiple Items)
+  if (isBatchRemoveIntent(rawText)) {
+    const removedItems = executeBatchRemove(session.cart, rawText);
+    if (removedItems && removedItems.length > 0) {
+      const cartTotal = session.cart.reduce((sum, item) => sum + ((item.price || 0) * (item.quantity || 1)), 0);
+      session.order_subtotal = cartTotal;
+      session.order_total = cartTotal;
+      session.state = session.cart.length > 0 ? 'AWAITING_CHECKOUT_CONFIRM' : 'IDLE';
+      session.current_step = session.cart.length > 0 ? 'AWAITING_CHECKOUT_CONFIRM' : 'IDLE';
+      await saveSession(session);
+
+      const resp = formatUpdatedCartResponse(session.cart);
+      await sendQuickReplies(psid, resp.text, resp.quickReplies);
+      return { intent: 'BATCH_CART_REMOVE', confidence: 1.0, removedItems, cartTotal };
+    }
+  }
+
+  if (isBatchAddIntent(rawText)) {
+    const [candidates] = await db.query(`
+      SELECT m.id, m.name, m.price, m.synonyms, m.is_available, COALESCE(m.stock_quantity, i.stock_quantity, 0) AS stock_quantity
+      FROM menu_items m
+      LEFT JOIN inventory i ON i.menu_item_id = m.id
+      WHERE COALESCE(m.is_deleted, 0) = 0
+    `);
+
+    if (!session.cart) session.cart = [];
+    const addedItems = executeBatchAdd(session.cart, rawText, candidates);
+
+    // Notify user of any out-of-stock items (Requirement 4)
+    if (addedItems && addedItems.outOfStockItems && addedItems.outOfStockItems.length > 0) {
+      for (const oosName of addedItems.outOfStockItems) {
+        const soldOutMsg = `Pasensya na po, sold out / out of stock na po ang ${oosName} sa ngayon.`;
+        await sendTextMessage(psid, soldOutMsg);
+      }
+    }
+
+    if (addedItems && addedItems.length > 0) {
+      const cartTotal = session.cart.reduce((sum, item) => sum + ((item.price || 0) * (item.quantity || 1)), 0);
+      session.order_subtotal = cartTotal;
+      session.order_total = cartTotal;
+      session.state = 'AWAITING_CHECKOUT_CONFIRM';
+      session.current_step = 'AWAITING_CHECKOUT_CONFIRM';
+      await saveSession(session);
+
+      const resp = formatUpdatedCartResponse(session.cart);
+      await sendQuickReplies(psid, resp.text, resp.quickReplies);
+      return { intent: 'BATCH_CART_ADD', confidence: 1.0, addedItems, cartTotal };
+    } else if (addedItems && addedItems.outOfStockItems && addedItems.outOfStockItems.length > 0) {
+      return { intent: 'BATCH_CART_ADD_OUT_OF_STOCK', confidence: 1.0, outOfStock: true };
+    }
   }
 
   // 1. Delivery trigger keywords: 'delivery', 'deliver', 'padeliver'
@@ -1020,165 +1772,358 @@ async function handleTextInput(psid, session, rawText) {
   if (isDeliveryChoice && (session.state === 'AWAITING_ORDER_TYPE' || session.current_step === 'AWAITING_ORDER_TYPE' || (session.cart && session.cart.length > 0 && !isDetailsStateCheck))) {
     session.orderType = 'delivery';
     session.order_type = 'delivery';
+    session.dining_mode = 'Delivery';
     if (session.cart && session.cart.length > 0) {
       session.ordered_items = [...session.cart];
     }
-    session.current_step = 'AWAITING_CUSTOMER_INFO';
-    session.state = 'AWAITING_CUSTOMER_INFO';
+    session.current_step = 'COLLECTING_CUSTOMER_INFO';
+    session.state = 'COLLECTING_CUSTOMER_INFO';
     await saveSession(session);
 
-    const reply = `Please provide the following:
-Address:
-Name:
-Contact number or landmark:`;
+    const reply = getCheckoutInfoPrompt(session);
 
     await sendTextMessage(psid, reply);
     return { intent: 'ORDER_TYPE_DELIVERY', confidence: 1.0, replyLog: reply };
   }
 
-  // 2. State: 'AWAITING_CUSTOMER_INFO'
-  if (session.state === 'AWAITING_CUSTOMER_INFO' || session.current_step === 'AWAITING_CUSTOMER_INFO') {
-    const parsed = parseCustomerInfo(rawText);
+  // 2. State: 'COLLECTING_CUSTOMER_INFO' & 'AWAITING_CUSTOMER_INFO' (Issue 3 & Issue 4)
+  if (
+    session.state === 'COLLECTING_CUSTOMER_INFO' ||
+    session.current_step === 'COLLECTING_CUSTOMER_INFO' ||
+    session.state === 'AWAITING_CUSTOMER_INFO' ||
+    session.current_step === 'AWAITING_CUSTOMER_INFO'
+  ) {
+    let currentDiningMode = session.dining_mode;
+    if (!currentDiningMode) {
+      if (session.orderType === 'delivery') currentDiningMode = 'Delivery';
+      else if (session.orderType === 'dine_in') currentDiningMode = 'Dine In';
+      else if (session.orderType === 'pickup') currentDiningMode = 'Pick-up';
+    }
 
-    if (!parsed.address || parsed.address.length < 5) {
-      const askInfoMsg = 'Pakibigay ang inyong kumpletong address, pangalan, at contact number o landmark.';
+    const parsed = parseCustomerInfo(rawText, currentDiningMode);
+
+    const customerName = parsed.name || session.customer_name || session.details?.name || '';
+    const contactNumber = parsed.contact || session.contact_number || session.details?.phone || '';
+
+    // If customer name or contact number is missing, prompt politely
+    if (!customerName || !contactNumber || contactNumber.length < 7) {
+      const askInfoMsg = 'Pakibigay po ang inyong buong Pangalan at Active Contact Number para sa inyong order:';
       await sendTextMessage(psid, askInfoMsg);
       return { intent: 'AWAITING_CUSTOMER_INFO_RETRY', confidence: 1.0, replyLog: askInfoMsg };
     }
 
-    let deliveryDetails;
-    try {
-      deliveryDetails = await calculateDeliveryDistanceAndFee(parsed.address);
-    } catch (err) {
-      const geoFailMsg = 'Paumanhin, hindi mahanap ang address na inyong ibinigay. Pakisend muli ang inyong kumpletong address kasama ang kilalang landmark upang matukoy ang distansya.';
-      await sendTextMessage(psid, geoFailMsg);
-      return { intent: 'GEO_ADDRESS_NOT_FOUND', confidence: 1.0, replyLog: geoFailMsg };
-    }
-
-    const customerName = parsed.name || session.customer_name || session.details?.name || 'Customer';
-    const contactNumber = parsed.contact || session.contact_number || session.details?.phone || 'N/A';
     const subtotal = (session.cart && session.cart.length > 0)
       ? calculateCartSubtotal(session.cart)
-      : (session.order_subtotal || 150.00);
+      : (session.order_subtotal || 0);
 
-    const distanceKm = deliveryDetails.distanceKm;
-    const deliveryFee = deliveryDetails.deliveryFee;
-    const grandTotal = Math.round((subtotal + deliveryFee) * 100) / 100;
+    const discount = parseFloat(session.discount_amount || 0) || 0;
 
+    const isDineIn = /dine[\s-]*in|sa\s*loob/i.test(currentDiningMode || '') || /table|dine[\s-]*in|sa\s*loob/i.test(parsed.address || '');
+    const isPickup = /pick[\s-]*up|pickup|take[\s-]*out|takeout|daanan/i.test(currentDiningMode || '') || /pick[\s-]*up|pickup|take[\s-]*out|takeout|counter/i.test(parsed.address || '');
+    const isDelivery = !isDineIn && !isPickup && (/delivery/i.test(currentDiningMode || '') || (!currentDiningMode && parsed.address));
+
+    if (isDineIn) session.dining_mode = 'Dine In';
+    else if (isPickup) session.dining_mode = 'Pick-up';
+    else if (isDelivery) session.dining_mode = 'Delivery';
+
+    let addressStr = '';
+    let deliveryFee = 0;
+
+    const currentStoreAddr = getStoreAddress();
+    if (session.dining_mode === 'Dine In' || session.dining_mode === 'Pick-up') {
+      session.address = currentStoreAddr;
+      session.delivery_address = currentStoreAddr;
+      addressStr = currentStoreAddr;
+      deliveryFee = 0;
+    } else {
+      addressStr = parsed.address || session.delivery_address || session.address || session.details?.address || '';
+      if (!addressStr || addressStr === currentStoreAddr || addressStr === STORE_ADDRESS) {
+        const askAddrMsg = 'Pakibigay po ang inyong kumpletong Delivery Address:';
+        await sendTextMessage(psid, askAddrMsg);
+        return { intent: 'AWAITING_CUSTOMER_INFO_RETRY', confidence: 1.0, replyLog: askAddrMsg };
+      }
+      // 1. Geocode customer address with local biasing & PH component filtering
+      let geocoded = await geocodeCustomerAddress(addressStr);
+      if (!geocoded || !geocoded.success || geocoded.error === 'ZERO_RESULTS') {
+        const notFoundMsg = 'Paumanhin po, hindi namin mahanap ang eksaktong lokasyon. Pakisama po ang Barangay, Siyudad, o kilalang Landmark (hal. Tapat ng MRT Boni o Puregold).';
+        session.state = 'AWAITING_ADDRESS_RETRY';
+        session.checkout_step = 'AWAITING_ADDRESS_RETRY';
+        session.current_step = 'AWAITING_ADDRESS_RETRY';
+        session.customer_name = customerName;
+        session.contact_number = contactNumber;
+        session.phone_number = contactNumber;
+        session.payment_mode = parsed.paymentMode || (/\bgcash\b/i.test(rawText) ? 'GCash' : 'Cash');
+        await saveSession(session);
+        await sendTextMessage(psid, notFoundMsg);
+        return { intent: 'AWAITING_ADDRESS_RETRY', confidence: 1.0, replyLog: notFoundMsg };
+      }
+
+      const resolved_lat = geocoded.resolved_lat;
+      const resolved_lng = geocoded.resolved_lng;
+      const formatted_address = geocoded.formatted_address || addressStr;
+
+      // 2. Compute distance & fee
+      const feeRes = await calculateDeliveryFee(resolved_lat, resolved_lng);
+      const distance = feeRes.distanceKm;
+      const calculatedFee = feeRes.deliveryFee;
+
+      // Check 10 km limit
+      if (distance > 10.0 || feeRes.isDeliverable === false) {
+        const nonDeliverableNotice = `Paunawa: Ang inyong lokasyon (${distance} km) ay lagpas sa aming 10 km delivery limit at hindi na po ito sakop para sa delivery. Maaari po kayong pumili ng Dine In o Pick-up.`;
+        await sendTextMessage(psid, nonDeliverableNotice);
+        return { intent: 'DELIVERY_NON_DELIVERABLE', confidence: 1.0, replyLog: nonDeliverableNotice };
+      }
+
+      // Check > 3.0 km escalation rule
+      if (distance > 3.0) {
+        const escalationNotice = `Paunawa: Ang inyong lokasyon (${distance} km) ay lagpas sa aming in-house delivery radius (3.0 km). Maaari po itong i-book sa Grab/Lalamove ng aming staff para sa inyong order.`;
+        await sendTextMessage(psid, escalationNotice);
+        try {
+          notificationService.broadcastSSE('COURIER_ESCALATION_NEEDED', {
+            psid,
+            distanceKm: distance,
+            maxRadiusKm: 3.0,
+            address: formatted_address
+          });
+        } catch (notifErr) { }
+      }
+
+      // Save to session
+      session.delivery_address = formatted_address;
+      session.address = formatted_address;
+      session.customer_lat = resolved_lat;
+      session.customer_lng = resolved_lng;
+      session.delivery_distance_km = distance;
+      session.delivery_fee = calculatedFee;
+      session.deliveryFee = calculatedFee;
+      session.customer_name = customerName;
+      session.contact_number = contactNumber;
+      session.phone_number = contactNumber;
+      session.payment_mode = parsed.paymentMode || (/\bgcash\b/i.test(rawText) ? 'GCash' : 'Cash');
+      if (!session.details) session.details = {};
+      session.details.name = customerName;
+      session.details.phone = contactNumber;
+      session.details.address = formatted_address;
+      session.details.paymentMode = session.payment_mode;
+
+      // Transition to address confirmation
+      session.state = 'AWAITING_ADDRESS_CONFIRMATION';
+      session.checkout_step = 'AWAITING_ADDRESS_CONFIRMATION';
+      session.current_step = 'AWAITING_ADDRESS_CONFIRMATION';
+      await saveSession(session);
+
+      const confirmPrompt = `📍 Nai-locate po namin ang inyong drop-off:\n"${formatted_address}" (${distance} km)\nDelivery Fee: ₱${calculatedFee.toFixed(2)}\n\nTama po ba ang lokasyong ito?\n[1] Oo, tama ito\n[2] Ibahin ang address`;
+      await sendQuickReplies(psid, confirmPrompt, [
+        { title: 'Oo, tama ito', payload: 'CONFIRM_ADDRESS_YES' },
+        { title: 'Ibahin ang address', payload: 'CONFIRM_ADDRESS_NO' }
+      ]);
+      return { intent: 'AWAITING_ADDRESS_CONFIRMATION', confidence: 1.0, replyLog: confirmPrompt };
+    }
+
+    // For Dine In / Pick-up: Skip address confirmation, auto-assign store address, set fee 0, and proceed directly to discount
+    const paymentMode = parsed.paymentMode || (/\bgcash\b/i.test(rawText) ? 'GCash' : 'Cash');
     session.customer_name = customerName;
     session.contact_number = contactNumber;
-    session.delivery_address = deliveryDetails.formattedAddress;
-    session.distance_km = distanceKm;
-    session.delivery_fee = deliveryFee;
+    session.phone_number = contactNumber;
+    session.delivery_address = addressStr;
+    session.address = addressStr;
+    session.delivery_fee = 0;
+    session.deliveryFee = 0;
     session.order_subtotal = subtotal;
-    session.order_total = grandTotal;
-    if (session.cart && session.cart.length > 0) {
-      session.ordered_items = [...session.cart];
-    }
+    session.payment_mode = paymentMode;
     if (!session.details) session.details = {};
     session.details.name = customerName;
-    session.details.address = deliveryDetails.formattedAddress;
     session.details.phone = contactNumber;
+    session.details.address = addressStr;
+    session.details.paymentMode = paymentMode;
 
-    session.current_step = 'AWAITING_PAYMENT_VERIFICATION';
-    session.state = 'AWAITING_PAYMENT_VERIFICATION';
+    session.state = 'AWAITING_DISCOUNT_CONFIRMATION';
+    session.current_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+    session.checkout_step = 'AWAITING_DISCOUNT_CONFIRMATION';
     await saveSession(session);
 
-    const baseAppUrl = (config.appUrl || 'http://localhost:3000').replace(/\/+$/, '');
-    const gcashFullQrUrl = `${baseAppUrl}/images/gcash_full_qr.png`;
-    const gcashRedirectUrl = `${baseAppUrl}/pay/gcash?psid=${encodeURIComponent(psid)}`;
-    const gcashNo = '0928 176 2895';
-    const gcashName = 'FR****S DA*E F.';
-
-    // 1. Message 1: Generic Template Card (GCash Card with square image aspect ratio)
-    await sendGenericTemplate(psid, [
-      {
-        title: 'GCash',
-        subtitle: gcashNo,
-        image_url: gcashFullQrUrl,
-        buttons: [
-          {
-            type: 'web_url',
-            url: gcashRedirectUrl,
-            title: 'Transfer with GCash',
-            webview_height_ratio: 'compact'
-          }
-        ]
-      }
-    ], { image_aspect_ratio: 'square' });
-
-    // 2. Message 2: 3-step text instructions
-    const paymentInstructions = `1. Tap "Transfer with GCash".
-2. GCash will open with the recipient's account details prefilled.
-3. After you complete the transfer, your receipt will be uploaded into this chat.`;
-
-    await sendTextMessage(psid, paymentInstructions);
-
-    return { intent: 'CUSTOMER_INFO_RECEIVED_AWAITING_PAYMENT', confidence: 1.0, replyLog: paymentInstructions };
+    const askDiscountMsg = 'Mayroon po ba kayong Senior Citizen o PWD ID para sa 20% discount?';
+    await sendQuickReplies(psid, askDiscountMsg, [
+      { title: 'Mayroon', payload: 'DISCOUNT_YES' },
+      { title: 'Wala po', payload: 'DISCOUNT_NO' }
+    ]);
+    return { intent: 'AWAITING_DISCOUNT_CONFIRMATION', confidence: 1.0, replyLog: askDiscountMsg };
   }
 
-  // 3. State: 'AWAITING_PAYMENT_VERIFICATION' & legacy 'AWAITING_DELIVERY_DETAILS'
+  // 2a-1. State: 'AWAITING_ADDRESS_CONFIRMATION' (Text-Based Geocoding Drop-off Confirmation)
   if (
+    session.state === 'AWAITING_ADDRESS_CONFIRMATION' ||
+    session.checkout_step === 'AWAITING_ADDRESS_CONFIRMATION' ||
+    session.current_step === 'AWAITING_ADDRESS_CONFIRMATION'
+  ) {
+    const isConfirm = rawText === 'CONFIRM_ADDRESS_YES' ||
+      /\b(?:1|oo|opo|yes|tama|tama\s*ito|oo\s*tama|ok|okay|confirm|proceed|sige|g)\b/i.test(norm);
+    const isChange = rawText === 'CONFIRM_ADDRESS_NO' ||
+      /\b(?:2|ibahin|ibahin\s*ang\s*address|hindi|no|mali|change|iba|palitan)\b/i.test(norm);
+
+    if (isConfirm) {
+      session.state = 'AWAITING_DISCOUNT_CONFIRMATION';
+      session.current_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+      session.checkout_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+      await saveSession(session);
+
+      const askDiscountMsg = 'Mayroon po ba kayong Senior Citizen o PWD ID para sa 20% discount?';
+      await sendQuickReplies(psid, askDiscountMsg, [
+        { title: 'Mayroon', payload: 'DISCOUNT_YES' },
+        { title: 'Wala po', payload: 'DISCOUNT_NO' }
+      ]);
+      return { intent: 'AWAITING_DISCOUNT_CONFIRMATION', confidence: 1.0, replyLog: askDiscountMsg };
+    }
+
+    if (isChange) {
+      session.state = 'AWAITING_ADDRESS_RETRY';
+      session.current_step = 'AWAITING_ADDRESS_RETRY';
+      session.checkout_step = 'AWAITING_ADDRESS_RETRY';
+      await saveSession(session);
+
+      const askRetryMsg = 'Pakisama po ang inyong specific street number at kalapit na landmark (hal. #123 Boni Ave tapat ng Puregold, Mandaluyong):';
+      await sendTextMessage(psid, askRetryMsg);
+      return { intent: 'AWAITING_ADDRESS_RETRY', confidence: 1.0, replyLog: askRetryMsg };
+    }
+
+    // Default re-prompt if response is ambiguous
+    const reconfirmMsg = `Pakipili po kung tama ang drop-off:\n[1] Oo, tama ito\n[2] Ibahin ang address`;
+    await sendQuickReplies(psid, reconfirmMsg, [
+      { title: 'Oo, tama ito', payload: 'CONFIRM_ADDRESS_YES' },
+      { title: 'Ibahin ang address', payload: 'CONFIRM_ADDRESS_NO' }
+    ]);
+    return { intent: 'AWAITING_ADDRESS_CONFIRMATION', confidence: 1.0, replyLog: reconfirmMsg };
+  }
+
+  // 2a-2. State: 'AWAITING_ADDRESS_RETRY' (Revised address input)
+  if (
+    session.state === 'AWAITING_ADDRESS_RETRY' ||
+    session.checkout_step === 'AWAITING_ADDRESS_RETRY' ||
+    session.current_step === 'AWAITING_ADDRESS_RETRY'
+  ) {
+    const rawAddressInput = rawText.trim();
+    const geocoded = await geocodeCustomerAddress(rawAddressInput);
+
+    if (!geocoded || !geocoded.success || geocoded.error === 'ZERO_RESULTS') {
+      const retryMsg = 'Paumanhin po, hindi pa rin namin mahanap ang eksaktong lokasyon. Pakisama po ang Barangay, Siyudad, o kilalang Landmark (hal. Tapat ng MRT Boni o Puregold).';
+      await sendTextMessage(psid, retryMsg);
+      return { intent: 'AWAITING_ADDRESS_RETRY', confidence: 1.0, replyLog: retryMsg };
+    }
+
+    const resolved_lat = geocoded.resolved_lat;
+    const resolved_lng = geocoded.resolved_lng;
+    const formatted_address = geocoded.formatted_address || rawAddressInput;
+
+    const feeRes = await calculateDeliveryFee(resolved_lat, resolved_lng);
+    const distance = feeRes.distanceKm;
+    const calculatedFee = feeRes.deliveryFee;
+
+    if (distance > 10.0 || feeRes.isDeliverable === false) {
+      const nonDeliverableNotice = `Paunawa: Ang inyong lokasyon (${distance} km) ay lagpas sa aming 10 km delivery limit at hindi na po ito sakop para sa delivery. Maaari po kayong pumili ng Dine In o Pick-up.`;
+      await sendTextMessage(psid, nonDeliverableNotice);
+      return { intent: 'DELIVERY_NON_DELIVERABLE', confidence: 1.0, replyLog: nonDeliverableNotice };
+    }
+
+    if (distance > 3.0) {
+      const escalationNotice = `Paunawa: Ang inyong lokasyon (${distance} km) ay lagpas sa aming in-house delivery radius (3.0 km). Maaari po itong i-book sa Grab/Lalamove ng aming staff para sa inyong order.`;
+      await sendTextMessage(psid, escalationNotice);
+      try {
+        notificationService.broadcastSSE('COURIER_ESCALATION_NEEDED', {
+          psid,
+          distanceKm: distance,
+          maxRadiusKm: 3.0,
+          address: formatted_address
+        });
+      } catch (notifErr) { }
+    }
+
+    session.delivery_address = formatted_address;
+    session.address = formatted_address;
+    session.customer_lat = resolved_lat;
+    session.customer_lng = resolved_lng;
+    session.delivery_distance_km = distance;
+    session.delivery_fee = calculatedFee;
+    session.deliveryFee = calculatedFee;
+    if (session.details) session.details.address = formatted_address;
+
+    session.state = 'AWAITING_ADDRESS_CONFIRMATION';
+    session.checkout_step = 'AWAITING_ADDRESS_CONFIRMATION';
+    session.current_step = 'AWAITING_ADDRESS_CONFIRMATION';
+    await saveSession(session);
+
+    const confirmPrompt = `📍 Nai-locate po namin ang inyong drop-off:\n"${formatted_address}" (${distance} km)\nDelivery Fee: ₱${calculatedFee.toFixed(2)}\n\nTama po ba ang lokasyong ito?\n[1] Oo, tama ito\n[2] Ibahin ang address`;
+    await sendQuickReplies(psid, confirmPrompt, [
+      { title: 'Oo, tama ito', payload: 'CONFIRM_ADDRESS_YES' },
+      { title: 'Ibahin ang address', payload: 'CONFIRM_ADDRESS_NO' }
+    ]);
+    return { intent: 'AWAITING_ADDRESS_CONFIRMATION', confidence: 1.0, replyLog: confirmPrompt };
+  }
+
+  // 2b. State: 'AWAITING_DISCOUNT_CONFIRMATION' (Requirement 1)
+  if (
+    session.state === 'AWAITING_DISCOUNT_CONFIRMATION' ||
+    session.current_step === 'AWAITING_DISCOUNT_CONFIRMATION'
+  ) {
+    const isYes = /\b(?:meron|mayroon|opo|yes|oo|senior|pwd|meron\s*po|mayroon\s*po|i\s*have)\b/i.test(norm);
+    const isNo = /\b(?:wala|wala\s*po|no|hindi|none|wag\s*na|huwag|ayaw|wala\s*akong)\b/i.test(norm);
+
+    if (isYes) {
+      session.state = 'AWAITING_DISCOUNT_PROOF';
+      session.current_step = 'AWAITING_DISCOUNT_PROOF';
+      await saveSession(session);
+
+      const askProofMsg = 'Paki-send po ang picture ng inyong Senior Citizen o PWD ID o i-type ang inyong ID Number para ma-apply ang 20% discount.';
+      await sendTextMessage(psid, askProofMsg);
+      return { intent: 'AWAITING_DISCOUNT_PROOF', confidence: 1.0, replyLog: askProofMsg };
+    }
+
+    if (isNo) {
+      session.discount = { applied: false, type: 'None', amount: 0 };
+      session.discount_amount = 0;
+      return await finalizeOrderSummaryAndPayment(psid, session);
+    }
+
+    const reAskMsg = 'Mayroon po ba kayong Senior Citizen o PWD ID para sa 20% discount?';
+    await sendQuickReplies(psid, reAskMsg, [
+      { title: 'Mayroon', payload: 'DISCOUNT_YES' },
+      { title: 'Wala po', payload: 'DISCOUNT_NO' }
+    ]);
+    return { intent: 'AWAITING_DISCOUNT_CONFIRMATION_RETRY', confidence: 1.0, replyLog: reAskMsg };
+  }
+
+  // 2c. State: 'AWAITING_DISCOUNT_PROOF' (Requirement 1)
+  if (
+    session.state === 'AWAITING_DISCOUNT_PROOF' ||
+    session.current_step === 'AWAITING_DISCOUNT_PROOF'
+  ) {
+    const subtotal = session.order_subtotal || (session.cart ? calculateCartSubtotal(session.cart) : 0);
+    const computedDiscount = Math.round((subtotal * 0.20) * 100) / 100;
+    const idText = rawText.trim() || 'Senior / PWD ID Provided';
+
+    session.discount = {
+      applied: true,
+      type: 'Senior Citizen / PWD 20%',
+      amount: computedDiscount,
+      idNumber: idText
+    };
+    session.discount_amount = computedDiscount;
+
+    return await finalizeOrderSummaryAndPayment(psid, session);
+  }
+
+  // 3. State: 'AWAITING_PAYMENT_PROOF', 'AWAITING_GCASH_VERIFICATION', 'AWAITING_PAYMENT_VERIFICATION'
+  if (
+    session.checkout_step === 'AWAITING_PAYMENT_PROOF' ||
+    session.state === 'AWAITING_PAYMENT_PROOF' ||
+    session.current_step === 'AWAITING_PAYMENT_PROOF' ||
+    session.state === 'AWAITING_GCASH_VERIFICATION' ||
+    session.current_step === 'AWAITING_GCASH_VERIFICATION' ||
     session.state === 'AWAITING_PAYMENT_VERIFICATION' ||
     session.current_step === 'AWAITING_PAYMENT_VERIFICATION' ||
     session.state === 'AWAITING_DELIVERY_DETAILS' ||
     session.current_step === 'AWAITING_DELIVERY_DETAILS'
   ) {
-    // Check if 13-digit Reference Number is present in text
-    const refMatch = rawText.match(/\b\d{4}\s?\d{3}\s?\d{6}\b/) || rawText.match(/\b\d{13}\b/) || rawText.match(/(?:ref(?:erence)?(?:\s*no\.?)?)\s*[:#]?\s*([0-9\s]{13,16})/i);
-    if (refMatch) {
-      const cleanRef = (refMatch[1] || refMatch[0]).replace(/\s+/g, '');
-      if (cleanRef.length === 13) {
-        // Save address if also present
-        const textWithoutRef = rawText.replace(refMatch[0], '').trim();
-        if (textWithoutRef.length > 5 && !session.delivery_address) {
-          session.delivery_address = textWithoutRef;
-          if (!session.details) session.details = {};
-          session.details.address = textWithoutRef;
-        }
-
-        const verifyResult = await verifyPaymentTransaction({
-          referenceNumber: cleanRef,
-          session,
-          psid,
-          parsedAmount: null
-        });
-
-        const isAwaitingPaymentVerification = (
-          session.state === 'AWAITING_PAYMENT_VERIFICATION' ||
-          session.current_step === 'AWAITING_PAYMENT_VERIFICATION' ||
-          Boolean(session.customer_name)
-        );
-
-        if (verifyResult.success && isAwaitingPaymentVerification) {
-          session.current_step = 'order_placed';
-          session.state = 'order_placed';
-          session.gcash_ref = cleanRef;
-          await saveSession(session);
-
-          const receiptMsg = generateSummaryReceipt(session, cleanRef);
-          await sendTextMessage(psid, receiptMsg);
-          return { intent: 'GCASH_TYPED_REF_VERIFIED', confidence: 1.0, replyLog: receiptMsg };
-        } else {
-          await sendTextMessage(psid, verifyResult.botReply);
-          return { intent: verifyResult.success ? 'GCASH_TYPED_REF_VERIFIED' : 'GCASH_REF_VERIFICATION_FAILED', confidence: 1.0, replyLog: verifyResult.botReply };
-        }
-      }
-    }
-
-    // In AWAITING_PAYMENT_VERIFICATION state: customer typed something without 13-digit reference number
-    // Manatiling tahimik ang bot sa state na 'AWAITING_PAYMENT_VERIFICATION' at maghintay lamang sa awtomatikong upload ng resibo o ref number
-    if (session.state === 'AWAITING_PAYMENT_VERIFICATION' || session.current_step === 'AWAITING_PAYMENT_VERIFICATION') {
-      return { intent: 'AWAITING_PAYMENT_VERIFICATION_SILENT', confidence: 1.0 };
-    }
-
-    // Legacy fallback for AWAITING_DELIVERY_DETAILS: if text only contains address without reference number
-    if (rawText.length > 5 && !['hi', 'hello', 'menu', 'cart'].includes(norm)) {
-      session.delivery_address = rawText;
-      if (!session.details) session.details = {};
-      session.details.address = rawText;
-      return { intent: 'SET_DELIVERY_ADDRESS_AWAITING_REF', confidence: 1.0 };
-    }
+    return await handlePaymentProofTextInput(psid, session, rawText);
   }
 
   // 1. States expecting free text (Decision 1b)
@@ -1243,6 +2188,14 @@ Contact number or landmark:`;
     }
   }
 
+  // Issue 3: Explicit Checkout intent / triggers (Eliminates "Yes to what" and confirmation trap)
+  if (
+    /(?:check\s*out|checkout|yes.*checkout|bayad|babayaran|paki\s*checkout)/i.test(norm) ||
+    ['checkout', 'check out', 'pay now', 'im done', 'thats all'].includes(norm)
+  ) {
+    return startCheckoutFlow(psid, session);
+  }
+
   // 2. Open Yes/No question states (Decision 1c)
   const openQuestionStates = [
     'AWAITING_SUGGESTION_CONFIRMATION',
@@ -1285,8 +2238,12 @@ Contact number or landmark:`;
     return { intent: 'STANDALONE_NO', confidence: 1.0 };
   }
 
-  // 4. Shortcut words (Decision 1d)
-  if (['menu', 'order', 'browse', 'show menu', 'show me the menu', 'what do you have', 'what s available'].includes(norm)) {
+  // 4. Shortcut words & Full Menu inquiries (Requirement 1)
+  if (
+    ['menu', 'order', 'browse', 'show menu', 'show me the menu', 'what do you have', 'what s available', 'menu please', 'full menu', 'menu list', 'menu po'].includes(norm) ||
+    /\b(?:patingin\s*(?:ng)?\s*menu|tingin\s*(?:ng)?\s*menu|menu\s*please|ano\s*pong\s*tinda\s*niyo|anong\s*tinda\s*niyo|drinks\s*list|list\s*of\s*drinks|food\s*list|pahingi\s*ng\s*menu|pakita\s*ng\s*menu)\b/i.test(rawText) ||
+    (/\b(?:menu|catalog|tinda|listahan)\b/i.test(norm) && !/\b(?:cancel|remove|delete|alisin|tanggalin)\b/i.test(norm))
+  ) {
     await sendFullMenu(psid, session);
     return { intent: 'BROWSE_MENU', confidence: 1.0 };
   }
@@ -1311,7 +2268,52 @@ Contact number or landmark:`;
     return { intent: 'TRACK_ORDER', confidence: 1.0 };
   }
 
-  if (['hi', 'hello', 'hey', 'good morning', 'kumusta'].includes(norm)) {
+  // Stage 1: Dining Mode text responses if not yet locked
+  if (!session.dining_mode && !session.orderType) {
+    if (/\b(?:dine\s*in|sa\s*loob|table)\b/i.test(norm)) {
+      session.dining_mode = 'Dine In';
+      session.orderType = 'dine_in';
+      session.state = 'ORDERING';
+      await saveSession(session);
+      const msg = `Copy po sa Dine In! Free seating po tayo sa open seating area kaya feel free to find any available seat pagdating niyo.\n\nEto po ang aming menu para makapili kayo ng inyong drinks and meals:`;
+      await sendTextMessage(psid, msg);
+      await sendFullMenu(psid, session);
+      return { intent: 'DINING_MODE_DINE_IN', confidence: 1.0, replyLog: msg };
+    }
+    if (/\b(?:take[\s-]*out|takeout|pick[\s-]*up|pickup|daanan)\b/i.test(norm)) {
+      session.dining_mode = 'Pick-up';
+      session.orderType = 'pickup';
+      session.state = 'ORDERING';
+      await saveSession(session);
+      const msg = `Copy po sa Take Out! Ihahanda po natin ito agad para sa counter pickup pagdaan ninyo sa cafe.\n\nEto po ang aming menu para makapili kayo:`;
+      await sendTextMessage(psid, msg);
+      await sendFullMenu(psid, session);
+      return { intent: 'DINING_MODE_TAKE_OUT', confidence: 1.0, replyLog: msg };
+    }
+    if (/\b(?:delivery|deliver|padeliver|pa-deliver)\b/i.test(norm)) {
+      session.dining_mode = 'Delivery';
+      session.orderType = 'delivery';
+      session.state = 'ORDERING';
+      await saveSession(session);
+      const msg = `Noted po sa Delivery! Ihahatid po namin ito sa inyong address (hihingin po namin ang complete delivery address mamaya sa checkout).\n\nEto po ang aming menu para makapili kayo:`;
+      await sendTextMessage(psid, msg);
+      await sendFullMenu(psid, session);
+      return { intent: 'DINING_MODE_DELIVERY', confidence: 1.0, replyLog: msg };
+    }
+  }
+
+  if (['hi', 'hello', 'hey', 'good morning', 'kumusta'].includes(norm) || /^(?:hi|hello|magandang (?:araw|umaga|hapon|gabi))\b/i.test(norm)) {
+    if (!session.dining_mode && !session.orderType) {
+      session.state = 'AWAITING_DINING_MODE';
+      await saveSession(session);
+      const greetingMsg = `Hello po! Welcome to Diner's Cafe! Ask ko lang po muna bago tayo magsimula, will this be for **Dine In**, **Delivery**, or **Take Out**?`;
+      await sendQuickReplies(psid, greetingMsg, [
+        { title: 'Dine In', payload: 'DINING_MODE_DINE_IN' },
+        { title: 'Delivery', payload: 'DINING_MODE_DELIVERY' },
+        { title: 'Take Out', payload: 'DINING_MODE_TAKE_OUT' }
+      ]);
+      return { intent: 'GREETING_STAGE1', confidence: 1.0, replyLog: greetingMsg };
+    }
     const welcome = botMessages.welcome();
     await sendQuickReplies(psid, welcome.text, welcome.quickReplies);
     return { intent: 'GREETING', confidence: 1.0 };
@@ -1446,7 +2448,17 @@ async function handleYesAnswer(psid, session) {
   }
 
   if (currentState === 'AWAITING_CHECKOUT_CONFIRM') {
-    await startCheckoutFlow(psid, session);
+    if (session.dining_mode) {
+      session.state = 'COLLECTING_CUSTOMER_INFO';
+      session.current_step = 'COLLECTING_CUSTOMER_INFO';
+      await saveSession(session);
+      const prompt = getCheckoutInfoPrompt(session);
+      await sendTextMessage(psid, prompt);
+      return { intent: 'CONFIRM_CHECKOUT_YES', confidence: 1.0 };
+    }
+    session.state = 'AWAITING_ORDER_TYPE';
+    const otMsg = botMessages.orderType();
+    await sendQuickReplies(psid, otMsg.text, otMsg.quickReplies);
     return { intent: 'CONFIRM_CHECKOUT_YES', confidence: 1.0 };
   }
 
@@ -1549,6 +2561,78 @@ async function handleNoAnswer(psid, session) {
  * One query for all available, in-stock items joined to active categories.
  * No category selector in main path.
  */
+/**
+ * Template string handler formatting the structured Announcement text (Deliverable 2)
+ * @param {Object} promo - Promotion record
+ * @returns {string} Formatted announcement text
+ */
+function formatPromotionAnnouncement(promo) {
+  const eventTitle = promo.title || 'Special Promotion';
+  let dateRange = 'Ongoing Promo';
+
+  if (promo.start_date && promo.end_date) {
+    dateRange = promo.start_date === promo.end_date 
+      ? promo.start_date 
+      : `${promo.start_date} to ${promo.end_date}`;
+  } else if (promo.start_date) {
+    dateRange = `Simula ${promo.start_date}`;
+  } else if (promo.end_date) {
+    dateRange = `Hanggang ${promo.end_date}`;
+  }
+
+  const eventDescription = promo.description || promo.perk_description || '';
+
+  return `📢 SPECIAL EVENT ANNOUNCEMENT!\n\n${eventTitle}\n📅 Petsa: ${dateRange}\n\n${eventDescription}\n\nBago po kayo mag-order, nais niyo po ba itong i-avail? Eto po ang ating buong menu:`;
+}
+
+/**
+ * Check for currently active promotion / event for pre-menu teaser
+ * Query: SELECT * FROM promotions WHERE is_active = TRUE AND NOW() BETWEEN start_date AND end_date LIMIT 1
+ */
+async function getActivePromotionForPreMenu() {
+  try {
+    const [rows] = await db.query(`
+      SELECT * FROM promotions 
+      WHERE is_active = TRUE 
+        AND NOW() BETWEEN start_date AND end_date 
+      LIMIT 1
+    `);
+    if (rows && rows.length > 0) {
+      return rows[0];
+    }
+
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    const [fallbackRows] = await db.query(`
+      SELECT * FROM promotions 
+      WHERE is_active = 1 
+        AND (start_date IS NULL OR start_date <= ?)
+        AND (end_date IS NULL OR end_date >= ?)
+      ORDER BY created_at DESC 
+      LIMIT 1
+    `, [todayStr, todayStr]);
+    return (fallbackRows && fallbackRows.length > 0) ? fallbackRows[0] : null;
+  } catch (err) {
+    console.warn('[Pre-Menu Promo Query Warning]', err.message);
+    return null;
+  }
+}
+
+async function getActivePromotionsForToday() {
+  const promo = await getActivePromotionForPreMenu();
+  return promo ? [promo] : [];
+}
+
+/**
+ * Task 3: Send Full Menu as Horizontal Carousel (R1, R2, Decision 2)
+ * Multi-Message Sequential Dispatch Pattern:
+ * Branch A (Active Promo exists):
+ *   Message 1: Send Poster Image Attachment
+ *   Message 2: Send Structured Text Announcement
+ *   Message 3: Send Full Menu Catalog (Carousel)
+ * Branch B (No Active Promo):
+ *   Skip Messages 1 and 2 entirely, dispatch Menu Catalog directly
+ */
 async function sendFullMenu(psid, session) {
   session.state = 'BROWSING';
 
@@ -1567,9 +2651,45 @@ async function sendFullMenu(psid, session) {
     return;
   }
 
-  // 1. Intro message
-  const intro = botMessages.menuIntro();
-  await sendTextMessage(psid, intro.text);
+  // 1. Check for Active Promotion/Event
+  let promo = null;
+  try {
+    promo = await getActivePromotionForPreMenu();
+  } catch (err) {
+    console.warn('[Pre-Menu Promo Hook Error]', err.message);
+  }
+
+  if (promo) {
+    // -------------------------------------------------------------
+    // Branch A: If an Active Promo/Event Exists
+    // -------------------------------------------------------------
+
+    // Message 1: Send Poster Image Attachment (if banner image exists)
+    let posterUrl = promo.banner_image_url;
+    if (posterUrl) {
+      if (!posterUrl.startsWith('http://') && !posterUrl.startsWith('https://') && !posterUrl.startsWith('data:')) {
+        const baseUrl = (config.appUrl || 'http://localhost:3000').replace(/\/+$/, '');
+        const cleanPath = posterUrl.startsWith('/') ? posterUrl : `/${posterUrl}`;
+        posterUrl = `${baseUrl}${cleanPath}`;
+      }
+      await sendImageAttachment(psid, posterUrl).catch(err => {
+        console.warn('[Pre-Menu Teaser] Poster dispatch warning:', err.message);
+      });
+    }
+
+    // Message 2: Send Structured Text Announcement
+    const announcementText = formatPromotionAnnouncement(promo);
+    await sendTextMessage(psid, announcementText);
+  } else {
+    // -------------------------------------------------------------
+    // Branch B: If NO Active Promo/Event Exists
+    // -------------------------------------------------------------
+    // Skip Messages 1 and 2 entirely. Present intro to Menu Catalog.
+    const intro = botMessages.menuIntro();
+    await sendTextMessage(psid, intro.text);
+  }
+
+  // Message 3: Send Full Menu Catalog (Carousel of 10)
 
   // 2. Build cards and chunk into carousels of 10
   const displayedItems = items.slice(0, MENU_MAX_ITEMS);
@@ -1736,17 +2856,17 @@ async function handleOrderItemText(psid, session, rawText, nlu) {
   }
   // Extract candidate query string
   const [candidates] = await db.query(`
-    SELECT m.id, m.name, m.price, m.synonyms, m.is_available, i.stock_quantity
+    SELECT m.id, m.name, m.price, m.synonyms, m.is_available, COALESCE(m.stock_quantity, i.stock_quantity, 0) AS stock_quantity
     FROM menu_items m
-    JOIN inventory i ON i.menu_item_id = m.id
-    WHERE m.is_available = 1 AND i.stock_quantity > 0
+    LEFT JOIN inventory i ON i.menu_item_id = m.id
+    WHERE COALESCE(m.is_deleted, 0) = 0
   `);
 
-  let cleanQuery = (nlu.menuItem || rawText)
-    .replace(/\b(?:i\s*want|can\s*i\s*get|order|add|one\s*more|another|isa\s*pang|dalawa\s*pang|gusto\s*ko\s*ng|pa-order\s*po\s*ng)\b/gi, '')
+  let cleanQuery = (nlu?.menuItem || rawText || '')
+    .replace(/\b(?:i\s*want|can\s*i\s*get|order|add|one\s*more|another|isa\s*pang|dalawa\s*pang|gusto\s*ko\s*ng|pa[- ]?order(?:\s*po)?(?:\s*ng)?|pabili(?:\s*po)?(?:\s*ng)?)\b/gi, '')
     .replace(/\b(?:the|a|an|po|please|pls|ang|yung|ng|sa)\b/gi, '')
     .replace(/\b\d+\s*(?:pcs|pieces|orders?|cups?|servings?|x)?\b/gi, '')
-    .replace(/\b(?:one|two|three|four|five|six|seven|eight|nine|ten|isa|dalawa|tatlo|apat|lima|anim|pito|walo|siyam|sampu)\b/gi, '')
+    .replace(/\b(?:one|two|three|four|five|six|seven|eight|nine|ten|isa|isang|dalawa|dalawang|tatlo|tatlong|apat|apat na|lima|limang|anim|anim na|pito|pitong|walo|walong|siyam|siyam na|sampu|sampung)\b/gi, '')
     .trim();
   if (!cleanQuery) cleanQuery = rawText;
 
@@ -1754,11 +2874,22 @@ async function handleOrderItemText(psid, session, rawText, nlu) {
 
   if (matchResult.status === 'accept') {
     const matchedItem = matchResult.matches[0];
-    const qty = nlu.quantity || parseQuantity(rawText);
+
+    // Stock & Availability Guard (Requirement 4)
+    const stock = matchedItem.stock_quantity !== undefined ? matchedItem.stock_quantity : 999;
+    const isAvail = matchedItem.is_available === undefined || matchedItem.is_available === 1 || matchedItem.is_available === true;
+    if (stock <= 0 || !isAvail) {
+      const soldOutMsg = `Pasensya na po, sold out / out of stock na po ang ${matchedItem.name} sa ngayon.`;
+      await sendTextMessage(psid, soldOutMsg);
+      return { intent: 'ORDER_ITEM_OUT_OF_STOCK', confidence: 1.0, handled: true };
+    }
+
+    const qty = nlu.quantity || parseQuantity(rawText) || 1;
 
     if (qty !== null && qty > 0) {
       if (!session.cart) session.cart = [];
       addToCart(session.cart, matchedItem, qty);
+      await saveSession(session);
       session.state = 'AWAITING_CHECKOUT_CONFIRM';
       const subtotal = calculateCartSubtotal(session.cart);
       const addedMsg = botMessages.added(qty, matchedItem.name, peso(subtotal));
@@ -1775,6 +2906,15 @@ async function handleOrderItemText(psid, session, rawText, nlu) {
 
   if (matchResult.status === 'confirm') {
     const topCand = matchResult.matches[0];
+
+    // Stock & Availability Guard (Requirement 4)
+    const candStock = topCand.stock_quantity !== undefined ? topCand.stock_quantity : 999;
+    const candAvail = topCand.is_available === undefined || topCand.is_available === 1 || topCand.is_available === true;
+    if (candStock <= 0 || !candAvail) {
+      const soldOutMsg = `Pasensya na po, sold out / out of stock na po ang ${topCand.name} sa ngayon.`;
+      await sendTextMessage(psid, soldOutMsg);
+      return { intent: 'ORDER_ITEM_OUT_OF_STOCK', confidence: 1.0, handled: true };
+    }
     const extractedQuantity = (nlu && nlu.quantity) || parseQuantity(rawText) || 1;
 
     session.pending_suggestion = {
@@ -1850,28 +2990,56 @@ async function handleRemoveItemById(psid, session, menuItemId, qty = null) {
     return;
   }
 
+  await saveSession(session);
+
   if (session.cart.length === 0) {
     session.state = 'IDLE';
-    const remEmpty = botMessages.removedEmpty(result.removed, result.name);
-    await sendQuickReplies(psid, remEmpty.text, remEmpty.quickReplies);
+    const remEmptyMsg = `Removed na po ang ${result.removed}x ${result.name} sa inyong cart! Eto po ang updated items niyo: Cart is now empty.`;
+    await sendQuickReplies(psid, remEmptyMsg, [
+      { title: '☕ Menu', payload: 'MENU_HOME' }
+    ]);
   } else {
     session.state = 'AWAITING_CHECKOUT_CONFIRM';
     const subtotal = calculateCartSubtotal(session.cart);
-    const remMsg = botMessages.removed(result.removed, result.name, peso(subtotal));
-    await sendQuickReplies(psid, remMsg.text, remMsg.quickReplies);
+    const summaryList = session.cart.map(c => `- ${c.quantity}x ${c.name} (${peso((c.price || 0) * c.quantity)})`).join('\n') + `\nTotal: ${peso(subtotal)}`;
+    const remMsg = `Removed na po ang ${result.removed}x ${result.name} sa inyong cart! Eto po ang updated items niyo:\n${summaryList}`;
+    await sendQuickReplies(psid, remMsg, [
+      { title: 'Proceed to Checkout', payload: 'CONFIRM_CHECKOUT' },
+      { title: 'Add more items', payload: 'KEEP_SHOPPING' },
+      { title: 'View cart', payload: 'VIEW_CART' }
+    ]);
   }
 }
 
-async function handleRemoveItemText(psid, session, rawText, nlu) {
+async function handleRemoveItemText(psid, session, rawText, nlu = {}) {
   if (!session.cart || session.cart.length === 0) {
     const empty = botMessages.cartEmpty();
     await sendQuickReplies(psid, empty.text, empty.quickReplies);
     return { intent: 'REMOVE_ITEM_EMPTY', confidence: 1.0 };
   }
 
+  // Multi-item & Typo-tolerant atomic removal (Issue 1)
+  const removedItems = executeMultiItemRemoval(session.cart, rawText);
+  if (removedItems && removedItems.length > 0) {
+    // Recompute cart_total immediately after mutation
+    const cart_total = session.cart.reduce((sum, item) => sum + ((item.price || 0) * (item.quantity || 1)), 0);
+    session.order_subtotal = cart_total;
+    session.order_total = cart_total;
+
+    // Mutate and persist to DB directly
+    await saveSession(session);
+
+    session.state = session.cart.length > 0 ? 'AWAITING_CHECKOUT_CONFIRM' : 'IDLE';
+    session.current_step = session.cart.length > 0 ? 'AWAITING_CHECKOUT_CONFIRM' : 'IDLE';
+
+    const resp = formatRemovalResponse(removedItems, session.cart);
+    await sendQuickReplies(psid, resp.text, resp.quickReplies);
+    return { intent: 'REMOVE_ITEM', confidence: 1.0, removedItems, cart_total };
+  }
+
   // If no specific item in text, ask which item
-  const itemQuery = nlu.menuItem || rawText
-    .replace(/\b(?:remove|delete|take\s*out|cancel\s*(?:the|my)?|alisin|tanggalin)\b/gi, '')
+  const itemQuery = (nlu && nlu.menuItem) || rawText
+    .replace(/\b(?:remove|delete|take\s*out|cancel\s*(?:the|my)?|alisin|tanggalin|patanggal|pa\s*tanggal)\b/gi, '')
     .trim();
 
   if (!itemQuery || itemQuery.length < 3) {
@@ -1886,21 +3054,13 @@ async function handleRemoveItemText(psid, session, rawText, nlu) {
   }));
 
   const matchRes = matchItems(itemQuery, candidates);
-  const qty = nlu.quantity || parseQuantity(rawText);
+  const qty = (nlu && nlu.quantity) || parseQuantity(rawText);
 
-  if (matchRes.status === 'accept') {
+  // Single-Turn Atomic Execution: Remove item directly without secondary confirmation
+  if (matchRes.status === 'accept' || matchRes.status === 'confirm') {
     const matched = matchRes.matches[0];
     await handleRemoveItemById(psid, session, matched.id, qty);
     return { intent: 'REMOVE_ITEM', confidence: 1.0 };
-  }
-
-  if (matchRes.status === 'confirm') {
-    const matched = matchRes.matches[0];
-    session.pendingItem = { id: matched.id, name: matched.name, qty };
-    session.state = 'AWAITING_REMOVE_ITEM';
-    const didYou = botMessages.didYouMean(`Remove ${matched.name}`);
-    await sendQuickReplies(psid, didYou.text, didYou.quickReplies);
-    return { intent: 'REMOVE_ITEM_CONFIRM', confidence: 0.7 };
   }
 
   if (matchRes.status === 'ambiguous') {
@@ -1943,12 +3103,17 @@ async function startCheckoutFlow(psid, session) {
   if (!session.cart || session.cart.length === 0) {
     const empty = botMessages.cartEmpty();
     await sendQuickReplies(psid, empty.text, empty.quickReplies);
-    return;
+    return { intent: 'CHECKOUT_EMPTY', confidence: 1.0 };
   }
 
-  session.state = 'AWAITING_ORDER_TYPE';
-  const otMsg = botMessages.orderType();
-  await sendQuickReplies(psid, otMsg.text, otMsg.quickReplies);
+  // Issue 3: Immediately transition to COLLECTING_CUSTOMER_INFO and prompt cleanly without "Yes to what?"
+  session.state = 'COLLECTING_CUSTOMER_INFO';
+  session.current_step = 'COLLECTING_CUSTOMER_INFO';
+  await saveSession(session);
+
+  const prompt = getCheckoutInfoPrompt(session);
+  await sendTextMessage(psid, prompt);
+  return { intent: 'COLLECTING_CUSTOMER_INFO_PROMPT', confidence: 1.0, replyLog: prompt };
 }
 
 async function proceedAfterOrderType(psid, session) {
@@ -2093,9 +3258,14 @@ async function handleLocationPin(psid, session, location) {
   }
 
   try {
+    const feeRes = await calculateDeliveryFee(location.lat, location.lng);
+    session.delivery_fee = feeRes.deliveryFee;
+    session.deliveryFee = feeRes.deliveryFee;
+    session.delivery_coordinates = { lat: location.lat, lng: location.lng };
+
     const quoteRes = await quoteForAddress({ lat: location.lat, lng: location.lng, address: session.details?.address });
     session.quote = quoteRes;
-    session.details.address = quoteRes.formattedAddress || `Pin (${location.lat.toFixed(4)}, ${location.lng.toFixed(4)})`;
+    session.details.address = feeRes.formattedAddress || quoteRes.formattedAddress || `Pin (${location.lat.toFixed(4)}, ${location.lng.toFixed(4)})`;
 
     if (session.editingField) {
       session.editingField = null;
@@ -2489,10 +3659,11 @@ async function handleStage5Confirmation(psid, session, options = {}) {
 
   let quoteToken = session.quote?.quoteToken || session.quoteToken || null;
   if (!quoteToken && orderType === 'delivery') {
+    const storeSettings = storeSettingsService.getCachedStoreSettings();
     quoteToken = jwt.sign(
       {
-        lat: Number(config.store?.lat) || 14.6042,
-        lng: Number(config.store?.lng) || 120.9822,
+        lat: Number(storeSettings.store_latitude) || Number(config.store?.lat) || 14.6042,
+        lng: Number(storeSettings.store_longitude) || Number(config.store?.lng) || 120.9822,
         address: deliveryAddress,
         distanceKm: session.distance_km || 2.5,
         vehicleType: 'motorcycle',
@@ -2506,7 +3677,7 @@ async function handleStage5Confirmation(psid, session, options = {}) {
 
   const newOrder = await createOrder(psid, {
     customerName,
-    customerPhone: session.contact_number || session.details?.phone || '09170000000',
+    customerPhone: session.phone_number || session.contact_number || session.details?.phone || '',
     deliveryAddress,
     orderType,
     paymentMethod,
@@ -2547,46 +3718,42 @@ async function handleStage5Confirmation(psid, session, options = {}) {
     session.current_step = 'AWAITING_DELIVERY';
     await saveSession(session);
 
-    const reply = `Natanggap at verified na po namin ang inyong confirmation at GCash payment para sa Order #${orderNum}!\nNa-forward na po sa aming dispatch at kitchen team ang inyong delivery order. Maraming salamat po sa pag-order sa Diner's Cafe, Sir/Ma'am ${customerName}! Hintayin na lang po natin dumating si kuya rider.`;
+    const reply = `Natanggap na po namin ang inyong GCash payment! Ang inyong order (#${orderNum}) ay submitted na for Pending Approval.`;
     await sendTextMessage(psid, reply);
     return { intent: 'ORDER_CONFIRMED_PAID', confidence: 1.0, replyLog: reply };
   }
 
   if (paymentMethod === 'gcash') {
-    session.state = 'AWAITING_PAYMENT_VERIFICATION';
-    session.current_step = 'AWAITING_PAYMENT_VERIFICATION';
+    session.checkout_step = 'AWAITING_PAYMENT_PROOF';
+    session.state = 'AWAITING_PAYMENT_PROOF';
+    session.current_step = 'AWAITING_PAYMENT_PROOF';
     await saveSession(session);
 
+    const currentSettings = storeSettingsService.getCachedStoreSettings();
+    const gcashNumber = currentSettings.gcash_account_number || config.store?.gcashNumber || '0928 176 2895';
+    const gcashName = currentSettings.gcash_account_name || config.store?.gcashName || "Diner's Cafe";
+    const qrImageUrl = currentSettings.gcash_qr_image_url || '/assets/gcash_qr.png';
     const baseAppUrl = (config.appUrl || 'http://localhost:3000').replace(/\/+$/, '');
-    const gcashFullQrUrl = `${baseAppUrl}/images/gcash_full_qr.png`;
-    const gcashRedirectUrl = `${baseAppUrl}/pay/gcash?psid=${encodeURIComponent(psid)}`;
+    const fullQrUrl = qrImageUrl.startsWith('http') ? qrImageUrl : `${baseAppUrl}${qrImageUrl.startsWith('/') ? '' : '/'}${qrImageUrl}`;
 
-    const textMsg = `Maraming salamat po, Sir/Ma'am ${customerName}!\n\nPumasok na po sa Diner's Cafe system ang inyong order (#${orderNum}).\nTotal Amount: ₱${parseFloat(totalAmount).toFixed(2)}\n\nPaki-send po ang bayad sa GCash (0928 176 2895 - FR****S DA*E F.). Pagkatapos mag-transfer, paki-send ang resibo o mag-reply ng "Send na po".`;
-    await sendTextMessage(psid, textMsg);
+    // Message 1: Send the cafe's GCash QR Code as an image attachment
+    try {
+      await sendImageAttachment(psid, fullQrUrl);
+    } catch (qrErr) {
+      console.warn('[GCash Order] Could not dispatch QR code image:', qrErr.message);
+    }
 
-    await sendGenericTemplate(psid, [
-      {
-        title: 'GCash Payment',
-        subtitle: `Order #${orderNum} - ₱${parseFloat(totalAmount).toFixed(2)}`,
-        image_url: gcashFullQrUrl,
-        buttons: [
-          {
-            type: 'web_url',
-            url: gcashRedirectUrl,
-            title: 'Transfer with GCash',
-            webview_height_ratio: 'compact'
-          }
-        ]
-      }
-    ], { image_aspect_ratio: 'square' });
+    // Message 2: Send formatted text instructions (no external webview URL buttons)
+    const detailsMsg = `💳 GCASH PAYMENT DETAILS:\nAccount Name: ${gcashName}\nAccount Number: ${gcashNumber}\nTotal Amount to Pay: ₱${parseFloat(totalAmount).toFixed(2)}\n\n📌 Paalala:\nI-save o i-scan ang QR code sa itaas gamit ang inyong GCash app. \nPagkatapos magbayad, paki-send po rito ang SCREENSHOT ng resibo o i-type ang 13-digit Reference Number upang maihanda na ang inyong order.`;
+    await sendTextMessage(psid, detailsMsg);
 
-    return { intent: 'ORDER_PLACED_AWAITING_GCASH', confidence: 1.0, replyLog: textMsg };
+    return { intent: 'ORDER_PLACED_AWAITING_GCASH', confidence: 1.0, replyLog: detailsMsg };
   } else {
     session.state = 'ORDER_PLACED';
     session.current_step = 'ORDER_PLACED';
     await saveSession(session);
 
-    const textMsg = `Maraming salamat po, Sir/Ma'am ${customerName}!\n\nKumpirmado na po ang inyong order (#${orderNum})! Na-forward na po sa kusina ang inyong ticket para maihanda.\nTotal Amount: ₱${parseFloat(totalAmount).toFixed(2)} (Cash on Delivery).\n\nHintayin na lamang po ang inyong delivery. Salamat po sa pag-order sa Diner's Cafe!`;
+    const textMsg = `Salamat po! Naipasa na po ang inyong order sa system with status: Pending Approval. I-notify po namin kayo oras na ma-verify ng store.`;
     await sendQuickReplies(psid, textMsg, [
       { title: 'Track order', payload: 'TRACK_LATEST_ORDER' },
       { title: '☕ Menu', payload: 'MENU_HOME' }
@@ -2715,6 +3882,15 @@ async function tryGeminiConversationalTurn(psid, session, rawText) {
           (rawName && (m.name.toLowerCase() === rawName || m.name.toLowerCase().includes(rawName) || rawName.includes(m.name.toLowerCase())))
         );
         if (dbItem) {
+          // Stock & Availability Guard (Requirement 4)
+          const itemStock = dbItem.stock_quantity !== undefined ? dbItem.stock_quantity : 999;
+          const isAvail = dbItem.is_available === undefined || dbItem.is_available === 1 || dbItem.is_available === true;
+          if (itemStock <= 0 || !isAvail) {
+            const soldOutMsg = `Pasensya na po, sold out / out of stock na po ang ${dbItem.name} sa ngayon.`;
+            await sendTextMessage(psid, soldOutMsg);
+            continue;
+          }
+
           const qty = Math.max(1, parseInt(ext.qty || ext.quantity, 10) || 1);
           const customParts = [];
           if (ext.size) customParts.push(`Size: ${ext.size}`);
@@ -2796,5 +3972,21 @@ module.exports = {
   verifyPaymentTransaction,
   recognizeReceipt,
   parseReceiptText,
-  generateSummaryReceipt
+  generateSummaryReceipt,
+  finalizeOrderSummaryAndPayment,
+  STORE_ADDRESS,
+  getStoreAddress,
+  getCheckoutInfoPrompt,
+  parseCustomerInfo,
+  formatPlaintextOrderSummary,
+  formatPromotionAnnouncement,
+  getActivePromotionForPreMenu,
+  savePaymentProofImage,
+  handlePaymentProofUpload,
+  handlePaymentProofTextInput,
+  calculateDeliveryFee,
+  calculateDeliveryDistanceAndFee,
+  computeDeliveryFee,
+  geocodeCustomerAddress,
+  sanitizeCustomerAddress
 };

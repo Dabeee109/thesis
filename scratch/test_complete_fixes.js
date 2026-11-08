@@ -6,18 +6,19 @@ const db = require('../database/db');
 
 async function runTests() {
   console.log('--- 1. Testing Format of Order Summary Receipt ---');
-  const inputReceipt = "Eto po ang summary ng inyong order: Name: Dave Fernandez Location: 203 blk 14 Addition hills Mandaluyong City Payment option: GCash Dining mode: Delivery Discount: ₱0.20 (Senior Citizen Discount) Order: - 1x qwertys (₱1.00) Total: ₱129.80 (Subtotal ₱1.00 - ₱0.20 Discount + ₱129.00 Delivery Fee computed for 2km+ radius). Tama po ba lahat ng details? Reply YES to confirm and proceed, o sabihin lang po kung may gustong palitan!";
+  const inputReceipt = "Name: Dave Fernandez Phone Number: 09171234567 Location: 203 blk 14 Addition hills Mandaluyong City Payment option: GCash Dining mode: Delivery Discount: ₱0.00 (None) Order: - 1x Spanish Latte (16oz, 50% sugar, Oat Milk, Iced) - ₱175.00 Total: ₱225.00 (Subtotal ₱175.00 - ₱0.00 + ₱50.00 Delivery Fee) Tama po ba lahat ng details? Reply YES to confirm, o sabihin lang po kung may gustong palitan!";
   
   const formatted = formatOrderSummaryReceipt(inputReceipt);
   console.log('FORMATTED OUTPUT:\n' + formatted);
 
-  assert(formatted.includes('Eto po ang summary ng inyong order:\nName: Dave Fernandez'), 'Intro and Name must be separated by newline');
+  assert(formatted.includes('Name: Dave Fernandez'), 'Name must be present');
+  assert(/Phone(?:\s*number)?:\s*09171234567/i.test(formatted), 'Phone number must have its own line');
   assert(formatted.includes('\nLocation: 203 blk 14 Addition hills Mandaluyong City'), 'Location must have its own line');
   assert(formatted.includes('\nPayment option: GCash'), 'Payment option must have its own line');
   assert(formatted.includes('\nDining mode: Delivery'), 'Dining mode must have its own line');
-  assert(formatted.includes('\nDiscount: ₱0.20 (Senior Citizen Discount)'), 'Discount must have its own line');
-  assert(formatted.includes('\nOrder:\n- 1x qwertys (₱1.00)'), 'Order must have its own line');
-  assert(formatted.includes('\nTotal: ₱129.80'), 'Total must have its own line');
+  assert(formatted.includes('\nDiscount: ₱0.00 (None)'), 'Discount must have its own line');
+  assert(formatted.includes('\nOrder:\n- 1x Spanish Latte'), 'Order must have its own line');
+  assert(formatted.includes('\nTotal: ₱225.00'), 'Total must have its own line');
   assert(formatted.includes('\nTama po ba lahat ng details?'), 'Confirmation question must have its own line');
   console.log('✅ TEST 1 PASSED: Format Order Summary Receipt has all explicit line breaks!\n');
 
@@ -75,3 +76,4 @@ runTests().catch(err => {
   console.error('❌ TEST FAILED:', err);
   process.exit(1);
 });
+

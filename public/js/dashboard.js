@@ -166,7 +166,8 @@ function switchTab(tabId) {
     overview: 'Operational Overview',
     orders: 'Order Operations',
     menu: 'Menu Management',
-    inventory: 'Inventory & Stock Control',
+    promotions: 'Promotions, Events & Seasonal Deals',
+    inventory: 'Promotions, Events & Seasonal Deals',
     delivery: 'Smart Delivery Management (FR6)',
     feedback: 'Customer Feedback & Ratings (FR11)',
     reports: 'Reports & Business Analytics (FR10)',
@@ -178,7 +179,8 @@ function switchTab(tabId) {
   // Load specific tab data on switch
   if (tabId === 'orders') loadOrders();
   if (tabId === 'menu') loadMenu();
-  if (tabId === 'inventory') loadInventory();
+  if (tabId === 'promotions') loadPromotions();
+  if (tabId === 'inventory') switchTab('promotions');
   if (tabId === 'delivery') loadDeliveries();
   if (tabId === 'feedback') loadFeedback();
   if (tabId === 'reports') loadReports();
@@ -186,6 +188,8 @@ function switchTab(tabId) {
   if (tabId === 'settings') {
     loadUsers();
     loadFacebookSettings();
+    loadStoreLocationSettings();
+    loadGcashSettings();
   }
 }
 
@@ -194,13 +198,15 @@ async function refreshAllData() {
     loadKPIs(),
     loadOrders(),
     loadMenu(),
-    loadInventory(),
+    loadPromotions(),
     loadDeliveries(),
     loadFeedback(),
     loadReports(),
     loadChatbotStatus(),
     loadUsers(),
-    loadFacebookSettings()
+    loadFacebookSettings(),
+    loadStoreLocationSettings(),
+    loadGcashSettings()
   ]);
 }
 
@@ -225,10 +231,15 @@ function handleRealtimeEvent(eventType, data) {
   if (eventType === 'VOID_REQUEST_RESOLVED') {
     API.toast(`📢 Order #${data.orderNumber} void was ${data.status} by ${data.resolvedBy}.`, data.status === 'approved' ? 'success' : 'info');
     loadOrders();
-    loadInventory();
   }
-  if (eventType === 'STOCK_ALERT' || eventType === 'INVENTORY_UPDATED') {
-    loadInventory();
+  if (eventType === 'PROMOTIONS_UPDATED') {
+    loadPromotions();
+  }
+  if (eventType === 'PROMOTION_BROADCAST_PROGRESS') {
+    updateBroadcastProgress(data);
+  }
+  if (eventType === 'PROMOTION_BROADCAST_COMPLETED') {
+    handleBroadcastCompleted(data);
   }
   if (eventType === 'NEW_FEEDBACK') {
     loadFeedback();
@@ -378,11 +389,17 @@ function renderKanban(orders) {
     const itemsSummary = (order.items || []).map(i => `${i.quantity}x ${i.item_name}`).join(', ');
 
     let paymentBadge = '';
-    if (order.payment_method === 'gcash') {
+    if ((order.payment_method || '').toLowerCase() === 'gcash') {
       if (order.payment_mismatch) {
         paymentBadge = `<span class="badge badge-mismatch">⚠️ GCash Mismatch</span>`;
+      } else if (order.payment_status === 'Pending Verification') {
+        paymentBadge = `<span class="badge badge-preparing" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #f59e0b;">⏳ Proof Sent</span>`;
+      } else if (order.payment_status === 'Paid') {
+        paymentBadge = `<span class="badge badge-gcash">📱 GCash Paid</span>`;
+      } else if (order.payment_status === 'Failed') {
+        paymentBadge = `<span class="badge badge-mismatch" style="background: rgba(239, 68, 68, 0.2); color: #f87171;">❌ Proof Invalid</span>`;
       } else {
-        paymentBadge = `<span class="badge badge-gcash">📱 GCash Verified</span>`;
+        paymentBadge = `<span class="badge badge-pending">📱 GCash Pending</span>`;
       }
     } else {
       paymentBadge = `<span class="badge badge-cash">💵 Cash</span>`;
@@ -572,10 +589,65 @@ async function viewOrderDetails(orderId) {
           </div>
         </div>
 
-        <div style="margin-top: 16px; padding: 12px; background: var(--bg-surface-elevated); border-radius: var(--radius-sm);">
-          <div style="font-size: 0.85rem; font-weight: 700;">Payment: ${o.payment_method.toUpperCase()} (${o.payment_status})</div>
-          ${o.payment_mismatch ? `<div style="color: var(--status-danger); font-size: 0.82rem; margin-top: 4px;">⚠️ ${o.mismatch_notes}</div>` : ''}
-          ${o.reference_no ? `<div style="font-size: 0.82rem; color: var(--text-muted);">Ref: ${o.reference_no}</div>` : ''}
+        <!-- Payment & Proof of Payment Section (Requirement 4) -->
+        <div style="margin-top: 16px; padding: 14px; background: var(--bg-surface-elevated); border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div style="font-size: 0.88rem; font-weight: 700; color: var(--brand-crema);">
+              💳 Payment Method: <span style="text-transform: uppercase; color: var(--brand-primary);">${escapeHtml(o.payment_method || 'CASH')}</span>
+            </div>
+            <div>
+              <span class="badge ${o.payment_status === 'Paid' ? 'badge-delivered' : (o.payment_status === 'Pending Verification' ? 'badge-preparing' : (o.payment_status === 'Failed' ? 'badge-mismatch' : 'badge-pending'))}" style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">
+                ${escapeHtml(o.payment_status || 'Pending')}
+              </span>
+            </div>
+          </div>
+
+          ${o.payment_mismatch ? `<div style="color: var(--status-danger); font-size: 0.82rem; margin: 4px 0;">⚠️ ${escapeHtml(o.mismatch_notes || '')}</div>` : ''}
+
+          <!-- Show Reference Number if present -->
+          ${(o.payment_ref_number || o.reference_no || o.gcash_ref) ? `
+            <div style="font-size: 0.86rem; color: var(--text-primary); margin: 6px 0; display: flex; align-items: center; gap: 6px;">
+              <span>🔢 Reference Number:</span>
+              <strong style="color: var(--brand-primary); font-family: monospace; font-size: 0.95rem; letter-spacing: 0.5px;">
+                ${escapeHtml(o.payment_ref_number || o.reference_no || o.gcash_ref)}
+              </strong>
+            </div>
+          ` : ''}
+
+          <!-- Clickable thumbnail preview for payment_proof_image -->
+          ${(o.payment_proof_image || o.receipt_url) ? `
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border-subtle);">
+              <div style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 6px;">
+                📸 Proof of Payment (Click to view full image):
+              </div>
+              <a href="${escapeHtml(o.payment_proof_image || o.receipt_url)}" target="_blank" rel="noopener noreferrer" title="View Full Payment Proof in new tab">
+                <img src="${escapeHtml(o.payment_proof_image || o.receipt_url)}" alt="GCash Receipt" 
+                     style="max-height: 125px; max-width: 220px; object-fit: contain; border-radius: 6px; border: 1px solid var(--border-subtle); background: #111; box-shadow: 0 2px 8px rgba(0,0,0,0.4); cursor: pointer; transition: transform 0.2s;" 
+                     onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'" />
+              </a>
+            </div>
+          ` : `
+            ${((o.payment_method || '').toLowerCase() === 'gcash' && o.payment_status !== 'Paid') ? `
+              <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 6px; font-style: italic;">
+                ℹ️ Customer has not uploaded an image receipt yet.
+              </div>
+            ` : ''}
+          `}
+
+          <!-- Staff Verification Action Buttons (Requirement 4) -->
+          ${((o.payment_method || '').toLowerCase() === 'gcash' || o.payment_status === 'Pending Verification' || o.payment_ref_number || o.payment_proof_image) ? `
+            <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); display: flex; gap: 10px; flex-wrap: wrap;">
+              <button type="button" class="btn btn-success btn-sm" onclick="markPaymentVerified(${o.id}, '${o.order_number}')" 
+                      style="font-weight: 700; background: #10b981; color: #fff; border: none; padding: 7px 14px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;"
+                      ${o.payment_status === 'Paid' ? 'disabled style="opacity: 0.55; cursor: not-allowed;"' : ''}>
+                <span>✅ Mark Payment Verified / Paid</span>
+              </button>
+              <button type="button" class="btn btn-danger btn-sm" onclick="markPaymentInvalid(${o.id}, '${o.order_number}')" 
+                      style="font-weight: 700; background: #ef4444; color: #fff; border: none; padding: 7px 14px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;">
+                <span>⚠️ Invalid Payment Proof</span>
+              </button>
+            </div>
+          ` : ''}
         </div>
 
         ${o.void_status === 'pending_approval' && o.status !== 'cancelled' ? `
@@ -781,6 +853,54 @@ function printReceipt() {
   window.print();
 }
 
+/**
+ * Staff Marks Payment as Verified / Paid (Requirement 4)
+ */
+async function markPaymentVerified(orderId, orderNumber) {
+  if (!confirm(`Mark payment as VERIFIED / PAID for Order #${orderNumber}?\n\nThe customer will receive a confirmation message on Messenger.`)) {
+    return;
+  }
+
+  try {
+    const res = await API.post(`/orders/${orderId}/verify-payment`, {});
+    if (res && res.success) {
+      API.toast(`✅ Payment for Order #${orderNumber} marked as Paid!`, 'success');
+      await Promise.all([loadOrders(), loadKPIs()]);
+      // Refresh the modal view if open
+      viewOrderDetails(orderId);
+    } else {
+      API.toast(res.message || 'Failed to verify payment.', 'error');
+    }
+  } catch (err) {
+    API.toast(err.message || 'Error verifying payment.', 'error');
+  }
+}
+
+/**
+ * Staff Marks Payment Proof as Invalid (Requirement 4)
+ */
+async function markPaymentInvalid(orderId, orderNumber) {
+  const reason = prompt(`Prompt customer on Messenger to re-upload proof of payment for Order #${orderNumber}?\n\nOptional note/reason:`, 'Malabong screenshot o maling reference number');
+  if (reason === null) return; // User cancelled prompt
+
+  try {
+    const res = await API.post(`/orders/${orderId}/invalid-payment`, { reason });
+    if (res && res.success) {
+      API.toast(`⚠️ Payment marked as invalid. Customer re-upload prompt sent for Order #${orderNumber}.`, 'info');
+      await Promise.all([loadOrders(), loadKPIs()]);
+      // Refresh the modal view if open
+      viewOrderDetails(orderId);
+    } else {
+      API.toast(res.message || 'Failed to update payment status.', 'error');
+    }
+  } catch (err) {
+    API.toast(err.message || 'Error updating payment status.', 'error');
+  }
+}
+
+window.markPaymentVerified = markPaymentVerified;
+window.markPaymentInvalid = markPaymentInvalid;
+
 // ----------------------------------------------------------------------------
 // 3. Menu Management
 // ----------------------------------------------------------------------------
@@ -838,11 +958,19 @@ function renderMenuItems(categories) {
             <span class="menu-card-price">₱${parseFloat(item.price).toFixed(2)}</span>
           </div>
           <div class="menu-card-desc">${item.description || ''}</div>
-          <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+          <div style="display: flex; gap: 8px; margin-bottom: 12px; align-items: center; flex-wrap: wrap;">
+            ${(item.is_available && (item.stock_quantity > 0)) ? `
+              <span class="badge" style="background: rgba(34, 197, 94, 0.16); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.35); font-weight: 700; padding: 4px 10px; border-radius: 9999px;">
+                Stock: ${item.stock_quantity}
+              </span>
+            ` : `
+              <span class="badge" style="background: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid rgba(248, 113, 113, 0.35); font-weight: 700; padding: 4px 10px; border-radius: 9999px;">
+                Sold Out
+              </span>
+            `}
             <span class="badge ${item.is_available ? 'badge-delivered' : 'badge-mismatch'}">
               ${item.is_available ? 'In Menu' : 'Unavailable'}
             </span>
-            <span class="badge badge-cash">Stock: ${item.stock_quantity || 0}</span>
           </div>
           <div class="menu-card-actions">
             <button class="btn ${item.is_available ? 'btn-outline' : 'btn-success'} btn-sm" onclick="toggleMenuItemAvailability(${item.id})">
@@ -1035,6 +1163,28 @@ window.clearMenuImageSelection = clearMenuImageSelection;
 window.handleManualImageUrl = handleManualImageUrl;
 window.toggleImageUrlInput = toggleImageUrlInput;
 
+function handleStockQuantityChange(val) {
+  const stock = parseInt(val, 10);
+  const availSelect = document.getElementById('menu-availability-input');
+  if (!availSelect) return;
+
+  if (isNaN(stock) || stock <= 0) {
+    availSelect.value = '0';
+  } else if (availSelect.dataset.userOverridden !== 'true') {
+    availSelect.value = '1';
+  }
+}
+
+function handleAvailabilityStatusChange(val) {
+  const availSelect = document.getElementById('menu-availability-input');
+  if (availSelect) {
+    availSelect.dataset.userOverridden = 'true';
+  }
+}
+
+window.handleStockQuantityChange = handleStockQuantityChange;
+window.handleAvailabilityStatusChange = handleAvailabilityStatusChange;
+
 function openAddMenuItemModal() {
   document.getElementById('menu-item-id').value = '';
   document.getElementById('modal-menu-title').innerText = 'Add New Menu Item';
@@ -1042,7 +1192,12 @@ function openAddMenuItemModal() {
   document.getElementById('menu-desc-input').value = '';
   document.getElementById('menu-price-input').value = '';
   document.getElementById('menu-prep-input').value = '10';
-  document.getElementById('initial-stock-group').style.display = 'grid';
+  document.getElementById('menu-stock-input').value = '25';
+  const availSelect = document.getElementById('menu-availability-input');
+  if (availSelect) {
+    availSelect.value = '1';
+    delete availSelect.dataset.userOverridden;
+  }
 
   // Reset image picker
   stagedMenuImageBase64 = null;
@@ -1083,7 +1238,15 @@ function openEditMenuItemModal(itemId) {
   document.getElementById('menu-desc-input').value = targetItem.description || '';
   document.getElementById('menu-price-input').value = targetItem.price;
   document.getElementById('menu-prep-input').value = targetItem.preparation_time_min || 10;
-  document.getElementById('initial-stock-group').style.display = 'none';
+  
+  // Populate Stock Quantity & Availability (Requirement 1)
+  const stockQty = targetItem.stock_quantity !== undefined ? targetItem.stock_quantity : 0;
+  document.getElementById('menu-stock-input').value = stockQty;
+  const availSelect = document.getElementById('menu-availability-input');
+  if (availSelect) {
+    availSelect.value = (targetItem.is_available && stockQty > 0) ? '1' : '0';
+    delete availSelect.dataset.userOverridden;
+  }
 
   // Populate image picker with current item image
   stagedMenuImageBase64 = null;
@@ -1134,8 +1297,12 @@ async function handleMenuItemSubmit(e) {
   const price = document.getElementById('menu-price-input').value;
   const prepTimeMin = document.getElementById('menu-prep-input').value;
   let imageUrl = document.getElementById('menu-img-input').value;
-  const initialStock = document.getElementById('menu-stock-input').value;
-  const unit = document.getElementById('menu-unit-input').value;
+  
+  // Stock and Availability values
+  const stockQuantity = parseInt(document.getElementById('menu-stock-input').value, 10) || 0;
+  const availSelect = document.getElementById('menu-availability-input');
+  const isAvailable = (availSelect && availSelect.value === '1' && stockQuantity > 0) ? 1 : 0;
+  const unit = (document.getElementById('menu-unit-input') && document.getElementById('menu-unit-input').value) || 'servings';
 
   const saveBtn = document.getElementById('menu-save-btn');
   const origBtnText = saveBtn ? saveBtn.innerText : 'Save Item';
@@ -1160,10 +1327,30 @@ async function handleMenuItemSubmit(e) {
     }
 
     if (id) {
-      await API.put(`/menu/${id}`, { categoryId, name, description, price, prepTimeMin, imageUrl });
+      await API.put(`/menu/${id}`, { 
+        categoryId, 
+        name, 
+        description, 
+        price, 
+        prepTimeMin, 
+        imageUrl,
+        stock_quantity: stockQuantity,
+        is_available: isAvailable
+      });
       API.toast('Menu item updated!', 'success');
     } else {
-      await API.post('/menu', { categoryId, name, description, price, prepTimeMin, imageUrl, initialStock, unit });
+      await API.post('/menu', { 
+        categoryId, 
+        name, 
+        description, 
+        price, 
+        prepTimeMin, 
+        imageUrl, 
+        initialStock: stockQuantity,
+        stock_quantity: stockQuantity,
+        is_available: isAvailable,
+        unit 
+      });
       API.toast('Menu item created!', 'success');
     }
     closeModal('modal-menu-item');
@@ -1179,96 +1366,379 @@ async function handleMenuItemSubmit(e) {
 }
 
 // ----------------------------------------------------------------------------
-// 4. Inventory Management
+// 4. Promotions & Events Management (Replaces Inventory & Stock Module)
 // ----------------------------------------------------------------------------
+let allPromotions = [];
+let currentBroadcastPromoId = null;
+
+async function loadPromotions() {
+  try {
+    const res = await API.get('/promotions');
+    if (res && res.promotions) {
+      allPromotions = res.promotions;
+      renderPromotionsTable(allPromotions);
+    }
+  } catch (err) {
+    console.error('Load promotions error:', err);
+  }
+}
+
+// Background compatibility helper for legacy void routines
 async function loadInventory() {
   try {
     const res = await API.get('/inventory');
-    if (res && res.inventory) {
-      allInventory = res.inventory;
-      renderInventoryTable(allInventory);
-    }
-    const logsRes = await API.get('/inventory/logs');
-    if (logsRes && logsRes.logs) {
-      renderInventoryLogs(logsRes.logs);
-    }
-  } catch (err) {
-    console.error('Load inventory error:', err);
+    if (res && res.inventory) allInventory = res.inventory;
+  } catch (e) {}
+}
+
+function renderPromotionsTable(promotions) {
+  const tbody = document.getElementById('promotions-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  if (!promotions || promotions.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 32px;">No promotions or events created yet. Click "+ Create Promo / Event" to start!</td></tr>`;
+    return;
   }
-}
 
-function renderInventoryTable(items) {
-  const tbody = document.getElementById('inventory-tbody');
-  tbody.innerHTML = '';
-
-  items.forEach(item => {
+  promotions.forEach(p => {
     const tr = document.createElement('tr');
+
+    // Type Badge class
+    let typeBadgeClass = 'badge-type-discount';
+    if (p.promo_type === 'Bundle / BOGO') typeBadgeClass = 'badge-type-bundle';
+    else if (p.promo_type === 'Cafe Event') typeBadgeClass = 'badge-type-event';
+
+    // Status Badge class
+    let statusBadgeClass = 'badge-active';
+    if (p.status === 'UPCOMING') statusBadgeClass = 'badge-upcoming';
+    else if (p.status === 'EXPIRED') statusBadgeClass = 'badge-expired';
+    else if (p.status === 'INACTIVE') statusBadgeClass = 'badge-mismatch';
+
+    // Poster thumbnail
+    const posterHtml = p.banner_image_url
+      ? `<img src="${escapeHtml(p.banner_image_url)}" class="promo-poster-thumb" alt="Poster" onerror="this.onerror=null; this.src='/favicon.ico';">`
+      : `<div class="promo-poster-thumb" style="display: flex; align-items: center; justify-content: center; font-size: 1.3rem;">🖼️</div>`;
+
     tr.innerHTML = `
-      <td><strong>${item.item_name}</strong></td>
-      <td>${item.category_name}</td>
-      <td><span style="font-size: 1.05rem; font-weight: 800;">${item.stock_quantity}</span> ${item.unit}</td>
-      <td>${item.low_stock_threshold} ${item.unit}</td>
       <td>
-        <span class="badge ${item.stock_status === 'in_stock' ? 'badge-delivered' : item.stock_status === 'low_stock' ? 'badge-pending' : 'badge-mismatch'}">
-          ${item.stock_status.replace('_', ' ')}
-        </span>
+        <div style="font-weight: 700; color: var(--brand-crema); font-size: 0.95rem;">${escapeHtml(p.title)}</div>
+        ${p.description ? `<div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(p.description)}</div>` : ''}
       </td>
-      <td>${item.last_restocked_at ? new Date(item.last_restocked_at).toLocaleDateString() : 'N/A'}</td>
       <td>
-        <button class="btn btn-secondary btn-sm" onclick="openRestockModal(${item.id}, '${item.item_name.replace(/'/g, "\\'")}')">
-          📦 Restock
-        </button>
+        <span class="badge ${typeBadgeClass}">${escapeHtml(p.promo_type || 'Product Discount')}</span>
+      </td>
+      <td>${posterHtml}</td>
+      <td>
+        <strong style="color: var(--brand-gold);">${escapeHtml(p.perk_description)}</strong>
+      </td>
+      <td>
+        <span style="font-size: 0.85rem; color: var(--text-secondary);">${escapeHtml(p.applicable_scope || 'All Menu Items')}</span>
+      </td>
+      <td>
+        <span style="font-size: 0.85rem;">${escapeHtml(p.date_range_display || 'Always Valid')}</span>
+      </td>
+      <td>
+        <span class="badge ${statusBadgeClass}">${escapeHtml(p.status)}</span>
+      </td>
+      <td>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <!-- Toggle Active / Inactive Switch -->
+          <label class="switch" title="${p.is_active ? 'Click to deactivate' : 'Click to activate'}">
+            <input type="checkbox" ${p.is_active ? 'checked' : ''} onchange="togglePromotion(${p.id})">
+            <span class="slider"></span>
+          </label>
+          <button class="btn btn-secondary btn-sm" onclick="editPromotion(${p.id})" title="Edit Promo">✏️</button>
+          <button class="btn btn-danger btn-sm" onclick="deletePromotion(${p.id}, '${escapeHtml(p.title).replace(/'/g, "\\'")}')" title="Delete Promo">🗑️</button>
+          <button class="btn btn-primary btn-sm" onclick="openBroadcastModal(${p.id})" style="padding: 5px 9px;" title="Broadcast announcement via Messenger">📢 Broadcast</button>
+        </div>
       </td>
     `;
     tbody.appendChild(tr);
   });
 }
 
-function renderInventoryLogs(logs) {
-  const tbody = document.getElementById('inventory-logs-tbody');
-  tbody.innerHTML = '';
+function openPromoModal(promoId = null) {
+  const form = document.getElementById('promo-form');
+  if (form) form.reset();
+  
+  document.getElementById('promo-id').value = '';
+  document.getElementById('promo-banner-url').value = '';
+  document.getElementById('promo-preview-wrapper').style.display = 'none';
+  document.getElementById('promo-upload-placeholder').style.display = 'block';
+  document.getElementById('promo-modal-title').innerText = 'Create Promo / Event';
+  document.getElementById('promo-active-toggle').checked = true;
 
-  logs.forEach(log => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
-      <td><strong>${log.item_name}</strong></td>
-      <td style="color: ${log.change_amount > 0 ? 'var(--status-success)' : 'var(--status-danger)'}; font-weight: 700;">
-        ${log.change_amount > 0 ? `+${log.change_amount}` : log.change_amount}
-      </td>
-      <td>${log.reason.replace('_', ' ')}</td>
-      <td>${log.reference_id || '-'}</td>
-      <td>${log.logged_by || 'System'}</td>
-    `;
-    tbody.appendChild(tr);
-  });
+  if (promoId) {
+    const p = allPromotions.find(item => item.id === promoId);
+    if (p) {
+      document.getElementById('promo-id').value = p.id;
+      document.getElementById('promo-title').value = p.title || '';
+      document.getElementById('promo-type').value = p.promo_type || 'Product Discount';
+      document.getElementById('promo-perk').value = p.perk_description || '';
+      document.getElementById('promo-scope').value = p.applicable_scope || 'All Menu Items';
+      document.getElementById('promo-start-date').value = p.start_date || '';
+      document.getElementById('promo-end-date').value = p.end_date || '';
+      document.getElementById('promo-description').value = p.description || '';
+      document.getElementById('promo-active-toggle').checked = !!p.is_active;
+      document.getElementById('promo-modal-title').innerText = 'Edit Promo / Event';
+
+      if (p.banner_image_url) {
+        document.getElementById('promo-banner-url').value = p.banner_image_url;
+        document.getElementById('promo-preview-img').src = p.banner_image_url;
+        document.getElementById('promo-preview-wrapper').style.display = 'inline-block';
+        document.getElementById('promo-upload-placeholder').style.display = 'none';
+      }
+    }
+  }
+
+  openModal('modal-promo');
 }
 
-function openRestockModal(invId, itemName) {
-  document.getElementById('restock-inv-id').value = invId;
-  document.getElementById('restock-item-name').value = itemName;
-  document.getElementById('restock-qty-input').value = '20';
-  document.getElementById('restock-notes-input').value = '';
-  openModal('modal-restock');
+function handlePromoFileSelect(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+
+  if (file.size > 5 * 1024 * 1024) {
+    API.toast('File size exceeds maximum 5MB limit.', 'error');
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = async function(e) {
+    const base64Data = e.target.result;
+    // Live preview inside modal before saving
+    document.getElementById('promo-preview-img').src = base64Data;
+    document.getElementById('promo-preview-wrapper').style.display = 'inline-block';
+    document.getElementById('promo-upload-placeholder').style.display = 'none';
+
+    try {
+      // Upload to server
+      const res = await API.post('/promotions/upload-poster', { imageBase64: base64Data });
+      if (res && res.success && res.imageUrl) {
+        document.getElementById('promo-banner-url').value = res.imageUrl;
+        API.toast('Poster uploaded successfully!', 'success');
+      }
+    } catch (err) {
+      console.warn('Upload error, using local base64 fallback:', err.message);
+      document.getElementById('promo-banner-url').value = base64Data;
+    }
+  };
+  reader.readAsDataURL(file);
 }
 
-async function handleRestockSubmit(e) {
+function removePromoImage(event) {
+  event.stopPropagation();
+  document.getElementById('promo-file-input').value = '';
+  document.getElementById('promo-banner-url').value = '';
+  document.getElementById('promo-preview-img').src = '';
+  document.getElementById('promo-preview-wrapper').style.display = 'none';
+  document.getElementById('promo-upload-placeholder').style.display = 'block';
+}
+
+async function handlePromoSubmit(e) {
   e.preventDefault();
-  const inventoryId = document.getElementById('restock-inv-id').value;
-  const quantityToAdd = document.getElementById('restock-qty-input').value;
-  const notes = document.getElementById('restock-notes-input').value;
+  const id = document.getElementById('promo-id').value;
+  const payload = {
+    title: document.getElementById('promo-title').value.trim(),
+    promo_type: document.getElementById('promo-type').value,
+    perk_description: document.getElementById('promo-perk').value.trim(),
+    applicable_scope: document.getElementById('promo-scope').value.trim(),
+    start_date: document.getElementById('promo-start-date').value || null,
+    end_date: document.getElementById('promo-end-date').value || null,
+    banner_image_url: document.getElementById('promo-banner-url').value || null,
+    description: document.getElementById('promo-description').value.trim() || null,
+    is_active: document.getElementById('promo-active-toggle').checked ? 1 : 0
+  };
+
+  const saveBtn = document.getElementById('promo-save-btn');
+  const origText = saveBtn.innerText;
+  saveBtn.disabled = true;
+  saveBtn.innerText = 'Saving...';
 
   try {
-    const res = await API.post('/inventory/restock', { inventoryId, quantityToAdd, notes });
+    let res;
+    if (id) {
+      res = await API.put(`/promotions/${id}`, payload);
+    } else {
+      res = await API.post('/promotions', payload);
+    }
+
     if (res && res.success) {
-      API.toast(res.message, 'success');
-      closeModal('modal-restock');
-      loadInventory();
+      API.toast(res.message || 'Promotion saved successfully!', 'success');
+      closeModal('modal-promo');
+      loadPromotions();
+    } else {
+      API.toast(res.message || 'Failed to save promotion.', 'error');
     }
   } catch (err) {
-    console.error('Restock error:', err);
+    API.toast(err.message || 'Error saving promotion.', 'error');
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.innerText = origText;
   }
 }
+
+async function togglePromotion(id) {
+  try {
+    const res = await API.patch(`/promotions/${id}/toggle`, {});
+    if (res && res.success) {
+      API.toast(res.message, 'success');
+      loadPromotions();
+    }
+  } catch (err) {
+    API.toast('Failed to toggle promotion status.', 'error');
+  }
+}
+
+function editPromotion(id) {
+  openPromoModal(id);
+}
+
+async function deletePromotion(id, title) {
+  if (!confirm(`Are you sure you want to delete "${title}"?`)) return;
+  try {
+    const res = await API.delete(`/promotions/${id}`);
+    if (res && res.success) {
+      API.toast('Promotion deleted successfully.', 'success');
+      loadPromotions();
+    }
+  } catch (err) {
+    API.toast('Failed to delete promotion.', 'error');
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Messenger Mass Broadcast Engine (Requirement 4)
+// ----------------------------------------------------------------------------
+async function openBroadcastModal(promoId) {
+  currentBroadcastPromoId = promoId;
+  const promo = allPromotions.find(p => p.id === promoId);
+  if (!promo) return;
+
+  document.getElementById('broadcast-promo-id').value = promo.id;
+  document.getElementById('broadcast-title').innerText = promo.title;
+  document.getElementById('broadcast-perk').innerText = `Perk: ${promo.perk_description}`;
+  document.getElementById('broadcast-dates').innerText = `Schedule: ${promo.date_range_display || 'Always Valid'}`;
+  document.getElementById('broadcast-thumb').src = promo.banner_image_url || '/favicon.ico';
+
+  // Reset progress UI
+  document.getElementById('broadcast-progress-container').style.display = 'none';
+  document.getElementById('broadcast-progress-bar').style.width = '0%';
+  document.getElementById('broadcast-progress-percent').innerText = '0%';
+  document.getElementById('broadcast-status-label').innerText = 'Dispatching announcements...';
+  document.getElementById('broadcast-progress-text').innerText = 'Sent 0 of 0...';
+
+  const sendBtn = document.getElementById('btn-start-broadcast');
+  const cancelBtn = document.getElementById('btn-cancel-broadcast');
+  sendBtn.disabled = false;
+  sendBtn.style.display = 'inline-block';
+  cancelBtn.disabled = false;
+
+  try {
+    const res = await API.get('/admin/promotions/recipients-count');
+    const count = (res && res.count) || 0;
+    document.getElementById('broadcast-recipient-badge').innerText = `${count} unique customers`;
+  } catch (e) {
+    document.getElementById('broadcast-recipient-badge').innerText = 'Eligible customers';
+  }
+
+  openModal('modal-broadcast');
+}
+
+async function executeBroadcast() {
+  if (!currentBroadcastPromoId) return;
+
+  const sendBtn = document.getElementById('btn-start-broadcast');
+  const cancelBtn = document.getElementById('btn-cancel-broadcast');
+  sendBtn.disabled = true;
+  cancelBtn.disabled = true;
+
+  document.getElementById('broadcast-progress-container').style.display = 'block';
+  document.getElementById('broadcast-progress-bar').style.width = '10%';
+  document.getElementById('broadcast-progress-percent').innerText = '10%';
+  document.getElementById('broadcast-progress-text').innerText = 'Queuing mass messages...';
+
+  try {
+    const res = await API.post(`/admin/promotions/${currentBroadcastPromoId}/broadcast`, {});
+    if (res && res.success) {
+      document.getElementById('broadcast-progress-bar').style.width = '100%';
+      document.getElementById('broadcast-progress-percent').innerText = '100%';
+      document.getElementById('broadcast-status-label').innerText = '✅ Broadcast Completed!';
+      document.getElementById('broadcast-progress-text').innerText = `Successfully delivered to ${res.sentCount} customer(s)!`;
+      API.toast(res.message || 'Mass broadcast completed successfully!', 'success');
+      loadPromotions();
+      setTimeout(() => {
+        closeModal('modal-broadcast');
+      }, 1800);
+    } else {
+      API.toast(res.message || 'Failed to dispatch broadcast.', 'error');
+      document.getElementById('broadcast-status-label').innerText = '❌ Broadcast Failed';
+      document.getElementById('broadcast-progress-text').innerText = res.message || 'No recipients found.';
+      sendBtn.disabled = false;
+      cancelBtn.disabled = false;
+    }
+  } catch (err) {
+    API.toast(err.message || 'Broadcast error occurred.', 'error');
+    sendBtn.disabled = false;
+    cancelBtn.disabled = false;
+  }
+}
+
+function updateBroadcastProgress(data) {
+  if (!data) return;
+  const container = document.getElementById('broadcast-progress-container');
+  if (container) container.style.display = 'block';
+
+  const bar = document.getElementById('broadcast-progress-bar');
+  if (bar) bar.style.width = `${data.percentage}%`;
+
+  const percentLabel = document.getElementById('broadcast-progress-percent');
+  if (percentLabel) percentLabel.innerText = `${data.percentage}%`;
+
+  const textLabel = document.getElementById('broadcast-progress-text');
+  if (textLabel) textLabel.innerText = `Sent ${data.current} of ${data.total} (${data.percentage}%)...`;
+}
+
+function handleBroadcastCompleted(data) {
+  const bar = document.getElementById('broadcast-progress-bar');
+  if (bar) bar.style.width = '100%';
+
+  const percentLabel = document.getElementById('broadcast-progress-percent');
+  if (percentLabel) percentLabel.innerText = '100%';
+
+  const statusLabel = document.getElementById('broadcast-status-label');
+  if (statusLabel) statusLabel.innerText = '✅ Broadcast Completed!';
+
+  const textLabel = document.getElementById('broadcast-progress-text');
+  if (textLabel) textLabel.innerText = `Finished! ${data.sentCount} sent, ${data.failedCount} failed.`;
+}
+
+// Setup drag and drop for photo uploads
+document.addEventListener('DOMContentLoaded', () => {
+  const dropZone = document.getElementById('promo-drop-zone');
+  if (dropZone) {
+    ['dragenter', 'dragover'].forEach(name => {
+      dropZone.addEventListener(name, (e) => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+      });
+    });
+    ['dragleave', 'drop'].forEach(name => {
+      dropZone.addEventListener(name, (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+      });
+    });
+    dropZone.addEventListener('drop', (e) => {
+      const dt = e.dataTransfer;
+      const files = dt.files;
+      if (files && files.length > 0) {
+        handlePromoFileSelect({ target: { files: [files[0]] } });
+      }
+    });
+  }
+});
 
 // ----------------------------------------------------------------------------
 // 5. Smart Delivery & Fare Engine
@@ -2165,5 +2635,350 @@ async function testFbPageAccessToken() {
       btn.innerHTML = origBtnText;
     }
   }
+}
+
+// ----------------------------------------------------------------------------
+// 10. Store Branch & Delivery Location Settings
+// ----------------------------------------------------------------------------
+
+async function loadStoreLocationSettings() {
+  try {
+    const res = await API.get('/admin/settings/location');
+    if (res && res.success) {
+      const s = res.settings || res;
+      const nameInput = document.getElementById('store-name-input');
+      const addrInput = document.getElementById('store-address-input');
+      const latInput = document.getElementById('store-lat-input');
+      const lngInput = document.getElementById('store-lng-input');
+      const radInput = document.getElementById('store-radius-input');
+      const radDisplay = document.getElementById('store-radius-display');
+      const updatedEl = document.getElementById('store-location-last-updated');
+
+      if (nameInput) nameInput.value = s.store_name || "Diner's Cafe - Main Branch";
+      if (addrInput) addrInput.value = s.store_address || "Diner's Cafe - Store Main Branch, Mandaluyong City";
+      if (latInput) latInput.value = (s.store_latitude !== undefined && s.store_latitude !== null) ? s.store_latitude : 14.6042;
+      if (lngInput) lngInput.value = (s.store_longitude !== undefined && s.store_longitude !== null) ? s.store_longitude : 120.9822;
+      if (radInput) radInput.value = (s.max_delivery_radius_km !== undefined && s.max_delivery_radius_km !== null) ? s.max_delivery_radius_km : 3.0;
+      if (radDisplay) radDisplay.innerText = ((parseFloat(radInput?.value) || 3.0)).toFixed(2) + ' km';
+      if (updatedEl && s.updated_at) {
+        try {
+          updatedEl.innerText = `Last updated: ${new Date(s.updated_at).toLocaleString()}`;
+        } catch (e) {
+          updatedEl.innerText = `Last updated: ${s.updated_at}`;
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load store location settings:', err);
+  }
+}
+
+async function saveStoreLocationSettings() {
+  const nameInput = document.getElementById('store-name-input');
+  const addrInput = document.getElementById('store-address-input');
+  const latInput = document.getElementById('store-lat-input');
+  const lngInput = document.getElementById('store-lng-input');
+  const radInput = document.getElementById('store-radius-input');
+  const btn = document.getElementById('btn-save-store-location');
+
+  const payload = {
+    store_name: nameInput?.value?.trim() || '',
+    store_address: addrInput?.value?.trim() || '',
+    store_latitude: parseFloat(latInput?.value),
+    store_longitude: parseFloat(lngInput?.value),
+    max_delivery_radius_km: parseFloat(radInput?.value)
+  };
+
+  if (!payload.store_name) {
+    API.toast('Please enter the store branch name.', 'warning');
+    return;
+  }
+  if (!payload.store_address) {
+    API.toast('Please enter the store physical address.', 'warning');
+    return;
+  }
+  if (isNaN(payload.store_latitude) || payload.store_latitude < -90 || payload.store_latitude > 90) {
+    API.toast('Please provide a valid latitude coordinate (-90 to 90).', 'warning');
+    return;
+  }
+  if (isNaN(payload.store_longitude) || payload.store_longitude < -180 || payload.store_longitude > 180) {
+    API.toast('Please provide a valid longitude coordinate (-180 to 180).', 'warning');
+    return;
+  }
+  if (isNaN(payload.max_delivery_radius_km) || payload.max_delivery_radius_km <= 0) {
+    API.toast('Please enter a valid positive delivery radius.', 'warning');
+    return;
+  }
+
+  const origBtnText = btn ? btn.innerHTML : '';
+  try {
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳ Saving...</span>';
+    }
+
+    const res = await API.put('/admin/settings/location', payload);
+
+    if (res && res.success) {
+      API.toast('Settings updated successfully', 'success');
+      const updatedEl = document.getElementById('store-location-last-updated');
+      if (updatedEl) {
+        updatedEl.innerText = `Last updated: ${new Date().toLocaleString()}`;
+      }
+    } else {
+      API.toast(res.message || 'Failed to update store location settings.', 'error');
+    }
+  } catch (err) {
+    console.error('Failed to save store location settings:', err);
+    API.toast(err.message || 'Error updating store location settings.', 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = origBtnText;
+    }
+  }
+}
+
+function fetchCurrentGeoLocation() {
+  const statusEl = document.getElementById('geo-fetch-status');
+  const btn = document.getElementById('btn-fetch-location');
+
+  if (!navigator.geolocation) {
+    API.toast('Geolocation is not supported by your browser.', 'warning');
+    return;
+  }
+
+  const origText = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span>⏳ Fetching GPS...</span>';
+  }
+  if (statusEl) {
+    statusEl.style.display = 'block';
+    statusEl.style.color = 'var(--text-muted)';
+    statusEl.innerText = 'Acquiring GPS fix via browser Geolocation API...';
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      const lat = position.coords.latitude;
+      const lng = position.coords.longitude;
+      const accuracy = Math.round(position.coords.accuracy || 0);
+
+      const latInput = document.getElementById('store-lat-input');
+      const lngInput = document.getElementById('store-lng-input');
+      if (latInput) latInput.value = lat.toFixed(8);
+      if (lngInput) lngInput.value = lng.toFixed(8);
+
+      if (statusEl) {
+        statusEl.style.display = 'block';
+        statusEl.style.color = '#86efac';
+        statusEl.innerText = `✅ GPS coordinates acquired (accuracy: ±${accuracy}m)! Click "Save Location Settings" to apply.`;
+      }
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+      }
+      API.toast('Location fetched successfully from browser!', 'info');
+    },
+    (err) => {
+      console.warn('Geolocation error:', err);
+      if (statusEl) {
+        statusEl.style.display = 'block';
+        statusEl.style.color = '#fca5a5';
+        statusEl.innerText = `⚠️ Unable to retrieve GPS location (${err.message}).`;
+      }
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+      }
+      API.toast('Could not fetch location: ' + err.message, 'warning');
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+  );
+}
+
+// ----------------------------------------------------------------------------
+// 11. GCash Payment Gateway Configuration
+// ----------------------------------------------------------------------------
+
+let currentGcashSettings = {
+  gcash_account_name: "Diner's Cafe",
+  gcash_account_number: "09XXXXXXXXX",
+  gcash_qr_image_url: "/uploads/qr/gcash_qr_CHECKOUT.png"
+};
+let selectedGcashQrFile = null;
+
+async function loadGcashSettings() {
+  try {
+    const res = await API.get('/admin/settings/general');
+    if (res && res.success) {
+      const g = res.gcash || res.settings || res;
+      currentGcashSettings = {
+        gcash_account_name: g.gcash_account_name || "Diner's Cafe",
+        gcash_account_number: g.gcash_account_number || "09XXXXXXXXX",
+        gcash_qr_image_url: g.gcash_qr_image_url || "/uploads/qr/gcash_qr_CHECKOUT.png"
+      };
+
+      const nameInput = document.getElementById('gcash-account-name-input');
+      const numInput = document.getElementById('gcash-account-number-input');
+      const previewImg = document.getElementById('gcash-qr-preview');
+      const fileNameEl = document.getElementById('gcash-qr-file-name');
+
+      if (nameInput) nameInput.value = currentGcashSettings.gcash_account_name;
+      if (numInput) numInput.value = currentGcashSettings.gcash_account_number;
+      if (previewImg && currentGcashSettings.gcash_qr_image_url) {
+        previewImg.src = currentGcashSettings.gcash_qr_image_url;
+      }
+      if (fileNameEl) {
+        fileNameEl.innerText = 'JPG, PNG, or WebP (max 5MB)';
+      }
+      selectedGcashQrFile = null;
+    }
+  } catch (err) {
+    console.error('Failed to load GCash settings:', err);
+  }
+}
+
+function previewGcashQrCode(input) {
+  if (!input || !input.files || !input.files[0]) return;
+  const file = input.files[0];
+
+  if (!file.type.match(/^image\/(jpeg|png|webp)/i)) {
+    API.toast('Please select a valid image file (JPG, PNG, or WebP).', 'warning');
+    input.value = '';
+    return;
+  }
+
+  if (file.size > 5 * 1024 * 1024) {
+    API.toast('File size exceeds the 5MB limit. Please choose a smaller file.', 'warning');
+    input.value = '';
+    return;
+  }
+
+  selectedGcashQrFile = file;
+
+  const fileNameEl = document.getElementById('gcash-qr-file-name');
+  if (fileNameEl) {
+    fileNameEl.innerHTML = `Selected: <strong>${escapeHtml(file.name)}</strong> (${(file.size / 1024).toFixed(1)} KB)`;
+    fileNameEl.style.color = '#86efac';
+  }
+
+  const previewImg = document.getElementById('gcash-qr-preview');
+  if (previewImg) {
+    previewImg.src = URL.createObjectURL(file);
+  }
+  API.toast('QR code selected! Click "Save GCash Settings" to apply.', 'info');
+}
+
+async function saveGcashSettings() {
+  const nameInput = document.getElementById('gcash-account-name-input');
+  const numInput = document.getElementById('gcash-account-number-input');
+  const btn = document.getElementById('btn-save-gcash-settings');
+
+  const accountName = nameInput?.value?.trim() || '';
+  const accountNumber = numInput?.value?.trim() || '';
+
+  if (!accountName) {
+    API.toast('Please enter the GCash account name.', 'warning');
+    return;
+  }
+  if (!accountNumber) {
+    API.toast('Please enter the GCash mobile number.', 'warning');
+    return;
+  }
+
+  const origBtnText = btn ? btn.innerHTML : '';
+  try {
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳ Saving Payment Settings...</span>';
+    }
+
+    let res;
+    if (selectedGcashQrFile) {
+      const formData = new FormData();
+      formData.append('gcash_account_name', accountName);
+      formData.append('gcash_account_number', accountNumber);
+      formData.append('gcash_qr_image', selectedGcashQrFile);
+
+      res = await API.upload('/admin/settings/gcash', formData, 'PUT');
+    } else {
+      res = await API.put('/admin/settings/gcash', {
+        gcash_account_name: accountName,
+        gcash_account_number: accountNumber
+      });
+    }
+
+    if (res && res.success) {
+      API.toast('Payment settings updated successfully!', 'success');
+      selectedGcashQrFile = null;
+      await loadGcashSettings();
+    } else {
+      API.toast(res.message || 'Failed to update GCash settings.', 'error');
+    }
+  } catch (err) {
+    console.error('Failed to save GCash settings:', err);
+    API.toast(err.message || 'Error updating GCash settings.', 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = origBtnText;
+    }
+  }
+}
+
+function testGcashBotOutput() {
+  const nameInput = document.getElementById('gcash-account-name-input');
+  const numInput = document.getElementById('gcash-account-number-input');
+  const previewImg = document.getElementById('gcash-qr-preview');
+
+  const gName = nameInput?.value?.trim() || currentGcashSettings.gcash_account_name || "Diner's Cafe";
+  const gNum = numInput?.value?.trim() || currentGcashSettings.gcash_account_number || "09XXXXXXXXX";
+  const qrSrc = previewImg?.src || currentGcashSettings.gcash_qr_image_url || "/uploads/qr/gcash_qr_CHECKOUT.png";
+
+  const previewModalId = 'modal-gcash-bot-preview';
+  let modalEl = document.getElementById(previewModalId);
+  if (!modalEl) {
+    modalEl = document.createElement('div');
+    modalEl.id = previewModalId;
+    modalEl.className = 'modal-backdrop';
+    document.body.appendChild(modalEl);
+  }
+
+  modalEl.innerHTML = `
+    <div class="modal-card" style="max-width: 420px; border-radius: 14px; background: #1a1714; border: 1px solid var(--border-subtle); padding: 20px; box-shadow: 0 16px 40px rgba(0,0,0,0.6);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
+        <h4 style="margin: 0; font-size: 0.95rem; color: var(--text-primary); display: flex; align-items: center; gap: 6px;">
+          <span>🤖</span> <span>Messenger Bot Output Preview</span>
+        </h4>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal('${previewModalId}')" style="padding: 2px 8px; font-size: 0.8rem;">✕</button>
+      </div>
+
+      <div style="background: #24201c; border-radius: 12px; padding: 14px; border: 1px solid rgba(212, 163, 115, 0.2); margin-bottom: 14px;">
+        <div style="text-align: center; margin-bottom: 10px;">
+          <img src="${escapeHtml(qrSrc)}" style="width: 140px; height: 140px; object-fit: contain; border-radius: 8px; background: #fff; padding: 6px; box-shadow: 0 4px 10px rgba(0,0,0,0.3);" />
+          <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 6px;">[Image Attachment Sent First]</div>
+        </div>
+
+        <div style="background: #14110e; border-radius: 8px; padding: 12px; font-size: 0.82rem; line-height: 1.6; color: #faedcd; border-left: 3px solid var(--brand-primary); margin-bottom: 10px; white-space: pre-wrap; font-family: monospace;">💳 GCASH PAYMENT DETAILS:
+Account Name: ${escapeHtml(gName)}
+Account Number: ${escapeHtml(gNum)}
+Total Amount to Pay: ₱195.00
+
+📌 Paalala:
+I-save o i-scan ang QR code sa itaas gamit ang inyong GCash app.
+Pagkatapos magbayad, paki-send po rito ang SCREENSHOT ng resibo o i-type ang 13-digit Reference Number upang maihanda na ang inyong order.</div>
+      </div>
+
+      <div style="text-align: right;">
+        <button type="button" class="btn btn-primary btn-sm" onclick="closeModal('${previewModalId}')" style="padding: 6px 16px;">
+          OK, Close Preview
+        </button>
+      </div>
+    </div>
+  `;
+
+  openModal(previewModalId);
 }
 

@@ -6,6 +6,7 @@
 const db = require('../../database/db');
 const { calculateDeliveryFare } = require('../services/fareCalculator');
 const { broadcastSSE } = require('../services/notificationService');
+const orderService = require('../services/orderService');
 
 /**
  * Get all active and recent deliveries
@@ -170,9 +171,8 @@ async function overrideFare(req, res) {
 }
 
 /**
- * FEATURE 1: Rider Active Orders (Role-Based Query Filtering)
- * Whitelist: ONLY orders where order_type = 'delivery' AND status = 'dispatched'
- * Strictly excludes: pending, preparing, delivered, cancelled
+ * Get active orders assigned to rider (Requirement 3: Rider Active Queue)
+ * Visible orders: In Kitchen Preparation ('preparing') AND Dispatched / On Delivery ('dispatched')
  * Sorted chronologically by updated_at ASC (FIFO queue)
  */
 async function getActiveRiderOrders(req, res) {
@@ -206,8 +206,11 @@ async function getActiveRiderOrders(req, res) {
       JOIN customers c ON o.customer_id = c.id
       LEFT JOIN delivery_personnel dp ON d.rider_id = dp.id
       WHERE LOWER(o.order_type) = 'delivery'
-        AND LOWER(o.status) = 'dispatched'
-        AND LOWER(d.status) IN ('dispatched', 'assigned')
+        AND (
+          LOWER(o.status) IN ('preparing', 'dispatched')
+          OR o.status IN ('In Kitchen Preparation', 'Dispatched / On Delivery')
+        )
+        AND LOWER(d.status) IN ('pending', 'assigned', 'dispatched')
     `;
 
     const params = [];
@@ -220,11 +223,24 @@ async function getActiveRiderOrders(req, res) {
 
     const [orders] = await db.query(query, params);
 
+    const formattedOrders = orders.map(ord => {
+      let friendlyStatus = ord.order_status;
+      if (ord.order_status === 'preparing') friendlyStatus = 'In Kitchen Preparation';
+      else if (ord.order_status === 'dispatched') friendlyStatus = 'Dispatched / On Delivery';
+      else if (ord.order_status === 'delivered') friendlyStatus = 'Delivered';
+
+      return {
+        ...ord,
+        order_status: friendlyStatus,
+        raw_status: ord.order_status
+      };
+    });
+
     return res.json({
       success: true,
-      count: orders.length,
-      orders,
-      deliveries: orders.map(ord => ({
+      count: formattedOrders.length,
+      orders: formattedOrders,
+      deliveries: formattedOrders.map(ord => ({
         ...ord,
         id: ord.delivery_id,
         status: ord.order_status
@@ -233,6 +249,52 @@ async function getActiveRiderOrders(req, res) {
   } catch (err) {
     console.error('[Rider Active Orders Error]', err);
     return res.status(500).json({ success: false, message: 'Failed to retrieve active rider orders.' });
+  }
+}
+
+/**
+ * Delivery Completion Gatekeeper (POST /api/rider/orders/:id/complete) (Requirement 3.2)
+ */
+async function completeRiderDelivery(req, res) {
+  try {
+    const orderId = parseInt(req.params.id, 10);
+    const [orderRows] = await db.query('SELECT id, status, order_number, order_type FROM orders WHERE id = ?', [orderId]);
+    if (!orderRows || orderRows.length === 0) {
+      return res.status(404).json({ success: false, message: `Order #${orderId} not found.` });
+    }
+
+    const order = orderRows[0];
+    const currentStatus = (order.status || '').toLowerCase();
+
+    // 1. Gatekeeper check: Reject if in kitchen preparation
+    if (currentStatus === 'preparing' || currentStatus === 'in kitchen preparation') {
+      return res.status(403).json({
+        success: false,
+        message: 'Cannot complete delivery while order is still in kitchen preparation.'
+      });
+    }
+
+    // 2. Must be dispatched / on delivery
+    if (currentStatus !== 'dispatched' && currentStatus !== 'dispatched / on delivery') {
+      return res.status(400).json({
+        success: false,
+        message: `Order cannot be marked as delivered from status: ${order.status}`
+      });
+    }
+
+    // 3. Mark as delivered and unlock customer feedback gate
+    const updated = await orderService.updateOrderStatus(orderId, 'delivered', {
+      riderId: req.user?.riderId || req.body?.riderId
+    });
+
+    return res.json({
+      success: true,
+      message: 'Order marked as delivered successfully. Customer feedback gate unlocked.',
+      order: updated
+    });
+  } catch (err) {
+    console.error('[Complete Rider Delivery Error]', err);
+    return res.status(500).json({ success: false, message: err.message || 'Failed to complete delivery.' });
   }
 }
 
@@ -302,5 +364,6 @@ module.exports = {
   assignRider,
   overrideFare,
   getActiveRiderOrders,
-  getRiderHistory
+  getRiderHistory,
+  completeRiderDelivery
 };

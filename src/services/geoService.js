@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config/config');
+const storeSettingsService = require('./storeSettingsService');
 const { calculateDeliveryFare, MAX_DELIVERY_DISTANCE_KM } = require('./fareCalculator');
 const defaultMaps = require('./maps');
 const { GeoError } = require('./maps/errors');
@@ -154,9 +155,10 @@ async function quoteDelivery(input = {}, deps = {}) {
   // Pipeline Step 2: Validate coordinates
   validateCoords(lat, lng);
 
-  const storeLat = Number.isFinite(config.store.lat) ? config.store.lat : 14.6042;
-  const storeLng = Number.isFinite(config.store.lng) ? config.store.lng : 120.9822;
-  const maxKm = Math.min(config.store.maxDeliveryKm || 3.0, MAX_DELIVERY_DISTANCE_KM);
+  const storeSettings = storeSettingsService.getCachedStoreSettings();
+  const storeLat = Number.isFinite(storeSettings.store_latitude) ? storeSettings.store_latitude : (Number.isFinite(config.store.lat) ? config.store.lat : 14.6042);
+  const storeLng = Number.isFinite(storeSettings.store_longitude) ? storeSettings.store_longitude : (Number.isFinite(config.store.lng) ? config.store.lng : 120.9822);
+  const maxKm = Number.isFinite(storeSettings.max_delivery_radius_km) ? storeSettings.max_delivery_radius_km : (Number.isFinite(config.store.maxDeliveryKm) ? config.store.maxDeliveryKm : 3.0);
 
   // Pipeline Step 3: Haversine prefilter from store
   const straightLineKm = haversineKm(storeLat, storeLng, lat, lng);
@@ -187,7 +189,7 @@ async function quoteDelivery(input = {}, deps = {}) {
 
   // Pipeline Step 8: Price through existing fare calculator with injected time
   const currentTime = now();
-  const fare = calculateDeliveryFare(distanceKm, vehicleType, weatherCondition, currentTime);
+  const fare = calculateDeliveryFare(distanceKm, vehicleType, weatherCondition, currentTime, maxKm);
 
   // Pipeline Step 9: Sign the quote token
   const iat = Math.floor(currentTime.getTime() / 1000);

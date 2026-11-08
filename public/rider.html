@@ -101,7 +101,7 @@
 
     async function loadRiderDeliveries() {
       try {
-        const endpoint = currentRiderView === 'active' ? '/rider/active-orders' : '/rider/history';
+        const endpoint = currentRiderView === 'active' ? '/rider/orders/active' : '/rider/history';
         const res = await API.get(endpoint);
         const container = document.getElementById('rider-trips-container');
         container.innerHTML = '';
@@ -110,20 +110,23 @@
 
         if (trips.length === 0) {
           const emptyMsg = currentRiderView === 'active' 
-            ? 'No active dispatched orders for delivery right now.' 
+            ? 'No active orders in queue right now.' 
             : 'No delivered history found.';
           container.innerHTML = `<div class="card" style="text-align: center; color: var(--text-muted); padding: 28px;">${emptyMsg}</div>`;
           return;
         }
 
         trips.forEach(del => {
-          const isDelivered = del.order_status === 'delivered' || del.status === 'delivered';
+          const isDelivered = del.order_status === 'delivered' || del.status === 'delivered' || del.order_status === 'Delivered';
+          const isKitchen = del.order_status === 'preparing' || del.order_status === 'In Kitchen Preparation' || del.status === 'preparing';
+          const isDispatched = del.order_status === 'dispatched' || del.order_status === 'Dispatched / On Delivery' || del.status === 'dispatched';
+
           const card = document.createElement('div');
           card.className = `trip-card ${isDelivered ? 'delivered' : ''}`;
           card.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
               <span style="font-weight: 700; font-size: 1.1rem; color: var(--brand-primary);">#${del.order_number}</span>
-              <span class="badge badge-${del.order_status || del.status}">${del.order_status || del.status}</span>
+              <span class="badge badge-${(del.raw_status || del.order_status || del.status || '').toLowerCase().replace(/[^a-z]/g, '')}">${del.order_status || del.status}</span>
             </div>
             <div style="font-weight: 700; font-size: 1rem; margin-bottom: 4px;">👤 ${del.customer_name || 'Customer'}</div>
             <div style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 6px;">📍 ${del.delivery_address || 'Store vicinity'}</div>
@@ -137,9 +140,15 @@
                 <a href="tel:${del.customer_phone || ''}" class="btn btn-secondary btn-sm" style="text-align: center;">
                   📞 Call Customer
                 </a>
-                <button class="btn btn-success btn-sm" onclick="markDelivered(${del.order_id})">
-                  ✅ Complete Delivery
-                </button>
+                ${isKitchen ? `
+                  <button class="btn btn-secondary btn-sm" disabled style="opacity: 0.55; cursor: not-allowed;" title="Cannot complete delivery while order is still in kitchen preparation.">
+                    ⏳ In Kitchen Prep
+                  </button>
+                ` : `
+                  <button class="btn btn-success btn-sm" onclick="markDelivered(${del.order_id})">
+                    ✅ Complete Delivery
+                  </button>
+                `}
               </div>
             ` : `
               <div style="margin-top: 10px; font-size: 0.82rem; color: var(--status-success); font-weight: 600;">
@@ -156,13 +165,16 @@
 
     async function markDelivered(orderId) {
       try {
-        const res = await API.patch(`/orders/${orderId}/status`, { status: 'delivered' });
+        const res = await API.post(`/rider/orders/${orderId}/complete`, {});
         if (res && res.success) {
           API.toast('Delivery marked completed! Customer has been prompted for feedback.', 'success');
           loadRiderDeliveries();
+        } else {
+          API.toast(res.message || 'Cannot complete delivery.', 'warning');
         }
       } catch (err) {
         console.error('Mark delivered error:', err);
+        API.toast(err.message || 'Cannot complete delivery.', 'error');
       }
     }
   </script>

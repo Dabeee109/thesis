@@ -1,4 +1,5 @@
 const config = require('../config/config');
+const storeSettingsService = require('../services/storeSettingsService');
 const { quoteDelivery, GeoError } = require('../services/geoService');
 const { MAX_DELIVERY_DISTANCE_KM } = require('../services/fareCalculator');
 
@@ -38,12 +39,15 @@ async function getQuote(req, res) {
  * GET /api/delivery/service-area
  */
 function getServiceArea(req, res) {
-  const storeLat = Number.isFinite(config.store.lat) ? config.store.lat : 14.6042;
-  const storeLng = Number.isFinite(config.store.lng) ? config.store.lng : 120.9822;
-  const maxDeliveryKm = Math.min(config.store.maxDeliveryKm || 3.0, MAX_DELIVERY_DISTANCE_KM);
+  const settings = storeSettingsService.getCachedStoreSettings();
+  const storeLat = Number.isFinite(settings.store_latitude) ? settings.store_latitude : (Number.isFinite(config.store.lat) ? config.store.lat : 14.6042);
+  const storeLng = Number.isFinite(settings.store_longitude) ? settings.store_longitude : (Number.isFinite(config.store.lng) ? config.store.lng : 120.9822);
+  const maxDeliveryKm = Number.isFinite(settings.max_delivery_radius_km) ? settings.max_delivery_radius_km : Math.min(config.store.maxDeliveryKm || 3.0, MAX_DELIVERY_DISTANCE_KM);
 
   return res.status(200).json({
     success: true,
+    storeName: settings.store_name,
+    storeAddress: settings.store_address,
     storeLat,
     storeLng,
     maxDeliveryKm

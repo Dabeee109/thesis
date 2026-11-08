@@ -4,8 +4,13 @@
  * (Quick replies, Generic Carousels, Action Buttons).
  */
 
+const fs = require('fs');
+const path = require('path');
 const config = require('../config/config');
 const { broadcastSSE } = require('./notificationService');
+
+// In-memory cache for uploaded attachment IDs: { [cacheKey]: { attachmentId, timestamp } }
+const attachmentCache = new Map();
 
 /**
  * Format order summary receipts into distinct lines if received squashed
@@ -28,6 +33,7 @@ function formatOrderSummaryReceipt(text) {
 
     // 2. Separate each key field onto its own line
     formatted = formatted.replace(/\s*(Name\s*:)/gi, '\n$1');
+    formatted = formatted.replace(/\s*(Phone(?:\s*Number)?\s*:)/gi, '\nPhone number:');
     formatted = formatted.replace(/\s*(Location\s*:)/gi, '\n$1');
     formatted = formatted.replace(/\s*(Payment option\s*:)/gi, '\n$1');
     formatted = formatted.replace(/\s*(Dining mode\s*:)/gi, '\n$1');
@@ -74,13 +80,16 @@ function cleanText(str) {
  * @param {Object} options { messagingType = 'RESPONSE', throwOnError = false }
  */
 async function callSendAPI(recipientPsid, messagePayload, options = {}) {
-  const { messagingType = 'RESPONSE', throwOnError = false } = options;
+  const { messagingType = 'RESPONSE', tag, throwOnError = false } = options;
   const psidStr = String(recipientPsid);
   const requestBody = {
     recipient: { id: psidStr },
     message: messagePayload,
     messaging_type: messagingType
   };
+  if (tag) {
+    requestBody.tag = tag;
+  }
 
   // Always broadcast to local interactive Web Simulator via SSE
   broadcastSSE('SIMULATOR_MESSAGE', {
@@ -106,7 +115,12 @@ async function callSendAPI(recipientPsid, messagePayload, options = {}) {
 
       const data = await response.json();
       if (data.error) {
-        console.error('[Facebook Graph API Error]', data.error.code, data.error.message);
+        if (data.error.code === 10) {
+          console.warn(`[Facebook Send API] Recipient ${psidStr} is outside the standard 24-hour messaging window.`);
+        } else {
+          console.error('[Facebook Graph API Error]', data.error.code, data.error.message);
+        }
+
         if (throwOnError) {
           const err = new Error(data.error.message || 'Facebook Graph API error');
           err.code = data.error.code || 'GRAPH_API_ERROR';
@@ -220,10 +234,7 @@ async function sendButtonTemplate(psid, text, buttons = [], options = {}) {
  * Send Post-Delivery Feedback Request Prompt (Task 9)
  */
 async function sendFeedbackPrompt(psid, orderNumber, orderType = 'delivery') {
-  const isPickup = orderType === 'pickup';
-  const text = isPickup
-    ? 'Thanks for picking up! How was your experience today?'
-    : 'Your order has been delivered! How was your experience today?';
+  const text = "Natanggap niyo na po ba ang inyong order? Maraming salamat po sa pag-tangkilik sa Diner's Cafe! Pa-rate naman po ng inyong experience from 1 to 5 stars at pa-share ng inyong feedback para mapaganda pa ang aming serbisyo.";
 
   const quickReplies = [
     { title: '5 ⭐', payload: `FEEDBACK_RATE_5_${orderNumber}` },
@@ -240,18 +251,169 @@ async function sendFeedbackPrompt(psid, orderNumber, orderType = 'delivery') {
 }
 
 /**
- * Send an image attachment
+ * Upload an attachment (image poster, banner, etc.) to Facebook Graph API
+ * via POST /me/message_attachments using native FormData
+ * 
+ * Returns attachment_id string on success, or null on failure.
  */
-async function sendImageAttachment(psid, imageUrl, options = {}) {
-  return module.exports.callSendAPI(psid, {
-    attachment: {
-      type: 'image',
-      payload: {
-        url: imageUrl,
-        is_reusable: true
+async function uploadAttachment(fileSource, type = 'image') {
+  const pageToken = config.facebook?.pageAccessToken;
+  if (!pageToken || !pageToken.startsWith('EAA')) {
+    return null;
+  }
+
+  try {
+    let buffer;
+    let filename = 'attachment.jpg';
+    let mimeType = 'image/jpeg';
+    let cacheKey = null;
+
+    if (Buffer.isBuffer(fileSource)) {
+      buffer = fileSource;
+      cacheKey = `buffer_${buffer.length}_${buffer.slice(0, 32).toString('hex')}`;
+    } else if (typeof fileSource === 'string') {
+      if (fileSource.startsWith('data:image/')) {
+        const matches = fileSource.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+        if (matches) {
+          const ext = matches[1].includes('png') ? 'png' : (matches[1].includes('webp') ? 'webp' : 'jpg');
+          mimeType = `image/${matches[1]}`;
+          filename = `image.${ext}`;
+          buffer = Buffer.from(matches[2], 'base64');
+          cacheKey = `datauri_${buffer.length}_${buffer.slice(0, 32).toString('hex')}`;
+        }
+      } else {
+        // Local relative path (e.g. /uploads/promotions/...) or absolute path
+        let resolvedPath = fileSource;
+        if (resolvedPath.startsWith('/uploads/') || resolvedPath.startsWith('\\uploads\\') || resolvedPath.startsWith('uploads/')) {
+          const cleanRel = resolvedPath.replace(/^[\/\\]+/, '');
+          resolvedPath = path.join(__dirname, '../../public', cleanRel);
+        } else if (!fs.existsSync(resolvedPath)) {
+          // Check if it's relative to public directory
+          const inPublic = path.join(__dirname, '../../public', resolvedPath.replace(/^[\/\\]+/, ''));
+          if (fs.existsSync(inPublic)) {
+            resolvedPath = inPublic;
+          }
+        }
+
+        if (fs.existsSync(resolvedPath)) {
+          buffer = fs.readFileSync(resolvedPath);
+          filename = path.basename(resolvedPath);
+          const ext = path.extname(resolvedPath).toLowerCase();
+          mimeType = ext === '.png' ? 'image/png' : (ext === '.webp' ? 'image/webp' : 'image/jpeg');
+          cacheKey = `file_${resolvedPath}_${fs.statSync(resolvedPath).mtimeMs}`;
+        }
       }
     }
-  }, options);
+
+    if (!buffer) {
+      return null;
+    }
+
+    // Check memory cache
+    if (cacheKey && attachmentCache.has(cacheKey)) {
+      const cached = attachmentCache.get(cacheKey);
+      if (Date.now() - cached.timestamp < 3 * 24 * 60 * 60 * 1000) {
+        return cached.attachmentId;
+      }
+    }
+
+    const blob = new Blob([buffer], { type: mimeType });
+    const formData = new FormData();
+    formData.append('message', JSON.stringify({
+      attachment: {
+        type: type,
+        payload: { is_reusable: true }
+      }
+    }));
+    formData.append('filedata', blob, filename);
+
+    const response = await fetch(
+      `https://graph.facebook.com/v19.0/me/message_attachments?access_token=${encodeURIComponent(pageToken)}`,
+      {
+        method: 'POST',
+        body: formData
+      }
+    );
+
+    const data = await response.json();
+    if (data.error) {
+      console.error('[Facebook Upload Attachment Error]', data.error.code, data.error.message);
+      return null;
+    }
+
+    if (data.attachment_id) {
+      if (cacheKey) {
+        attachmentCache.set(cacheKey, {
+          attachmentId: data.attachment_id,
+          timestamp: Date.now()
+        });
+      }
+      return data.attachment_id;
+    }
+
+    return null;
+  } catch (err) {
+    console.error('[Facebook Upload Attachment Exception]', err.message);
+    return null;
+  }
+}
+
+/**
+ * Send an image attachment
+ * Supports:
+ * 1. attachment_id (numeric string or object { attachment_id })
+ * 2. local file path (/uploads/promotions/xxx.jpg) -> auto-uploads to get attachment_id
+ * 3. data URI (data:image/...) -> auto-uploads to get attachment_id
+ * 4. public HTTP/HTTPS URL -> sends via payload.url
+ */
+async function sendImageAttachment(psid, imageSource, options = {}) {
+  let attachmentId = null;
+  let imageUrl = null;
+
+  if (typeof imageSource === 'object' && imageSource !== null && imageSource.attachment_id) {
+    attachmentId = imageSource.attachment_id;
+  } else if (typeof imageSource === 'string') {
+    if (/^\d+$/.test(imageSource.trim())) {
+      attachmentId = imageSource.trim();
+    } else if (imageSource.startsWith('data:image/') || imageSource.startsWith('/uploads/') || imageSource.startsWith('uploads/') || !imageSource.startsWith('http')) {
+      // It's a local file or data URI: try uploading directly to Meta
+      attachmentId = await uploadAttachment(imageSource, 'image');
+      if (!attachmentId && !imageSource.startsWith('data:image/')) {
+        const baseUrl = (config.appUrl || 'http://localhost:3000').replace(/\/+$/, '');
+        const cleanPath = imageSource.startsWith('/') ? imageSource : `/${imageSource}`;
+        imageUrl = `${baseUrl}${cleanPath}`;
+      }
+    } else {
+      // Remote HTTP/HTTPS URL
+      imageUrl = imageSource;
+    }
+  }
+
+  if (attachmentId) {
+    return module.exports.callSendAPI(psid, {
+      attachment: {
+        type: 'image',
+        payload: {
+          attachment_id: attachmentId
+        }
+      }
+    }, options);
+  }
+
+  if (imageUrl) {
+    return module.exports.callSendAPI(psid, {
+      attachment: {
+        type: 'image',
+        payload: {
+          url: imageUrl,
+          is_reusable: true
+        }
+      }
+    }, options);
+  }
+
+  console.warn('[Messenger Send Image] Could not resolve imageSource into attachment_id or valid URL.');
+  return null;
 }
 
 module.exports = {
@@ -259,6 +421,7 @@ module.exports = {
   formatOrderSummaryReceipt,
   sendTextMessage,
   sendImageAttachment,
+  uploadAttachment,
   sendQuickReplies,
   sendGenericTemplate,
   sendButtonTemplate,

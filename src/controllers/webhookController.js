@@ -175,6 +175,7 @@ function processWebhookEvents(req, res) {
  * Provides interactive payment screen with prefilled order total, plus direct GCash app launch
  */
 async function gcashRedirect(req, res) {
+  res.setHeader('ngrok-skip-browser-warning', 'true');
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
 
   const query = req?.query || {};

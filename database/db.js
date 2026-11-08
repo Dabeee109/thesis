@@ -61,6 +61,7 @@ function initSqliteFallback() {
         name TEXT NOT NULL,
         description TEXT,
         price REAL NOT NULL DEFAULT 0.00,
+        stock_quantity INTEGER NOT NULL DEFAULT 0,
         image_url TEXT,
         is_available INTEGER NOT NULL DEFAULT 1,
         is_bestseller INTEGER NOT NULL DEFAULT 0,
@@ -101,6 +102,10 @@ function initSqliteFallback() {
         delivery_fee REAL NOT NULL DEFAULT 0.00,
         total_amount REAL NOT NULL DEFAULT 0.00,
         delivery_address TEXT,
+        customer_phone TEXT DEFAULT NULL,
+        payment_proof_image TEXT DEFAULT NULL,
+        payment_ref_number TEXT DEFAULT NULL,
+        payment_status TEXT DEFAULT 'Pending',
         distance_km REAL DEFAULT 1.00,
         customer_notes TEXT,
         cancellation_reason TEXT,
@@ -209,7 +214,65 @@ function initSqliteFallback() {
         raw_payload TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE TABLE IF NOT EXISTS promotions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        promo_type TEXT NOT NULL DEFAULT 'Product Discount',
+        banner_image_url TEXT DEFAULT NULL,
+        perk_description TEXT NOT NULL,
+        applicable_scope TEXT DEFAULT 'All Menu Items',
+        start_date TEXT DEFAULT NULL,
+        end_date TEXT DEFAULT NULL,
+        description TEXT DEFAULT NULL,
+        is_active INTEGER DEFAULT 1,
+        broadcast_count INTEGER DEFAULT 0,
+        last_broadcast_at DATETIME DEFAULT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS store_settings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gcash_account_name TEXT NOT NULL DEFAULT "Diner's Cafe",
+        gcash_account_number TEXT NOT NULL DEFAULT "09XXXXXXXXX",
+        gcash_qr_image_url TEXT DEFAULT NULL,
+        store_name TEXT NOT NULL DEFAULT "Diner's Cafe - Main Branch",
+        store_address TEXT NOT NULL DEFAULT "123 Boni Ave, Mandaluyong City",
+        store_latitude REAL NOT NULL DEFAULT 14.5794,
+        store_longitude REAL NOT NULL DEFAULT 121.0359,
+        max_delivery_radius_km REAL NOT NULL DEFAULT 3.00,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
     `);
+
+    // Seed default store settings if empty
+    try {
+      const storeCount = sqliteDb.prepare(`SELECT COUNT(*) as count FROM store_settings`).get();
+      if (storeCount && storeCount.count === 0) {
+        sqliteDb.prepare(`
+          INSERT INTO store_settings (id, gcash_account_name, gcash_account_number, gcash_qr_image_url, store_name, store_address, store_latitude, store_longitude, max_delivery_radius_km)
+          VALUES (1, 'Diner\\'s Cafe - Tondo Branch', '09171234567', '/uploads/qr/gcash_qr_CHECKOUT.png', 'Diner\\'s Cafe Tondo', 'Diner\\'s Cafe, Tondo, Manila', 14.6143686, 120.9642334, 3.00)
+        `).run();
+      }
+    } catch (e) {
+      console.warn('[SQLite] store_settings seed check skipped:', e.message);
+    }
+
+    // Seed sample promotions if empty
+    try {
+      const promoCount = sqliteDb.prepare(`SELECT COUNT(*) as count FROM promotions`).get();
+      if (promoCount && promoCount.count === 0) {
+        sqliteDb.prepare(`
+          INSERT INTO promotions (title, promo_type, banner_image_url, perk_description, applicable_scope, start_date, end_date, description, is_active)
+          VALUES 
+          ('Grand Weekend Acoustic Night & 20% OFF Cold Brews', 'Cafe Event', '/uploads/promotions/sample_acoustic_night.jpg', '20% OFF Cold Brews', 'Cold Brew Beverages', '2026-11-14', '2026-11-15', 'Samahan kami ngayong weekend para sa live acoustic music kasama ang 20% OFF sa lahat ng cold brews!', 1),
+          ('Buy 1 Take 1 Signature Spanish Latte', 'Bundle / BOGO', '/uploads/promotions/sample_bogo_latte.jpg', 'Buy 1 Take 1', 'Signature Spanish Latte', '2026-11-01', '2026-11-30', 'Double the energy! Buy 1 Take 1 sa ating bestselling Signature Spanish Latte all month long!', 1)
+        `).run();
+      }
+    } catch (e) {
+      console.warn('[SQLite] Promotions seed check skipped:', e.message);
+    }
 
     // Migration: Add void request columns if not present
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN void_status TEXT DEFAULT NULL;`); } catch (e) { }
@@ -224,6 +287,14 @@ function initSqliteFallback() {
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN receipt_url TEXT DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE menu_items ADD COLUMN synonyms TEXT DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE menu_items ADD COLUMN is_deleted INTEGER DEFAULT 0;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE menu_items ADD COLUMN stock_quantity INTEGER NOT NULL DEFAULT 0;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN customer_phone TEXT DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN payment_proof_image TEXT DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN payment_ref_number TEXT DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN payment_status TEXT DEFAULT 'Pending';`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE store_settings ADD COLUMN gcash_account_name TEXT DEFAULT "Diner's Cafe";`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE store_settings ADD COLUMN gcash_account_number TEXT DEFAULT "09XXXXXXXXX";`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE store_settings ADD COLUMN gcash_qr_image_url TEXT DEFAULT NULL;`); } catch (e) { }
 
     // Seed admin_gcash_transactions if empty
     try {
@@ -447,7 +518,12 @@ async function initDatabase() {
         { table: 'orders', column: 'gcash_ref', type: 'VARCHAR(100) NULL' },
         { table: 'orders', column: 'receipt_url', type: 'TEXT NULL' },
         { table: 'menu_items', column: 'synonyms', type: 'VARCHAR(255) NULL' },
-        { table: 'menu_items', column: 'is_deleted', type: 'TINYINT(1) NOT NULL DEFAULT 0' }
+        { table: 'menu_items', column: 'is_deleted', type: 'TINYINT(1) NOT NULL DEFAULT 0' },
+        { table: 'menu_items', column: 'stock_quantity', type: 'INT NOT NULL DEFAULT 0' },
+        { table: 'orders', column: 'customer_phone', type: 'VARCHAR(50) NULL' },
+        { table: 'orders', column: 'payment_proof_image', type: 'VARCHAR(500) NULL' },
+        { table: 'orders', column: 'payment_ref_number', type: 'VARCHAR(100) NULL' },
+        { table: 'orders', column: 'payment_status', type: "VARCHAR(50) DEFAULT 'Pending'" }
       ];
       for (const c of cols) {
         const [rows] = await conn.query(

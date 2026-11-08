@@ -70,14 +70,16 @@ function isExtremeHeatWindow(time) {
  * @param {Date|string|null} currentTime - Optional timestamp to evaluate extreme heat window
  * @returns {Object} Complete fare computation details
  */
-function calculateDeliveryFare(distanceKm, vehicleType = 'motorcycle', weatherCondition = 'sunny', currentTime = null) {
+function calculateDeliveryFare(distanceKm, vehicleType = 'motorcycle', weatherCondition = 'sunny', currentTime = null, maxRadius = null) {
   const dist = parseFloat(distanceKm);
   if (isNaN(dist) || dist < 0) {
     throw new Error('Invalid distance: Distance must be a positive number.');
   }
 
-  if (dist > MAX_DELIVERY_DISTANCE_KM) {
-    throw new Error(`Delivery distance (${dist.toFixed(2)} km) exceeds the maximum internal cafe delivery radius of ${MAX_DELIVERY_DISTANCE_KM} km.`);
+  const effectiveMaxRadius = Number.isFinite(maxRadius) && maxRadius > 0 ? maxRadius : MAX_DELIVERY_DISTANCE_KM;
+
+  if (dist > effectiveMaxRadius) {
+    throw new Error(`Delivery distance (${dist.toFixed(2)} km) exceeds the maximum internal cafe delivery radius of ${effectiveMaxRadius} km.`);
   }
 
   const vType = (vehicleType || 'motorcycle').toLowerCase().trim();
@@ -148,12 +150,16 @@ function calculateDeliveryFare(distanceKm, vehicleType = 'motorcycle', weatherCo
     rawFinalFare: parseFloat(rawFinalFare.toFixed(2)),
     finalFare: Math.max(0, finalFare),
     currency: 'PHP',
-    maxRadiusKm: MAX_DELIVERY_DISTANCE_KM
+    maxRadiusKm: effectiveMaxRadius
   };
 }
 
+const { calculateDeliveryFee, computeDeliveryFee } = require('./deliveryFeeCalculator');
+
 module.exports = {
   calculateDeliveryFare,
+  calculateDeliveryFee,
+  computeDeliveryFee,
   isExtremeHeatWindow,
   MAX_DELIVERY_DISTANCE_KM
 };

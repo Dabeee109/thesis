@@ -300,7 +300,7 @@ async function processFeedbackSubmission({ psid, session, rating, comment = '' }
   }
 
   // 4. Send official polite acknowledgment to customer
-  const acknowledgmentMessage = "Maraming salamat po sa inyong feedback! Malaking tulong po ito para mapaganda pa ang aming serbisyo.";
+  const acknowledgmentMessage = "Maraming salamat po sa inyong rating at feedback! Malaking tulong po ito sa amin. Enjoy your meal and see you again soon!";
   await sendTextMessage(psid, acknowledgmentMessage);
 
   return {

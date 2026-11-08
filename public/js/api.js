@@ -43,10 +43,13 @@ const API = {
   },
 
   async request(endpoint, options = {}) {
+    const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
     const headers = {
-      'Content-Type': 'application/json',
       ...options.headers
     };
+    if (!isFormData && !headers['Content-Type']) {
+      headers['Content-Type'] = 'application/json';
+    }
 
     const token = this.getToken();
     if (token) {
@@ -102,6 +105,13 @@ const API = {
 
   delete(endpoint) {
     return this.request(endpoint, { method: 'DELETE' });
+  },
+
+  upload(endpoint, formData, method = 'POST') {
+    return this.request(endpoint, {
+      method,
+      body: formData
+    });
   },
 
   // Toast Notification System

@@ -88,16 +88,16 @@ function classifyShort(text, { fuzzy = true } = {}) {
 
 // 3. parseQuantity
 const WORD_NUMBERS = {
-  one: 1, a: 1, an: 1, another: 1, isa: 1,
-  two: 2, dalawa: 2,
-  three: 3, tatlo: 3,
-  four: 4, apat: 4,
-  five: 5, lima: 5,
-  six: 6, anim: 6,
-  seven: 7, pito: 7,
-  eight: 8, walo: 8,
-  nine: 9, siyam: 9,
-  ten: 10, sampu: 10
+  one: 1, a: 1, an: 1, another: 1, isa: 1, isang: 1, '1': 1,
+  two: 2, dalawa: 2, dalawang: 2, '2': 2,
+  three: 3, tatlo: 3, tatlong: 3, '3': 3,
+  four: 4, apat: 4, 'apat na': 4, '4': 4,
+  five: 5, lima: 5, limang: 5, '5': 5,
+  six: 6, anim: 6, 'anim na': 6, '6': 6,
+  seven: 7, pito: 7, pitong: 7, '7': 7,
+  eight: 8, walo: 8, walong: 8, '8': 8,
+  nine: 9, siyam: 9, 'siyam na': 9, '9': 9,
+  ten: 10, sampu: 10, sampung: 10, '10': 10
 };
 
 function parseQuantity(text) {
@@ -116,6 +116,13 @@ function parseQuantity(text) {
   if (digitMatch) {
     const val = parseInt(digitMatch[1], 10);
     if (val >= 1 && val <= 99) return val;
+  }
+
+  // Look for two-word numbers like 'apat na', 'anim na', 'siyam na'
+  for (const [word, val] of Object.entries(WORD_NUMBERS)) {
+    if (word.includes(' ') && norm.includes(word)) {
+      return val;
+    }
   }
 
   // Look for word numbers
@@ -355,8 +362,11 @@ function peso(n) {
   });
 }
 
+const { normalizePinoySlang } = require('./pinoySlangNormalizer');
+
 module.exports = {
   normalize,
+  normalizePinoySlang,
   classifyShort,
   parseQuantity,
   matchItems,

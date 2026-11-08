@@ -204,10 +204,78 @@ async function rejectVoid(req, res) {
   }
 }
 
+/**
+ * Cancel / Void Order endpoint
+ * POST /api/admin/orders/:id/cancel
+ * POST /api/orders/:id/cancel
+ */
+async function cancelOrder(req, res) {
+  try {
+    const { id } = req.params;
+    const { reason, cancellationReason } = req.body;
+    const finalReason = cancellationReason || reason || 'Cancelled by Admin';
+
+    const updated = await updateOrderStatus(parseInt(id, 10), 'cancelled', {
+      cancellationReason: finalReason
+    });
+
+    return res.json({
+      success: true,
+      message: `Order #${updated.orderNumber} has been successfully cancelled.`,
+      order: updated
+    });
+  } catch (err) {
+    console.error('[Order Cancel Error]', err);
+    return res.status(500).json({ success: false, message: err.message || 'Failed to cancel order.' });
+  }
+}
+
+/**
+ * Mark payment verified / paid
+ * POST /api/orders/:id/verify-payment
+ */
+async function verifyPayment(req, res) {
+  try {
+    const { id } = req.params;
+    const updated = await orderService.verifyOrderPayment(parseInt(id, 10));
+    return res.json({
+      success: true,
+      message: `Payment for Order #${updated.order_number} marked as Paid.`,
+      order: updated
+    });
+  } catch (err) {
+    console.error('[Verify Payment Error]', err);
+    return res.status(500).json({ success: false, message: err.message || 'Failed to verify payment.' });
+  }
+}
+
+/**
+ * Mark payment invalid / prompt re-upload
+ * POST /api/orders/:id/invalid-payment
+ */
+async function invalidPayment(req, res) {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const updated = await orderService.markOrderPaymentInvalid(parseInt(id, 10), reason);
+    return res.json({
+      success: true,
+      message: `Payment proof for Order #${updated.order_number} marked as invalid. Customer has been prompted to re-upload.`,
+      order: updated
+    });
+  } catch (err) {
+    console.error('[Invalid Payment Error]', err);
+    return res.status(500).json({ success: false, message: err.message || 'Failed to update payment status.' });
+  }
+}
+
 module.exports = {
   getOrders,
   getOrder,
   changeOrderStatus,
+  cancelOrder,
+  verifyPayment,
+  invalidPayment,
   getSummaryKPIs,
   createManualOrder,
   requestVoid,

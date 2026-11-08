@@ -11,6 +11,7 @@ const reportController = require('../controllers/reportController');
 const chatbotController = require('../controllers/chatbotController');
 const deliveryQuoteController = require('../controllers/deliveryQuoteController');
 const settingsController = require('../controllers/settingsController');
+const promotionController = require('../controllers/promotionController');
 const rateLimit = require('express-rate-limit');
 
 const quoteLimiter = rateLimit({
@@ -40,18 +41,27 @@ router.patch('/auth/users/:id/toggle-status', authController.authMiddleware, aut
 
 // 2. Menu Management Routes (FR2, FR8)
 router.get('/menu', menuController.getMenu);
+router.get('/admin/menu', menuController.getMenu);
 router.post('/menu', authController.authMiddleware, menuController.createMenuItem);
+router.post('/admin/menu', authController.authMiddleware, menuController.createMenuItem);
 router.post('/menu/upload-image', authController.authMiddleware, menuController.uploadMenuImage);
 router.put('/menu/:id', authController.authMiddleware, menuController.updateMenuItem);
+router.put('/admin/menu/:id', authController.authMiddleware, menuController.updateMenuItem);
 router.patch('/menu/:id/toggle-availability', authController.authMiddleware, menuController.toggleAvailability);
 router.delete('/menu/:id', authController.authMiddleware, menuController.deleteMenuItem);
+router.delete('/admin/menu/:id', authController.authMiddleware, menuController.deleteMenuItem);
 
 // 3. Order Operations Routes (FR3, FR4, FR7)
 router.get('/orders', authController.authMiddleware, orderController.getOrders);
 router.get('/orders/summary/kpis', authController.authMiddleware, orderController.getSummaryKPIs);
 router.get('/orders/:id', authController.authMiddleware, orderController.getOrder);
 router.patch('/orders/:id/status', authController.authMiddleware, orderController.changeOrderStatus);
+router.post('/orders', authController.authMiddleware, orderController.createManualOrder);
 router.post('/orders/manual', authController.authMiddleware, orderController.createManualOrder);
+router.post('/orders/:id/cancel', authController.authMiddleware, orderController.cancelOrder);
+router.post('/admin/orders/:id/cancel', authController.authMiddleware, orderController.cancelOrder);
+router.post('/orders/:id/verify-payment', authController.authMiddleware, orderController.verifyPayment);
+router.post('/orders/:id/invalid-payment', authController.authMiddleware, orderController.invalidPayment);
 router.post('/orders/:id/request-void', authController.authMiddleware, orderController.requestVoid);
 router.post('/orders/:id/authorize-void', authController.authMiddleware, orderController.authorizeVoid);
 router.post('/orders/:id/reject-void', authController.authMiddleware, orderController.rejectVoid);
@@ -60,6 +70,8 @@ router.post('/orders/:id/reject-void', authController.authMiddleware, orderContr
 router.get('/deliveries', authController.authMiddleware, deliveryController.getDeliveries);
 router.get('/riders', authController.authMiddleware, deliveryController.getRiders);
 router.get('/rider/active-orders', deliveryController.getActiveRiderOrders);
+router.get('/rider/orders/active', deliveryController.getActiveRiderOrders);
+router.post('/rider/orders/:id/complete', deliveryController.completeRiderDelivery);
 router.get('/rider/history', deliveryController.getRiderHistory);
 router.post('/deliveries/compute-fare', deliveryController.computeFare);
 router.post('/deliveries/assign-rider', authController.authMiddleware, deliveryController.assignRider);
@@ -67,7 +79,20 @@ router.patch('/deliveries/:id/override-fare', authController.authMiddleware, del
 router.post('/delivery/quote', quoteLimiter, deliveryQuoteController.getQuote);
 router.get('/delivery/service-area', deliveryQuoteController.getServiceArea);
 
-// 5. Inventory Management Routes (FR8)
+// 5. Promotions & Events Management Routes (Replaces legacy Inventory UI)
+router.get('/promotions/active', promotionController.getActivePromotions);
+router.get('/promotions', promotionController.getPromotions);
+router.get('/promotions/:id', promotionController.getPromotionById);
+router.post('/promotions', authController.authMiddleware, promotionController.createPromotion);
+router.put('/promotions/:id', authController.authMiddleware, promotionController.updatePromotion);
+router.patch('/promotions/:id/toggle', authController.authMiddleware, promotionController.togglePromotionStatus);
+router.delete('/promotions/:id', authController.authMiddleware, promotionController.deletePromotion);
+router.post('/promotions/upload-poster', authController.authMiddleware, promotionController.uploadPromotionPoster);
+router.get('/admin/promotions/recipients-count', authController.authMiddleware, promotionController.getBroadcastRecipientsCount);
+router.post('/admin/promotions/:id/broadcast', authController.authMiddleware, promotionController.broadcastPromotion);
+router.post('/promotions/:id/broadcast', authController.authMiddleware, promotionController.broadcastPromotion);
+
+// Background Inventory Routes (Preserved for stock calculation and POS order pipelines)
 router.get('/inventory', authController.authMiddleware, inventoryController.getInventory);
 router.post('/inventory/restock', authController.authMiddleware, inventoryController.restock);
 router.get('/inventory/logs', authController.authMiddleware, inventoryController.getInventoryLogs);
@@ -92,5 +117,16 @@ router.post('/chatbot/toggle', authController.authMiddleware, chatbotController.
 router.get('/settings/facebook', authController.authMiddleware, authController.requireAdmin, settingsController.getFacebookSettings);
 router.put('/settings/facebook', authController.authMiddleware, authController.requireAdmin, settingsController.updateFacebookSettings);
 router.post('/settings/facebook/test', authController.authMiddleware, authController.requireAdmin, settingsController.testFacebookToken);
+
+// Store Branch & Delivery Location & GCash Settings
+router.get('/admin/settings/general', authController.authMiddleware, authController.requireAdmin, settingsController.getGeneralSettings);
+router.get('/settings/general', authController.authMiddleware, authController.requireAdmin, settingsController.getGeneralSettings);
+router.put('/admin/settings/gcash', authController.authMiddleware, authController.requireAdmin, settingsController.qrUpload.any(), settingsController.updateGcashSettings);
+router.put('/settings/gcash', authController.authMiddleware, authController.requireAdmin, settingsController.qrUpload.any(), settingsController.updateGcashSettings);
+router.get('/admin/settings/location', authController.authMiddleware, authController.requireAdmin, settingsController.getStoreLocationSettings);
+router.put('/admin/settings/location', authController.authMiddleware, authController.requireAdmin, settingsController.updateStoreLocationSettings);
+router.get('/settings/location', authController.authMiddleware, authController.requireAdmin, settingsController.getStoreLocationSettings);
+router.put('/settings/location', authController.authMiddleware, authController.requireAdmin, settingsController.updateStoreLocationSettings);
+router.get('/store/location/public', settingsController.getPublicStoreLocation);
 
 module.exports = router;

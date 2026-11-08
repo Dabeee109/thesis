@@ -178,9 +178,10 @@ async function testAllFiveFeatures() {
     });
     assert.strictEqual(delivRes.eligible, true);
     assert.strictEqual(delivRes.success, true);
-    assert.strictEqual(
-      delivRes.botReply,
-      'Maraming salamat po sa inyong feedback! Malaking tulong po ito para mapaganda pa ang aming serbisyo.'
+    assert(
+      delivRes.botReply.includes('Maraming salamat po sa inyong') &&
+      delivRes.botReply.includes('feedback!'),
+      'Acknowledgment reply should thank the customer for feedback'
     );
 
     // Check database to ensure feedback was actually persisted
