@@ -471,7 +471,7 @@ function renderKanban(orders) {
         paymentBadge = `<span class="badge badge-preparing" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #f59e0b;">⏳ Proof Sent</span>`;
       } else if (order.payment_status === 'Paid') {
         paymentBadge = `<span class="badge badge-gcash">📱 GCash Paid</span>`;
-      } else if (order.payment_status === 'Failed') {
+      } else if (order.payment_status === 'Failed' || order.payment_status === 'INVALID' || order.payment_status === 'Invalid') {
         paymentBadge = `<span class="badge badge-mismatch" style="background: rgba(239, 68, 68, 0.2); color: #f87171;">❌ Proof Invalid</span>`;
       } else {
         paymentBadge = `<span class="badge badge-pending">📱 GCash Pending</span>`;
@@ -671,13 +671,13 @@ async function viewOrderDetails(orderId) {
               💳 Payment Method: <span style="text-transform: uppercase; color: var(--brand-primary);">${escapeHtml(o.payment_method || 'CASH')}</span>
             </div>
             <div>
-              <span class="badge ${o.payment_status === 'Paid' ? 'badge-delivered' : (o.payment_status === 'Pending Verification' ? 'badge-preparing' : (o.payment_status === 'Failed' ? 'badge-mismatch' : 'badge-pending'))}" style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">
+              <span class="badge ${o.payment_status === 'Paid' ? 'badge-delivered' : (o.payment_status === 'Pending Verification' ? 'badge-preparing' : ((o.payment_status === 'Failed' || o.payment_status === 'INVALID' || o.payment_status === 'Invalid') ? 'badge-mismatch' : 'badge-pending'))}" style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">
                 ${escapeHtml(o.payment_status || 'Pending')}
               </span>
             </div>
           </div>
 
-          ${o.payment_mismatch ? `<div style="color: var(--status-danger); font-size: 0.82rem; margin: 4px 0;">⚠️ ${escapeHtml(o.mismatch_notes || '')}</div>` : ''}
+          ${(o.payment_mismatch || o.mismatch_notes) ? `<div style="color: var(--status-danger); font-size: 0.82rem; margin: 4px 0;">⚠️ ${escapeHtml(o.mismatch_notes || 'Payment proof flagged as invalid')}</div>` : ''}
 
           <!-- Show Reference Number if present -->
           ${(o.payment_ref_number || o.reference_no || o.gcash_ref) ? `
@@ -929,17 +929,19 @@ function printReceipt() {
 }
 
 /**
- * Staff Marks Payment as Verified / Paid (Requirement 4)
+ * Staff Marks Payment as Verified / Paid
+ * Updates payment to Paid, moves status from Pending to In Kitchen Preparation,
+ * notifies customer on Messenger, and refreshes Kanban immediately.
  */
 async function markPaymentVerified(orderId, orderNumber) {
-  if (!confirm(`Mark payment as VERIFIED / PAID for Order #${orderNumber}?\n\nThe customer will receive a confirmation message on Messenger.`)) {
+  if (!confirm(`Mark payment as VERIFIED / PAID for Order #${orderNumber}?\n\n• Order will move to 'In Kitchen Preparation'.\n• Customer will receive an automated confirmation on Facebook Messenger.`)) {
     return;
   }
 
   try {
     const res = await API.post(`/orders/${orderId}/verify-payment`, {});
     if (res && res.success) {
-      API.toast(`✅ Payment for Order #${orderNumber} marked as Paid!`, 'success');
+      API.toast(`✅ Payment for Order #${orderNumber} marked as Paid! Moved to In Kitchen.`, 'success');
       await Promise.all([loadOrders(), loadKPIs()]);
       // Refresh the modal view if open
       viewOrderDetails(orderId);
@@ -952,29 +954,124 @@ async function markPaymentVerified(orderId, orderNumber) {
 }
 
 /**
- * Staff Marks Payment Proof as Invalid (Requirement 4)
+ * Opens the Invalid Payment Proof modal with selectable reasons
  */
-async function markPaymentInvalid(orderId, orderNumber) {
-  const reason = prompt(`Prompt customer on Messenger to re-upload proof of payment for Order #${orderNumber}?\n\nOptional note/reason:`, 'Malabong screenshot o maling reference number');
-  if (reason === null) return; // User cancelled prompt
+function openInvalidPaymentModal(orderId, orderNumber) {
+  const modal = document.getElementById('modal-invalid-payment');
+  if (!modal) return;
+
+  const idInput = document.getElementById('invalid-payment-order-id');
+  const numInput = document.getElementById('invalid-payment-order-number');
+  const labelEl = document.getElementById('invalid-payment-order-label');
+  if (idInput) idInput.value = orderId;
+  if (numInput) numInput.value = orderNumber;
+  if (labelEl) labelEl.textContent = `Order #${orderNumber}`;
+
+  // Reset radio to default "Malabo ang picture"
+  const defaultRadio = document.querySelector('input[name="invalid-payment-reason-radio"][value="Malabo ang picture"]');
+  if (defaultRadio) defaultRadio.checked = true;
+
+  // Reset custom reason field
+  const customGroup = document.getElementById('invalid-payment-custom-group');
+  const customInput = document.getElementById('invalid-payment-custom-reason');
+  if (customGroup) customGroup.style.display = 'none';
+  if (customInput) customInput.value = '';
+
+  const submitBtn = document.getElementById('btn-submit-invalid-payment');
+  if (submitBtn) {
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = '<span>⚠️ Confirm Rejection & Notify Customer</span>';
+  }
+
+  openModal('modal-invalid-payment');
+}
+
+/**
+ * Toggles the visibility of the custom reason textarea when "Etc" is selected
+ */
+function toggleCustomReasonField(selectedValue) {
+  const customGroup = document.getElementById('invalid-payment-custom-group');
+  const customInput = document.getElementById('invalid-payment-custom-reason');
+  if (!customGroup) return;
+
+  if (selectedValue === 'Etc') {
+    customGroup.style.display = 'block';
+    if (customInput) {
+      customInput.focus();
+    }
+  } else {
+    customGroup.style.display = 'none';
+  }
+}
+
+/**
+ * Handles submission of Invalid Payment Proof form
+ */
+async function handleInvalidPaymentSubmit(event) {
+  if (event) event.preventDefault();
+
+  const orderId = document.getElementById('invalid-payment-order-id').value;
+  const orderNumber = document.getElementById('invalid-payment-order-number').value;
+
+  const selectedRadio = document.querySelector('input[name="invalid-payment-reason-radio"]:checked');
+  const radioValue = selectedRadio ? selectedRadio.value : 'Malabo ang picture';
+
+  let finalReason = radioValue;
+  if (radioValue === 'Etc') {
+    const customText = (document.getElementById('invalid-payment-custom-reason').value || '').trim();
+    if (!customText) {
+      API.toast('Paki-lagay po ang custom na dahilan bago mag-confirm.', 'warning');
+      document.getElementById('invalid-payment-custom-reason').focus();
+      return;
+    }
+    finalReason = customText;
+  }
+
+  const submitBtn = document.getElementById('btn-submit-invalid-payment');
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span>⏳ Sending Notification...</span>';
+  }
 
   try {
-    const res = await API.post(`/orders/${orderId}/invalid-payment`, { reason });
+    const res = await API.post(`/orders/${orderId}/invalid-payment`, {
+      reason: finalReason,
+      reasonCode: radioValue
+    });
+
     if (res && res.success) {
-      API.toast(`⚠️ Payment marked as invalid. Customer re-upload prompt sent for Order #${orderNumber}.`, 'info');
+      API.toast(`⚠️ Payment proof for Order #${orderNumber} marked as invalid. Customer notified on Messenger!`, 'info');
+      closeModal('modal-invalid-payment');
       await Promise.all([loadOrders(), loadKPIs()]);
-      // Refresh the modal view if open
-      viewOrderDetails(orderId);
+      // Refresh the order details modal if currently open
+      if (typeof viewOrderDetails === 'function') {
+        viewOrderDetails(orderId);
+      }
     } else {
       API.toast(res.message || 'Failed to update payment status.', 'error');
     }
   } catch (err) {
     API.toast(err.message || 'Error updating payment status.', 'error');
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '<span>⚠️ Confirm Rejection & Notify Customer</span>';
+    }
   }
+}
+
+/**
+ * Staff Marks Payment Proof as Invalid (triggers the modal)
+ */
+function markPaymentInvalid(orderId, orderNumber) {
+  openInvalidPaymentModal(orderId, orderNumber);
 }
 
 window.markPaymentVerified = markPaymentVerified;
 window.markPaymentInvalid = markPaymentInvalid;
+window.openInvalidPaymentModal = openInvalidPaymentModal;
+window.toggleCustomReasonField = toggleCustomReasonField;
+window.handleInvalidPaymentSubmit = handleInvalidPaymentSubmit;
 
 // ----------------------------------------------------------------------------
 // 3. Menu Management

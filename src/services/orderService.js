@@ -772,9 +772,13 @@ async function rejectVoidOrder(orderId, adminUser, rejectionNote) {
 
 /**
  * Staff marks order payment as verified / Paid
- * Updates payment_status to 'Paid' and notifies customer via Messenger
+ * 1. Updates payment_status to 'Paid'
+ * 2. Advances status from 'pending' / 'pending_approval' to 'preparing' (In Kitchen Preparation)
+ * 3. Notifies customer via Facebook Messenger and saves in notifications audit
+ * 4. Logs action in order_audit_logs
+ * 5. Broadcasts real-time events to Kanban (ORDER_STATUS_CHANGED, ORDER_PAYMENT_VERIFIED, RIDER_ORDER_ALERT)
  */
-async function verifyOrderPayment(orderId) {
+async function verifyOrderPayment(orderId, actor = null) {
   const [rows] = await db.query(
     `SELECT o.*, c.psid, c.first_name, c.last_name 
      FROM orders o 
@@ -784,43 +788,105 @@ async function verifyOrderPayment(orderId) {
   );
   if (rows.length === 0) throw new Error(`Order #${orderId} not found.`);
   const order = rows[0];
+  const prevStatus = order.status;
+
+  // Determine if status should advance to 'preparing' (In Kitchen Preparation)
+  const isPending = !order.status || 
+    ['pending', 'pending_approval', 'unpaid', 'new', 'for_confirmation', 'paid'].includes(order.status.toLowerCase());
+  const newStatus = isPending ? 'preparing' : order.status;
 
   await db.query(
     `UPDATE orders 
-     SET payment_status = 'Paid', updated_at = CURRENT_TIMESTAMP 
+     SET payment_status = 'Paid', status = ?, updated_at = CURRENT_TIMESTAMP 
      WHERE id = ?`,
-    [orderId]
+    [newStatus, orderId]
   );
 
   await db.query(
     `UPDATE payments 
-     SET status = 'verified', verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP 
+     SET status = 'verified', is_mismatch = 0, mismatch_notes = NULL, verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP 
      WHERE order_id = ?`,
     [orderId]
   );
 
-  // Notify customer
+  // Log in order_audit_logs
+  try {
+    const actorId = actor ? (actor.id || actor.userId || null) : null;
+    const actorName = actor ? (actor.username || actor.name || 'Staff') : 'Staff';
+    await db.query(
+      `INSERT INTO order_audit_logs (order_id, order_number, action, actor_id, actor_name, reason, details)
+       VALUES (?, ?, 'PAYMENT_VERIFIED', ?, ?, 'Payment Verified', 'Payment marked as Paid; order status advanced to In Kitchen Preparation')`,
+      [orderId, order.order_number, actorId, actorName]
+    );
+  } catch (aErr) {
+    console.warn('[orderService] Failed to insert audit log for payment verification:', aErr.message);
+  }
+
+  // Notify customer via Facebook Messenger and notification logs
+  const customerName = `${order.first_name || ''}`.trim() || 'Customer';
+  const notifMsg = `Magandang araw po, ${customerName}! ✅ Na-verify na po ng aming staff ang inyong bayad para sa Order #${order.order_number}.\n\n🍳 Kasalukuyan na po itong inihahanda sa aming kusina (In Kitchen Preparation). I-a-update po namin kayo oras na handa na ito para i-deliver o i-pickup. Maraming salamat po!`;
+
+  await sendNotification(order.psid, 'payment_verified', `Order #${order.order_number} Payment Verified`, notifMsg);
+
   if (order.psid && !order.psid.startsWith('POS_MANUAL_')) {
-    const notifMsg = `Salamat po! Na-verify na po ng aming staff ang inyong GCash payment para sa Order #${order.order_number}. Kasalukuyan na po itong pinoproseso ng aming kitchen team.`;
     await sendTextMessage(order.psid, notifMsg).catch(err => {
       console.warn('[orderService] Failed to send payment verified notification:', err.message);
     });
   }
 
+  // Look up assigned rider if any
+  let assignedRiderId = null;
+  try {
+    const [delRows] = await db.query('SELECT rider_id FROM deliveries WHERE order_id = ?', [orderId]);
+    if (delRows && delRows.length > 0 && delRows[0].rider_id) {
+      assignedRiderId = delRows[0].rider_id;
+    }
+  } catch (err) {
+    console.warn('[orderService] Rider lookup warning:', err.message);
+  }
+
+  // Broadcast real-time events to all connected clients & Kanban
   broadcastSSE('ORDER_PAYMENT_VERIFIED', {
     orderId,
     orderNumber: order.order_number,
-    payment_status: 'Paid'
+    payment_status: 'Paid',
+    status: newStatus
   });
 
-  return { ...order, payment_status: 'Paid' };
+  if (isPending) {
+    broadcastSSE('ORDER_STATUS_CHANGED', {
+      orderId,
+      orderNumber: order.order_number,
+      prevStatus,
+      newStatus: 'preparing',
+      riderId: assignedRiderId,
+      alertMessage: `🍳 Order #${order.order_number} payment verified. Now in Kitchen Preparation.`,
+      customerName: `${order.first_name || ''} ${order.last_name || ''}`.trim()
+    });
+
+    broadcastSSE('RIDER_ORDER_ALERT', {
+      orderId,
+      orderNumber: order.order_number,
+      riderId: assignedRiderId,
+      status: 'preparing',
+      message: `🍳 Order #${order.order_number} is now being prepared in the kitchen. Stand by for pickup.`,
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  return { ...order, status: newStatus, payment_status: 'Paid' };
 }
 
 /**
  * Staff marks payment proof as invalid
- * Prompts customer to re-upload receipt via Messenger
+ * 1. Updates order payment_status to 'INVALID'
+ * 2. Updates payments table status to 'mismatch_flagged' with reason
+ * 3. Records audit log in order_audit_logs
+ * 4. Sends specific reason explanation to customer via Messenger
+ * 5. Re-prompts customer to upload correct receipt (sets AWAITING_PAYMENT_PROOF session)
+ * 6. Broadcasts real-time events
  */
-async function markOrderPaymentInvalid(orderId, reason = '') {
+async function markOrderPaymentInvalid(orderId, reason = '', actor = null) {
   const [rows] = await db.query(
     `SELECT o.*, c.psid, c.first_name, c.last_name 
      FROM orders o 
@@ -831,23 +897,52 @@ async function markOrderPaymentInvalid(orderId, reason = '') {
   if (rows.length === 0) throw new Error(`Order #${orderId} not found.`);
   const order = rows[0];
 
+  const trimmedReason = (reason || '').trim() || 'Invalid payment proof';
+
   await db.query(
     `UPDATE orders 
-     SET payment_status = 'Failed', updated_at = CURRENT_TIMESTAMP 
+     SET payment_status = 'INVALID', updated_at = CURRENT_TIMESTAMP 
      WHERE id = ?`,
     [orderId]
   );
 
   await db.query(
     `UPDATE payments 
-     SET status = 'mismatch_flagged', mismatch_notes = ?, updated_at = CURRENT_TIMESTAMP 
+     SET status = 'mismatch_flagged', is_mismatch = 1, mismatch_notes = ?, updated_at = CURRENT_TIMESTAMP 
      WHERE order_id = ?`,
-    [reason || 'Invalid proof', orderId]
+    [trimmedReason, orderId]
   );
 
-  // Notify and re-prompt customer
+  // Log in order_audit_logs
+  try {
+    const actorId = actor ? (actor.id || actor.userId || null) : null;
+    const actorName = actor ? (actor.username || actor.name || 'Staff') : 'Staff';
+    await db.query(
+      `INSERT INTO order_audit_logs (order_id, order_number, action, actor_id, actor_name, reason, details)
+       VALUES (?, ?, 'PAYMENT_INVALID', ?, ?, ?, ?)`,
+      [orderId, order.order_number, actorId, actorName, trimmedReason, `Payment proof rejected: ${trimmedReason}`]
+    );
+  } catch (aErr) {
+    console.warn('[orderService] Failed to insert audit log for payment rejection:', aErr.message);
+  }
+
+  // Format tailored explanation for customer
+  let explanation = trimmedReason;
+  const reasonLower = trimmedReason.toLowerCase();
+  if (reasonLower.includes('malabo')) {
+    explanation = 'Malabo po o hindi mabasa nang malinaw ang ipinadalang picture ng resibo.';
+  } else if (reasonLower.includes('amount') || reasonLower.includes('halaga')) {
+    explanation = `Hindi po tugma ang halaga (amount) sa resibo sa total ng inyong order (₱${parseFloat(order.total_amount).toFixed(2)}).`;
+  } else if (reasonLower.includes('reference') || reasonLower.includes('ref')) {
+    explanation = 'Hindi po tugma o hindi mahanap ang ibinigay na GCash Reference / Trace Number.';
+  }
+
+  const promptMsg = `Paumanhin po, hindi po ma-verify ng aming staff ang inyong ipinadalang payment proof para sa Order #${order.order_number}.\n\n⚠️ Dahilan: ${explanation}\n\n📸 Paki-send po muli ang malinaw na screenshot ng inyong GCash receipt o i-type ang tamang Reference Number dito para ma-verify at maihanda na ang inyong order. Maraming salamat po!`;
+
+  await sendNotification(order.psid, 'payment_invalid', `Order #${order.order_number} Payment Proof Rejected`, promptMsg);
+
+  // Notify and re-prompt customer via Messenger
   if (order.psid && !order.psid.startsWith('POS_MANUAL_')) {
-    const promptMsg = `Paumanhin po, hindi po ma-verify ng aming staff ang inyong ipinadalang proof of payment para sa Order #${order.order_number}. Paki-send po muli ang malinaw na screenshot ng inyong GCash receipt o i-type ang tamang Reference Number dito.`;
     await sendTextMessage(order.psid, promptMsg).catch(err => {
       console.warn('[orderService] Failed to send invalid payment notification:', err.message);
     });
@@ -869,11 +964,19 @@ async function markOrderPaymentInvalid(orderId, reason = '') {
   broadcastSSE('ORDER_PAYMENT_INVALID', {
     orderId,
     orderNumber: order.order_number,
-    payment_status: 'Failed',
-    reason
+    payment_status: 'INVALID',
+    reason: trimmedReason
   });
 
-  return { ...order, payment_status: 'Failed' };
+  broadcastSSE('PAYMENT_UPDATE', {
+    orderId,
+    orderNumber: order.order_number,
+    isMismatch: true,
+    payment_status: 'INVALID',
+    mismatch_notes: trimmedReason
+  });
+
+  return { ...order, payment_status: 'INVALID', mismatch_notes: trimmedReason };
 }
 
 module.exports = {

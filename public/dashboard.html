@@ -1090,6 +1090,64 @@
     </div>
   </div>
 
+  <!-- 1.2 Invalid Payment Proof Modal -->
+  <div id="modal-invalid-payment" class="modal-overlay" style="z-index: 1050;">
+    <div class="modal-content" style="max-width: 500px;">
+      <div class="modal-header">
+        <h3 id="invalid-payment-modal-title" style="color: var(--status-danger); display: flex; align-items: center; gap: 8px;">
+          <span>⚠️ Invalid Payment Proof</span>
+        </h3>
+        <button class="modal-close" onclick="closeModal('modal-invalid-payment')">&times;</button>
+      </div>
+
+      <form id="invalid-payment-form" onsubmit="handleInvalidPaymentSubmit(event)">
+        <input type="hidden" id="invalid-payment-order-id">
+        <input type="hidden" id="invalid-payment-order-number">
+
+        <p style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5; margin-bottom: 14px;">
+          Pumili ng dahilan kung bakit hindi tanggap ang payment proof para sa <strong id="invalid-payment-order-label" style="color: var(--brand-crema);"></strong>. Ipapadala ito sa customer sa Facebook Messenger upang makapag-send sila ng tamang resibo:
+        </p>
+
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label class="form-label" style="font-weight: 700; margin-bottom: 8px; display: block; color: var(--text-primary);">Dahilan ng Pagka-invalid:</label>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 10px 14px; background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle); border-radius: 8px; font-size: 0.9rem; transition: border-color 0.2s;">
+              <input type="radio" name="invalid-payment-reason-radio" value="Malabo ang picture" checked onchange="toggleCustomReasonField(this.value)">
+              <span>📷 <strong>Malabo ang picture</strong> <span style="color: var(--text-muted); font-size: 0.82rem;">(Blurry receipt image)</span></span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 10px 14px; background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle); border-radius: 8px; font-size: 0.9rem; transition: border-color 0.2s;">
+              <input type="radio" name="invalid-payment-reason-radio" value="Mali ang amount" onchange="toggleCustomReasonField(this.value)">
+              <span>💰 <strong>Mali ang amount</strong> <span style="color: var(--text-muted); font-size: 0.82rem;">(Incorrect payment amount)</span></span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 10px 14px; background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle); border-radius: 8px; font-size: 0.9rem; transition: border-color 0.2s;">
+              <input type="radio" name="invalid-payment-reason-radio" value="Mali ang reference number" onchange="toggleCustomReasonField(this.value)">
+              <span>🔢 <strong>Mali ang reference number</strong> <span style="color: var(--text-muted); font-size: 0.82rem;">(Incorrect reference / trace number)</span></span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 10px 14px; background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle); border-radius: 8px; font-size: 0.9rem; transition: border-color 0.2s;">
+              <input type="radio" name="invalid-payment-reason-radio" value="Etc" onchange="toggleCustomReasonField(this.value)">
+              <span>📝 <strong>Etc</strong> <span style="color: var(--text-muted); font-size: 0.82rem;">(Custom reason)</span></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Custom Reason Container (dynamically displayed when "Etc" is selected) -->
+        <div id="invalid-payment-custom-group" style="display: none; margin-bottom: 16px;">
+          <label class="form-label" for="invalid-payment-custom-reason" style="font-weight: 600; margin-bottom: 6px; display: block;">
+            I-type ang custom na dahilan / mensahe para sa customer:
+          </label>
+          <textarea id="invalid-payment-custom-reason" class="form-control" rows="3" placeholder="Halimbawa: Hindi po tugma ang petsa sa resibo, o putol ang screenshot..."></textarea>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px; border-top: 1px solid var(--border-subtle); padding-top: 14px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-invalid-payment')">Kanselahin</button>
+          <button type="submit" id="btn-submit-invalid-payment" class="btn btn-danger" style="font-weight: 700; background: #ef4444; color: #fff; border: none; padding: 10px 18px; border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
+            <span>⚠️ Confirm Rejection & Notify Customer</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- 2. Assign Rider Modal -->
   <div id="modal-assign-rider" class="modal-overlay">
     <div class="modal-content">

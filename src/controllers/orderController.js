@@ -3,7 +3,8 @@
  * Handles listing orders, status progression, summary KPIs, and order cancellations.
  */
 
-const { getOrdersList, getOrderDetails, updateOrderStatus, createOrder } = require('../services/orderService');
+const orderService = require('../services/orderService');
+const { getOrdersList, getOrderDetails, updateOrderStatus, createOrder, verifyOrderPayment, markOrderPaymentInvalid } = orderService;
 const db = require('../../database/db');
 
 /**
@@ -275,10 +276,11 @@ async function cancelOrder(req, res) {
 async function verifyPayment(req, res) {
   try {
     const { id } = req.params;
-    const updated = await orderService.verifyOrderPayment(parseInt(id, 10));
+    const actor = req.user || { id: null, username: 'Staff' };
+    const updated = await orderService.verifyOrderPayment(parseInt(id, 10), actor);
     return res.json({
       success: true,
-      message: `Payment for Order #${updated.order_number} marked as Paid.`,
+      message: `Payment for Order #${updated.order_number} marked as Paid. Order moved to In Kitchen Preparation.`,
       order: updated
     });
   } catch (err) {
@@ -295,10 +297,11 @@ async function invalidPayment(req, res) {
   try {
     const { id } = req.params;
     const { reason } = req.body;
-    const updated = await orderService.markOrderPaymentInvalid(parseInt(id, 10), reason);
+    const actor = req.user || { id: null, username: 'Staff' };
+    const updated = await orderService.markOrderPaymentInvalid(parseInt(id, 10), reason, actor);
     return res.json({
       success: true,
-      message: `Payment proof for Order #${updated.order_number} marked as invalid. Customer has been prompted to re-upload.`,
+      message: `Payment proof for Order #${updated.order_number} marked as invalid. Customer has been notified and prompted to re-upload.`,
       order: updated
     });
   } catch (err) {

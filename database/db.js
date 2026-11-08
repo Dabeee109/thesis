@@ -285,6 +285,18 @@ function initSqliteFallback() {
         details TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE TABLE IF NOT EXISTS order_audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
+        order_number TEXT,
+        action TEXT NOT NULL,
+        actor_id INTEGER,
+        actor_name TEXT,
+        reason TEXT,
+        details TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
     `);
 
     // Seed default system_settings if empty
@@ -648,6 +660,22 @@ async function initDatabase() {
           triggered_by VARCHAR(100) DEFAULT 'System',
           details TEXT,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+
+      await conn.query(`
+        CREATE TABLE IF NOT EXISTS order_audit_logs (
+          id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          order_id INT UNSIGNED,
+          order_number VARCHAR(50),
+          action VARCHAR(50) NOT NULL,
+          actor_id INT UNSIGNED,
+          actor_name VARCHAR(100),
+          reason VARCHAR(255),
+          details TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_order_audit_order_id (order_id),
+          INDEX idx_order_audit_action (action)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
       `);
     } catch (migErr) {
