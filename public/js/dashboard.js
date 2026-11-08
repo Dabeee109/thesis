@@ -3375,9 +3375,6 @@ async function toggleStoreOperationalStatus() {
     if (btn) btn.disabled = false;
   }
 }
-    if (btn) btn.disabled = false;
-  }
-}
 
 async function loadOperatingHoursSettings() {
   try {
