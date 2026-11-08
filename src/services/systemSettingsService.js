@@ -130,7 +130,7 @@ async function updateSystemSettings(data = {}) {
          WHERE id = 1`,
         [cachedSettings.chatbot_enabled, cachedSettings.store_open_time, cachedSettings.store_close_time, cachedSettings.store_timezone]
       );
-    } catch (e) {}
+    } catch (e) { }
   } catch (err) {
     console.error('[SystemSettingsService Error] Failed to persist system settings:', err);
     throw err;
@@ -205,7 +205,7 @@ function isStoreOpen(date = new Date()) {
 }
 
 // Initial warm-up on process start
-getSystemSettings().catch(() => {});
+getSystemSettings().catch(() => { });
 
 module.exports = {
   getSystemSettings,

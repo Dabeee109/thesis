@@ -18,7 +18,8 @@ const {
   sendImageAttachment,
   sendQuickReplies,
   sendGenericTemplate,
-  sendButtonTemplate
+  sendButtonTemplate,
+  resolveMessengerImageUrl
 } = require('./messengerService');
 const {
   isRemovalIntent,
@@ -2869,11 +2870,11 @@ async function sendFullMenu(psid, session) {
     }
     subtitle = subtitle.substring(0, 80);
 
-    let imageUrl = it.image_url || 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=500&auto=format&fit=crop&q=60';
-    if (imageUrl.startsWith('/')) {
-      const base = (config.appUrl || '').replace(/\/$/, '');
-      if (base) imageUrl = `${base}${imageUrl}`;
-    }
+    const imageUrl = resolveMessengerImageUrl(it.image_url, {
+      name: it.name,
+      category: it.category_name,
+      subtitle: it.description
+    });
 
     return {
       title,
@@ -2924,11 +2925,11 @@ async function sendCategoryMenu(psid, slug) {
   }
 
   const elements = items.slice(0, 10).map(it => {
-    let imageUrl = it.image_url || 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=500&auto=format&fit=crop&q=60';
-    if (imageUrl.startsWith('/')) {
-      const base = (config.appUrl || '').replace(/\/$/, '');
-      if (base) imageUrl = `${base}${imageUrl}`;
-    }
+    const imageUrl = resolveMessengerImageUrl(it.image_url, {
+      name: it.name,
+      category: it.category_name,
+      subtitle: it.description
+    });
     return {
       title: `${it.name} · ${peso(it.price)}`.substring(0, 80),
       subtitle: String(it.description || '').substring(0, 80),

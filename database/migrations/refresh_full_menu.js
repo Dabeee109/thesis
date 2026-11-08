@@ -19,7 +19,7 @@ const verifiedCategories = [
 
 const verifiedMenuItems = [
   // PREMIUM DRINKS
-  { category: 'Drinks & Milktea', name: 'Biscoff Cheesecake', description: 'Rich creamy cheesecake blend topped with crushed Lotus Biscoff', price: 169.00, stock: 30 },
+  { category: 'Drinks & Milktea', name: 'Biscoff Cheesecake', description: 'Rich creamy cheesecake blend topped with crushed Lotus Biscoff', price: 169.00, stock: 30, image_url: 'https://images.unsplash.com/photo-1533134242443-d4fd215305ad?w=600&auto=format&fit=crop&q=80' },
   { category: 'Drinks & Milktea', name: 'Choco Java Chips', description: 'Decadent chocolate blend infused with premium java chips', price: 169.00, stock: 30 },
   { category: 'Drinks & Milktea', name: "Diner's Signature Drink", description: 'House-crafted specialty blend with signature flavor profile', price: 149.00, stock: 40 },
   { category: 'Drinks & Milktea', name: 'Oreo Blast', description: 'Creamy cookies and cream indulgence loaded with crushed Oreos', price: 149.00, stock: 35 },
@@ -203,9 +203,9 @@ async function runMigration() {
     const categoryId = categoryMap.get(item.category) || 1;
     const [res] = await db.query(
       `INSERT INTO menu_items (
-        category_id, category, name, description, price, stock_quantity, status, is_available, is_bestseller, preparation_time_min, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 'AVAILABLE', 1, 0, 15, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-      [categoryId, item.category, item.name, item.description, item.price, item.stock]
+        category_id, category, name, description, price, stock_quantity, image_url, status, is_available, is_bestseller, preparation_time_min, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'AVAILABLE', 1, 0, 15, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      [categoryId, item.category, item.name, item.description, item.price, item.stock, item.image_url || null]
     );
 
     const menuItemId = res.insertId || res.lastInsertRowid;

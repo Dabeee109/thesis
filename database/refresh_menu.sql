@@ -34,9 +34,9 @@ DELETE FROM `menu_items`;
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- 3. Populate Fresh Verified Menu Items (91 Items Across 8 Board Categories)
-INSERT INTO `menu_items` (`category`, `name`, `description`, `price`, `stock_quantity`, `status`, `is_available`) VALUES
+INSERT INTO `menu_items` (`category`, `name`, `description`, `price`, `stock_quantity`, `status`, `is_available`, `image_url`) VALUES
 -- PREMIUM DRINKS
-('Drinks & Milktea', 'Biscoff Cheesecake', 'Rich creamy cheesecake blend topped with crushed Lotus Biscoff', 169.00, 30, 'AVAILABLE', 1),
+('Drinks & Milktea', 'Biscoff Cheesecake', 'Rich creamy cheesecake blend topped with crushed Lotus Biscoff', 169.00, 30, 'AVAILABLE', 1, 'https://images.unsplash.com/photo-1533134242443-d4fd215305ad?w=600&auto=format&fit=crop&q=80'),
 ('Drinks & Milktea', 'Choco Java Chips', 'Decadent chocolate blend infused with premium java chips', 169.00, 30, 'AVAILABLE', 1),
 ('Drinks & Milktea', "Diner's Signature Drink", 'House-crafted specialty blend with signature flavor profile', 149.00, 40, 'AVAILABLE', 1),
 ('Drinks & Milktea', 'Oreo Blast', 'Creamy cookies and cream indulgence loaded with crushed Oreos', 149.00, 35, 'AVAILABLE', 1),
