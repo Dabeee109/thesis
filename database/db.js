@@ -252,7 +252,7 @@ function initSqliteFallback() {
       if (storeCount && storeCount.count === 0) {
         sqliteDb.prepare(`
           INSERT INTO store_settings (id, gcash_account_name, gcash_account_number, gcash_qr_image_url, store_name, store_address, store_latitude, store_longitude, max_delivery_radius_km)
-          VALUES (1, 'Diner\\'s Cafe - Tondo Branch', '09171234567', '/uploads/qr/gcash_qr_CHECKOUT.png', 'Diner\\'s Cafe Tondo', 'Diner\\'s Cafe, Tondo, Manila', 14.6143686, 120.9642334, 3.00)
+          VALUES (1, 'Diner''s Cafe - Tondo Branch', '09171234567', '/uploads/qr/gcash_qr_CHECKOUT.png', 'Diner''s Cafe Tondo', 'Diner''s Cafe, Tondo, Manila', 14.6143686, 120.9642334, 3.00)
         `).run();
       }
     } catch (e) {
