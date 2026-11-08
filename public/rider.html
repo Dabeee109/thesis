@@ -5,9 +5,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Rider Dispatch Portal | Diner's Cafe</title>
-  <link rel="manifest" href="manifest.json">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/assets/app-icon.svg" type="image/svg+xml">
   <meta name="theme-color" content="#d4a373">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="css/style.css">
   <style>
     .rider-container {
@@ -17,6 +19,13 @@
       min-height: 100vh;
       display: flex;
       flex-direction: column;
+    }
+
+    @media (min-width: 768px) {
+      .rider-container {
+        max-width: 900px;
+        padding: 24px;
+      }
     }
 
     .rider-header {
@@ -596,6 +605,8 @@
       }
     }
   </script>
+  <!-- Smart App Installation Floating Banner -->
+  <script src="/js/app-install-banner.js"></script>
 </body>
 
 </html>

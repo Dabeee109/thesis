@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2a1810"/>
+      <stop offset="50%" stop-color="#180f0a"/>
+      <stop offset="100%" stop-color="#0a0604"/>
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f5d0a9"/>
+      <stop offset="40%" stop-color="#d4a373"/>
+      <stop offset="100%" stop-color="#b07d4f"/>
+    </linearGradient>
+    <linearGradient id="cupGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#faedcd"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Background Squircle -->
+  <rect width="512" height="512" rx="120" fill="url(#bgGrad)"/>
+  <rect x="12" y="12" width="488" height="488" rx="110" fill="none" stroke="url(#goldGrad)" stroke-width="6" opacity="0.8"/>
+
+  <!-- Coffee Steam -->
+  <path d="M 200 160 Q 185 125 205 95 Q 225 65 210 35" fill="none" stroke="url(#goldGrad)" stroke-width="10" stroke-linecap="round" opacity="0.7"/>
+  <path d="M 256 150 Q 240 115 260 85 Q 280 55 265 25" fill="none" stroke="url(#goldGrad)" stroke-width="12" stroke-linecap="round" opacity="0.9"/>
+  <path d="M 312 160 Q 295 125 315 95 Q 335 65 320 35" fill="none" stroke="url(#goldGrad)" stroke-width="10" stroke-linecap="round" opacity="0.7"/>
+
+  <!-- Saucer -->
+  <ellipse cx="256" cy="380" rx="170" ry="22" fill="#140c08" stroke="url(#goldGrad)" stroke-width="8"/>
+  <ellipse cx="256" cy="376" rx="140" ry="14" fill="#24160e"/>
+
+  <!-- Coffee Cup Body -->
+  <path d="M 140 180 L 165 330 Q 175 365 256 365 Q 337 365 347 330 L 372 180 Z" fill="url(#cupGrad)" filter="url(#glow)"/>
+
+  <!-- Cup Rim -->
+  <ellipse cx="256" cy="180" rx="116" ry="24" fill="#faedcd" stroke="url(#goldGrad)" stroke-width="6"/>
+
+  <!-- Coffee Surface -->
+  <ellipse cx="256" cy="182" rx="104" ry="18" fill="#3a1d0d"/>
+  <ellipse cx="256" cy="183" rx="88" ry="12" fill="#5c2e17" opacity="0.8"/>
+
+  <!-- Cup Handle -->
+  <path d="M 360 210 Q 430 215 430 270 Q 430 325 345 320" fill="none" stroke="url(#cupGrad)" stroke-width="26" stroke-linecap="round"/>
+  <path d="M 360 210 Q 430 215 430 270 Q 430 325 345 320" fill="none" stroke="url(#goldGrad)" stroke-width="8" stroke-linecap="round" opacity="0.7"/>
+
+  <!-- Cup Accent Line / Heart -->
+  <path d="M 256 250 C 256 240, 240 230, 230 245 C 215 265, 256 295, 256 295 C 256 295, 297 265, 282 245 C 272 230, 256 240, 256 250 Z" fill="#b07d4f" opacity="0.9"/>
+
+  <!-- Text -->
+  <text x="256" y="445" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="34" font-weight="900" fill="url(#goldGrad)" text-anchor="middle" letter-spacing="4">DINER'S CAFE</text>
+  <text x="256" y="475" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="700" fill="#a89a8c" text-anchor="middle" letter-spacing="3">ORDERING &amp; DELIVERY</text>
+</svg>

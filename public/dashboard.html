@@ -4,9 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Operations Dashboard | Diner's Cafe</title>
-  <link rel="manifest" href="manifest.json">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/assets/app-icon.svg" type="image/svg+xml">
   <meta name="theme-color" content="#d4a373">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/dashboard.css">
   <script>
@@ -96,6 +98,9 @@
         </div>
 
         <div class="topbar-actions">
+          <a href="/download.html" target="_blank" class="btn btn-secondary btn-sm" title="Download & Install Mobile App for Phone & Tablet">
+            📱 Mobile App Hub
+          </a>
           <button id="btn-chatbot-toggle" class="btn btn-success btn-sm" onclick="handleChatbotToggleClick()" style="font-weight: 700;">
             🟢 AI Chatbot: Active (ON)
           </button>

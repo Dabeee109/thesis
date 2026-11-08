@@ -190,3 +190,4 @@ module.exports = {
   isStoreOpen,
   formatTime12h
 };
+
