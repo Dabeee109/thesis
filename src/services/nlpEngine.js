@@ -110,7 +110,7 @@ function isDeliveryDiningMode(diningMode) {
 /**
  * Conditional Checkout Information Prompt (Slot-Filling)
  * CASE A: Delivery -> Name, Phone number, Address, Landmark, Payment mode, note
- * CASE B: Dine In / Pick-up -> Name, Phone number, Payment mode, note
+ * CASE B: Dine In / Pick-up -> Name, Phone number, Arriving time, Payment mode, note
  */
 function getCheckoutInfoPrompt(session) {
   const mode = session?.dining_mode || (session?.orderType === 'delivery' ? 'Delivery' : 'Dine In');
@@ -126,20 +126,22 @@ note:`;
     return `Pakibigay po ang sumusunod para sa inyong order:
 Name:
 Phone number:
+Arriving time:
 Payment mode: (Cash or GCash)
 note:`;
   }
 }
 
 /**
- * Parse Customer Info (Address, Landmark, Name, Contact, Payment Mode, Note) from customer input
+ * Parse Customer Info (Address, Landmark, Arriving Time, Name, Contact, Payment Mode, Note) from customer input
  * @param {string} rawText 
  * @param {string} [diningMode]
- * @returns {{ address: string, landmark: string, name: string, contact: string, paymentMode: string, note: string }}
+ * @returns {{ address: string, landmark: string, arrivingTime: string, arriving_time: string, name: string, contact: string, paymentMode: string, note: string }}
  */
 function parseCustomerInfo(rawText, diningMode) {
   let address = '';
   let landmark = '';
+  let arrivingTime = '';
   let name = '';
   let contact = '';
   let paymentMode = 'Cash';
@@ -149,15 +151,17 @@ function parseCustomerInfo(rawText, diningMode) {
   const isDelivery = diningMode ? isDeliveryDiningMode(diningMode) : true;
 
   // 1. Labeled pattern matching
-  const addressMatch = clean.match(/(?:address|tirahan|location|table|counter)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\blandmark\b|\bname\b|\bpangalan\b|\bcontact\b|\bphone\b|\bmobile\b|\bpayment\b|\bmode\b|\bnote\b|\bnotes\b|$))/i);
-  const landmarkMatch = clean.match(/(?:landmark|tandaan|katabi|tapat)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\btirahan\b|\bname\b|\bpangalan\b|\bcontact\b|\bphone\b|\bmobile\b|\bpayment\b|\bmode\b|\bnote\b|\bnotes\b|$))/i);
-  const nameMatch = clean.match(/(?:name|pangalan)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\btirahan\b|\blandmark\b|\bcontact\b|\bphone\b|\bmobile\b|\bpayment\b|\bmode\b|\bnote\b|\bnotes\b|$))/i);
-  const contactMatch = clean.match(/(?:contact(?:\s*number)?|phone(?:\s*number)?|mobile|cellphone)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\btirahan\b|\blandmark\b|\bname\b|\bpangalan\b|\bpayment\b|\bmode\b|\bnote\b|\bnotes\b|$))/i);
-  const payMatch = clean.match(/(?:payment(?:\s*mode|\s*option)?|mode\s*of\s*payment|bayad)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\blandmark\b|\bname\b|\bcontact\b|\bphone\b|\bnote\b|\bnotes\b|$))/i);
-  const noteMatch = clean.match(/(?:note|notes|paalala|bilin|instruction|instructions)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\blandmark\b|\bname\b|\bcontact\b|\bphone\b|\bpayment\b|\bmode\b|$))/i);
+  const addressMatch = clean.match(/(?:address|tirahan|location|table|counter)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\blandmark\b|\barriving(?:\s*time)?\b|\barrival\b|\bname\b|\bpangalan\b|\bcontact\b|\bphone\b|\bmobile\b|\bpayment\b|\bmode\b|\bnote\b|\bnotes\b|$))/i);
+  const landmarkMatch = clean.match(/(?:landmark|tandaan|katabi|tapat)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\btirahan\b|\barriving(?:\s*time)?\b|\barrival\b|\bname\b|\bpangalan\b|\bcontact\b|\bphone\b|\bmobile\b|\bpayment\b|\bmode\b|\bnote\b|\bnotes\b|$))/i);
+  const arrivingMatch = clean.match(/(?:arriving(?:\s*time)?|arrival(?:\s*time)?|pickup(?:\s*time)?|pick-up(?:\s*time)?|time|oras|dating|eta)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\btirahan\b|\blandmark\b|\bname\b|\bpangalan\b|\bcontact\b|\bphone\b|\bmobile\b|\bpayment\b|\bmode\b|\bnote\b|\bnotes\b|$))/i);
+  const nameMatch = clean.match(/(?:name|pangalan)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\btirahan\b|\blandmark\b|\barriving(?:\s*time)?\b|\barrival\b|\bcontact\b|\bphone\b|\bmobile\b|\bpayment\b|\bmode\b|\bnote\b|\bnotes\b|$))/i);
+  const contactMatch = clean.match(/(?:contact(?:\s*number)?|phone(?:\s*number)?|mobile|cellphone)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\btirahan\b|\blandmark\b|\barriving(?:\s*time)?\b|\barrival\b|\bname\b|\bpangalan\b|\bpayment\b|\bmode\b|\bnote\b|\bnotes\b|$))/i);
+  const payMatch = clean.match(/(?:payment(?:\s*mode|\s*option)?|mode\s*of\s*payment|bayad)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\blandmark\b|\barriving(?:\s*time)?\b|\barrival\b|\bname\b|\bcontact\b|\bphone\b|\bnote\b|\bnotes\b|$))/i);
+  const noteMatch = clean.match(/(?:note|notes|paalala|bilin|instruction|instructions)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\blandmark\b|\barriving(?:\s*time)?\b|\barrival\b|\bname\b|\bcontact\b|\bphone\b|\bpayment\b|\bmode\b|$))/i);
 
   if (addressMatch) address = addressMatch[1].trim();
   if (landmarkMatch) landmark = landmarkMatch[1].trim();
+  if (arrivingMatch) arrivingTime = arrivingMatch[1].trim();
   if (nameMatch) name = nameMatch[1].trim();
   if (contactMatch) contact = contactMatch[1].trim();
   if (noteMatch) note = noteMatch[1].trim();
@@ -183,6 +187,9 @@ function parseCustomerInfo(rawText, diningMode) {
         lines.splice(i, 1);
       } else if (/^(?:landmark|tandaan|katabi|tapat)[:=-]?\s*/i.test(line) && !landmark) {
         landmark = line.replace(/^(?:landmark|tandaan|katabi|tapat)[:=-]?\s*/i, '').trim();
+        lines.splice(i, 1);
+      } else if (/^(?:arriving(?:\s*time)?|arrival(?:\s*time)?|pickup(?:\s*time)?|pick-up(?:\s*time)?|time|oras|dating|eta)[:=-]?\s*/i.test(line) && !arrivingTime) {
+        arrivingTime = line.replace(/^(?:arriving(?:\s*time)?|arrival(?:\s*time)?|pickup(?:\s*time)?|pick-up(?:\s*time)?|time|oras|dating|eta)[:=-]?\s*/i, '').trim();
         lines.splice(i, 1);
       } else if (/^(?:note|notes|paalala|bilin)[:=-]?\s*/i.test(line) && !note) {
         note = line.replace(/^(?:note|notes|paalala|bilin)[:=-]?\s*/i, '').trim();
@@ -232,6 +239,8 @@ function parseCustomerInfo(rawText, diningMode) {
   return {
     address: address.trim(),
     landmark: landmark.trim(),
+    arrivingTime: arrivingTime.trim(),
+    arriving_time: arrivingTime.trim(),
     name: name.trim(),
     contact: contact.trim(),
     paymentMode,
@@ -241,27 +250,16 @@ function parseCustomerInfo(rawText, diningMode) {
 
 /**
  * Plaintext Order Summary Layout
- * --- ORDER SUMMARY ---
- * Name: {Customer Name}
- * Phone number: {Phone Number}
- * Dining-mode: {Dine In / Pick-up}
- * Address: {Customer address}
- * Discount: {Discount Status}
- * Payment Mode: {Cash or GCash}
- * 
- * Orders:
- * - {Qty}x {Item Name}{Add-ons} (₱{Line Total})
- * 
- * Subtotal: ₱{Subtotal}
- * Discount: ₱{Discount Amount}
- * Delivery Fee: ₱0.00
- * TOTAL AMOUNT DUE: ₱{Total Amount Due}
+ * Template 1: Dine In / Pick-up
+ * Template 2: Delivery
  */
 function formatPlaintextOrderSummary({
   name,
   phone,
   diningMode = 'Delivery',
   address,
+  landmark = '',
+  note = '',
   discountType = 'None',
   paymentMode = 'Cash',
   cart = [],
@@ -275,13 +273,18 @@ function formatPlaintextOrderSummary({
   else if (/pick[\s-]*up|pickup|take[\s-]*out|takeout/i.test(diningMode)) formattedDiningMode = 'Pick-up';
   else formattedDiningMode = 'Delivery';
 
+  const isDelivery = formattedDiningMode === 'Delivery';
+
   let formattedAddress = address;
   const currentStoreAddress = getStoreAddress();
-  if (formattedDiningMode === 'Dine In' || formattedDiningMode === 'Pick-up') {
-    formattedAddress = currentStoreAddress;
+  if (!isDelivery) {
+    formattedAddress = currentStoreAddress || "Diner's Cafe, Tondo, Manila";
   } else if (!formattedAddress || /inside cafe|open seating|counter pickup|store counter/i.test(formattedAddress)) {
-    formattedAddress = currentStoreAddress;
+    formattedAddress = currentStoreAddress || "Diner's Cafe, Tondo, Manila";
   }
+
+  const effectiveNote = (note || '').trim() || 'None';
+  const effectiveLandmark = (landmark || '').trim() || 'None';
 
   const orderLines = (cart || []).map(item => {
     const qty = item.quantity || 1;
@@ -305,24 +308,47 @@ function formatPlaintextOrderSummary({
 
   const formattedSubtotal = Number(subtotal || 0).toFixed(2);
   const formattedDiscount = Number(discountAmount || 0).toFixed(2);
-  const formattedDeliveryFee = Number(formattedDiningMode === 'Delivery' ? (deliveryFee || 0) : 0).toFixed(2);
+  const formattedDeliveryFee = Number(isDelivery ? (deliveryFee || 0) : 0).toFixed(2);
   const formattedTotal = Number(total || 0).toFixed(2);
 
-  return `--- ORDER SUMMARY ---
+  if (isDelivery) {
+    return `--- ORDER SUMMARY ---
 Name: ${name || 'Customer'}
 Phone number: ${phone || ''}
-Dining-mode: ${formattedDiningMode}
+Dining-mode: Delivery
 Address: ${formattedAddress || ''}
+Landmark: ${effectiveLandmark}
 Discount: ${discountType || 'None'}
 Payment Mode: ${paymentMode || 'Cash'}
 
 Orders:
 ${orderLines}
 
+Note: ${effectiveNote}
+
 Subtotal: ₱${formattedSubtotal}
 Discount: ₱${formattedDiscount}
 Delivery Fee: ₱${formattedDeliveryFee}
 TOTAL AMOUNT DUE: ₱${formattedTotal}`;
+  } else {
+    return `--- ORDER SUMMARY ---
+Name: ${name || 'Customer'}
+Phone number: ${phone || ''}
+Dining-mode: ${formattedDiningMode}
+Address: ${formattedAddress}
+Discount: ${discountType || 'None'}
+Payment Mode: ${paymentMode || 'Cash'}
+
+Orders:
+${orderLines}
+
+Note: ${effectiveNote}
+
+Subtotal: ₱${formattedSubtotal}
+Discount: ₱${formattedDiscount}
+Delivery Fee: ₱0.00
+TOTAL AMOUNT DUE: ₱${formattedTotal}`;
+  }
 }
 
 const formatPlaintextSummaryReceipt = formatPlaintextOrderSummary;
@@ -368,6 +394,8 @@ async function finalizeOrderSummaryAndPayment(psid, session) {
     phone: contactNumber,
     diningMode: diningMode,
     address: addressStr,
+    landmark: session.landmark || session.details?.landmark || '',
+    note: session.customer_notes || session.note || session.notes || session.details?.note || '',
     discountType: discountType,
     paymentMode: paymentMode,
     cart: session.cart || [],
@@ -2150,10 +2178,14 @@ async function handleTextInput(psid, session, rawText) {
       session.phone_number = contactNumber;
       session.payment_mode = parsed.paymentMode || (/\bgcash\b/i.test(rawText) ? 'GCash' : 'Cash');
       session.customer_notes = parsed.note || session.customer_notes || '';
+      session.note = session.customer_notes;
+      session.arriving_time = parsed.arrivingTime || parsed.arriving_time || session.arriving_time || '';
+      session.arrivingTime = session.arriving_time;
       if (!session.details) session.details = {};
       session.details.name = customerName;
       session.details.phone = contactNumber;
       session.details.address = currentStoreAddr;
+      session.details.arrivingTime = session.arriving_time;
       session.details.note = session.customer_notes;
       session.details.paymentMode = session.payment_mode;
     } else {

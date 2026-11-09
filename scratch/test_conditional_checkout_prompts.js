@@ -35,25 +35,30 @@ note:`;
   const expectedDineInPrompt = `Pakibigay po ang sumusunod para sa inyong order:
 Name:
 Phone number:
+Arriving time:
 Payment mode: (Cash or GCash)
 note:`;
-  assert.strictEqual(dineInPrompt, expectedDineInPrompt, 'Dine In prompt must omit Address');
+  assert.strictEqual(dineInPrompt, expectedDineInPrompt, 'Dine In prompt must contain Arriving time and omit Address');
 
   const pickupPrompt = getCheckoutInfoPrompt({ dining_mode: 'Pick-up' });
-  assert.strictEqual(pickupPrompt, expectedDineInPrompt, 'Pick-up prompt must omit Address');
+  assert.strictEqual(pickupPrompt, expectedDineInPrompt, 'Pick-up prompt must contain Arriving time and omit Address');
   console.log('✓ Test 1 Passed: Conditional prompts correctly return fields for Delivery and Dine In / Pick-up.');
 
-  // Test 2: Slot-filling parser parseCustomerInfo with 3 fields for Dine In / Pick-up
+  // Test 2: Slot-filling parser parseCustomerInfo with Arriving time for Dine In / Pick-up
   console.log('\n[Test 2] Testing parseCustomerInfo slot-filling for Dine In / Pick-up...');
   const dineInInput = `Name: Juan Dela Cruz
 Phone number: 09171234567
-Payment mode: Cash`;
+Arriving time: 3:30 PM
+Payment mode: Cash
+note: Extra napkins please`;
   const parsedDineIn = parseCustomerInfo(dineInInput, 'Dine In');
   assert.strictEqual(parsedDineIn.name, 'Juan Dela Cruz');
   assert.strictEqual(parsedDineIn.contact, '09171234567');
+  assert.strictEqual(parsedDineIn.arrivingTime, '3:30 PM');
   assert.strictEqual(parsedDineIn.paymentMode, 'Cash');
+  assert.strictEqual(parsedDineIn.note, 'Extra napkins please');
   assert.strictEqual(parsedDineIn.address, '', 'Address should not be filled from text if not provided');
-  console.log('✓ Test 2 Passed: 3-field customer info parsed accurately without forcing whole text into address.');
+  console.log('✓ Test 2 Passed: Customer info parsed accurately with arriving_time and note.');
 
   // Test 3: End-to-end Dine In Checkout Flow
   console.log('\n[Test 3] Testing End-to-End Dine In Checkout & Backend Auto-Assignment of STORE_ADDRESS...');

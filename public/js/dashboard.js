@@ -635,6 +635,15 @@ async function viewOrderDetails(orderId) {
       const diningModeLabel = diningModeNorm.includes('DINE') ? 'Dine-In' : (diningModeNorm.includes('PICK') ? 'Store Pick-Up' : 'Delivery');
       const customerNote = (o.note || o.customer_note || o.customer_notes || '').trim() || '-';
 
+      const orderStatusNorm = String(o.status || o.order_status || '').toLowerCase().trim();
+      const isPendingApprovalStatus = (orderStatusNorm === 'pending' || orderStatusNorm === 'pending_approval' || orderStatusNorm === 'awaiting_confirmation');
+      const showPaymentActionButtons = isPendingApprovalStatus && (
+        (o.payment_method || '').toLowerCase() === 'gcash' ||
+        o.payment_status === 'Pending Verification' ||
+        Boolean(o.payment_ref_number || o.reference_no || o.gcash_ref) ||
+        Boolean(o.payment_proof_image || o.receipt_url)
+      );
+
       const itemsHtml = (o.items || []).map(i => `
         <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed var(--border-subtle);">
           <div>
@@ -743,8 +752,8 @@ async function viewOrderDetails(orderId) {
             ` : ''}
           `}
 
-          <!-- Staff Verification Action Buttons (Requirement 4) -->
-          ${((o.payment_method || '').toLowerCase() === 'gcash' || o.payment_status === 'Pending Verification' || o.payment_ref_number || o.payment_proof_image) ? `
+          <!-- Staff Verification Action Buttons: Strictly SHOW for PENDING / PENDING_APPROVAL only; HIDE/REMOVE for IN_PREPARATION, DISPATCHED, DELIVERED, CANCELLED -->
+          ${showPaymentActionButtons ? `
             <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); display: flex; gap: 10px; flex-wrap: wrap;">
               <button type="button" class="btn btn-success btn-sm" onclick="markPaymentVerified(${o.id}, '${o.order_number}')" 
                       style="font-weight: 700; background: #10b981; color: #fff; border: none; padding: 7px 14px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;"
