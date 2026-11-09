@@ -339,19 +339,11 @@ function initSqliteFallback() {
       console.warn('[SQLite] store_settings seed check skipped:', e.message);
     }
 
-    // Seed sample promotions if empty
+    // Promotions deactivated per user request
     try {
-      const promoCount = sqliteDb.prepare(`SELECT COUNT(*) as count FROM promotions`).get();
-      if (promoCount && promoCount.count === 0) {
-        sqliteDb.prepare(`
-          INSERT INTO promotions (title, promo_type, banner_image_url, perk_description, applicable_scope, start_date, end_date, description, is_active)
-          VALUES 
-          ('Grand Weekend Acoustic Night & 20% OFF Cold Brews', 'Cafe Event', '/uploads/promotions/sample_acoustic_night.jpg', '20% OFF Cold Brews', 'Cold Brew Beverages', '2026-11-14', '2026-11-15', 'Samahan kami ngayong weekend para sa live acoustic music kasama ang 20% OFF sa lahat ng cold brews!', 1),
-          ('Buy 1 Take 1 Signature Spanish Latte', 'Bundle / BOGO', '/uploads/promotions/sample_bogo_latte.jpg', 'Buy 1 Take 1', 'Signature Spanish Latte', '2026-11-01', '2026-11-30', 'Double the energy! Buy 1 Take 1 sa ating bestselling Signature Spanish Latte all month long!', 1)
-        `).run();
-      }
+      sqliteDb.exec(`UPDATE promotions SET is_active = 0;`);
     } catch (e) {
-      console.warn('[SQLite] Promotions seed check skipped:', e.message);
+      // Ignore if table does not exist yet
     }
 
     // Migration: Add void request columns if not present

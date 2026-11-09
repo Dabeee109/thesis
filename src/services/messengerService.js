@@ -17,6 +17,7 @@ const attachmentCache = new Map();
  */
 function formatOrderSummaryReceipt(text) {
   if (!text || typeof text !== 'string') return text;
+  if (text.includes('--- ORDER SUMMARY ---')) return text;
 
   if (
     /summary\s+ng\s+(?:inyong\s+)?order/i.test(text) ||

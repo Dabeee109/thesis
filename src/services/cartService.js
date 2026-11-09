@@ -22,7 +22,12 @@ function addToCart(cart, item, qty = 1) {
   }
 
   const quantity = Math.max(1, parseInt(qty, 10) || 1);
-  const idx = cart.findIndex(c => c.menuItemId === item.id);
+  const addons = Array.isArray(item.addons)
+    ? item.addons
+    : (Array.isArray(item.addOns) ? item.addOns : (item.addon ? [item.addon] : []));
+  const addonKey = addons.map(a => typeof a === 'object' ? a.name : a).sort().join('+');
+
+  const idx = cart.findIndex(c => (c.menuItemId === item.id || c.id === item.id) && (c.addonKey || '') === addonKey);
 
   if (idx >= 0) {
     cart[idx].quantity += quantity;
@@ -33,7 +38,10 @@ function addToCart(cart, item, qty = 1) {
     menuItemId: item.id,
     name: item.name,
     price: parseFloat(item.price) || 0.00,
-    quantity
+    quantity,
+    addons,
+    addOns: addons,
+    addonKey
   };
   cart.push(line);
   return line;
@@ -97,7 +105,9 @@ function calculateItemLineTotal(item) {
   let addOnsPrice = parseFloat(item.addOnsPrice || item.customizationPrice || 0.0);
 
   if (Array.isArray(item.addOns)) {
-    addOnsPrice = item.addOns.reduce((sum, a) => sum + (parseFloat(a.price) || 0.0), 0.0);
+    addOnsPrice = item.addOns.reduce((sum, a) => sum + (typeof a === 'object' ? (parseFloat(a.price) || 20.0) : 20.0), 0.0);
+  } else if (Array.isArray(item.addons)) {
+    addOnsPrice = item.addons.reduce((sum, a) => sum + (typeof a === 'object' ? (parseFloat(a.price) || 20.0) : 20.0), 0.0);
   } else if (item.customizations && typeof item.customizations === 'object') {
     if (item.customizations.size === '22oz' && !addOnsPrice) addOnsPrice += 20.0;
     if (String(item.customizations.milk || '').toLowerCase().includes('oat') && !addOnsPrice) addOnsPrice += 40.0;
