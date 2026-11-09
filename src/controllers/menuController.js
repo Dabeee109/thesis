@@ -30,7 +30,7 @@ async function getMenu(req, res) {
       SELECT 
         m.id,
         m.category_id,
-        COALESCE(m.category, c.name) AS category,
+        COALESCE(c.name, 'All') AS category,
         m.name,
         m.description,
         m.price,

@@ -309,3 +309,66 @@ CREATE TABLE IF NOT EXISTS `store_settings` (
 INSERT INTO `store_settings` (`id`, `gcash_account_name`, `gcash_account_number`, `gcash_qr_image_url`, `store_name`, `store_address`, `store_latitude`, `store_longitude`, `max_delivery_radius_km`)
 VALUES (1, 'Diner''s Cafe - Tondo Branch', '09171234567', '/uploads/qr/gcash_qr_CHECKOUT.png', 'Diner''s Cafe Tondo', 'Diner''s Cafe, Tondo, Manila', 14.61436860, 120.96423340, 3.00)
 ON DUPLICATE KEY UPDATE `id` = `id`;
+
+-- 17. System Settings Table (Bot status, operational hours, dynamic fare factors)
+CREATE TABLE IF NOT EXISTS `system_settings` (
+  `id` INT PRIMARY KEY DEFAULT 1,
+  `chatbot_enabled` TINYINT(1) DEFAULT 1,
+  `store_open_time` VARCHAR(20) DEFAULT '09:00:00',
+  `store_close_time` VARCHAR(20) DEFAULT '21:00:00',
+  `store_timezone` VARCHAR(50) DEFAULT 'Asia/Manila',
+  `is_manual_override` TINYINT(1) DEFAULT 0,
+  `override_at` DATETIME NULL,
+  `override_by` VARCHAR(100) NULL,
+  `fare_base` DECIMAL(10,2) DEFAULT 49.00,
+  `fare_per_05km` DECIMAL(10,2) DEFAULT 12.00,
+  `fare_fuel_cost` DECIMAL(10,2) DEFAULT 2.83,
+  `fare_maintenance` DECIMAL(10,2) DEFAULT 7.50,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO `system_settings` (`id`, `chatbot_enabled`, `store_open_time`, `store_close_time`, `store_timezone`)
+VALUES (1, 1, '09:00:00', '21:00:00', 'Asia/Manila')
+ON DUPLICATE KEY UPDATE `id` = `id`;
+
+-- 18. Store Status Audit Logs Table
+CREATE TABLE IF NOT EXISTS `store_status_audit` (
+  `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `previous_status` VARCHAR(20),
+  `new_status` VARCHAR(20),
+  `is_manual_override` TINYINT(1) DEFAULT 0,
+  `trigger_type` VARCHAR(50),
+  `triggered_by` VARCHAR(100) DEFAULT 'System',
+  `details` TEXT,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 19. Order Audit Logs Table
+CREATE TABLE IF NOT EXISTS `order_audit_logs` (
+  `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `order_id` INT UNSIGNED,
+  `order_number` VARCHAR(50),
+  `action` VARCHAR(50) NOT NULL,
+  `actor_id` INT UNSIGNED,
+  `actor_name` VARCHAR(100),
+  `reason` VARCHAR(255),
+  `details` TEXT,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_order_audit_order_id` (`order_id`),
+  INDEX `idx_order_audit_action` (`action`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 20. Delivery Fare Config Table
+CREATE TABLE IF NOT EXISTS `delivery_fare_config` (
+  `id` INT PRIMARY KEY,
+  `fare_base` DECIMAL(10,2) DEFAULT 49.00,
+  `fare_per_05km` DECIMAL(10,2) DEFAULT 12.00,
+  `fare_fuel_cost` DECIMAL(10,2) DEFAULT 2.83,
+  `fare_maintenance` DECIMAL(10,2) DEFAULT 7.50,
+  `updated_by` VARCHAR(100) DEFAULT 'Admin',
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO `delivery_fare_config` (`id`, `fare_base`, `fare_per_05km`, `fare_fuel_cost`, `fare_maintenance`, `updated_by`)
+VALUES (1, 49.00, 12.00, 2.83, 7.50, 'Admin')
+ON DUPLICATE KEY UPDATE `id` = `id`;

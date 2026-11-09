@@ -13,6 +13,7 @@ function initSqliteFallback() {
     const Database = require('better-sqlite3');
     const dbPath = process.env.SQLITE_PATH || path.join(__dirname, 'diners_cafe.sqlite');
     sqliteDb = new Database(dbPath);
+    useFallback = true;
     sqliteDb.pragma('journal_mode = WAL');
     sqliteDb.pragma('foreign_keys = ON');
 
@@ -647,57 +648,30 @@ async function initDatabase() {
 
     // MySQL idempotent migrations
     try {
-      const cols = [
-        { table: 'customers', column: 'session_json', type: 'TEXT NULL' },
-        { table: 'orders', column: 'feedback_requested_at', type: 'DATETIME NULL' },
-        { table: 'orders', column: 'gcash_ref', type: 'VARCHAR(100) NULL' },
-        { table: 'orders', column: 'receipt_url', type: 'TEXT NULL' },
-        { table: 'menu_items', column: 'synonyms', type: 'VARCHAR(255) NULL' },
-        { table: 'menu_items', column: 'is_deleted', type: 'TINYINT(1) NOT NULL DEFAULT 0' },
-        { table: 'menu_items', column: 'stock_quantity', type: 'INT NOT NULL DEFAULT 0' },
-        { table: 'orders', column: 'customer_phone', type: 'VARCHAR(50) NULL' },
-        { table: 'orders', column: 'payment_proof_image', type: 'VARCHAR(500) NULL' },
-        { table: 'orders', column: 'payment_ref_number', type: 'VARCHAR(100) NULL' },
-        { table: 'orders', column: 'payment_status', type: "VARCHAR(50) DEFAULT 'Pending'" },
-        { table: 'orders', column: 'customer_lat', type: 'DECIMAL(10, 7) NULL' },
-        { table: 'orders', column: 'customer_lng', type: 'DECIMAL(10, 7) NULL' },
-        { table: 'orders', column: 'void_status', type: 'VARCHAR(50) NULL' },
-        { table: 'orders', column: 'void_requested_by', type: 'VARCHAR(100) NULL' },
-        { table: 'orders', column: 'void_reason', type: 'TEXT NULL' },
-        { table: 'orders', column: 'void_requested_at', type: 'DATETIME NULL' },
-        { table: 'payments', column: 'receipt_url', type: 'TEXT NULL' },
-        { table: 'deliveries', column: 'customer_lat', type: 'DECIMAL(10, 7) NULL' },
-        { table: 'deliveries', column: 'customer_lng', type: 'DECIMAL(10, 7) NULL' },
-        { table: 'system_settings', column: 'is_manual_override', type: 'TINYINT(1) DEFAULT 0' },
-        { table: 'system_settings', column: 'override_at', type: 'DATETIME NULL' },
-        { table: 'system_settings', column: 'override_by', type: 'VARCHAR(100) NULL' },
-        { table: 'system_settings', column: 'fare_base', type: 'DECIMAL(10,2) DEFAULT 49.00' },
-        { table: 'system_settings', column: 'fare_per_05km', type: 'DECIMAL(10,2) DEFAULT 12.00' },
-        { table: 'system_settings', column: 'fare_fuel_cost', type: 'DECIMAL(10,2) DEFAULT 2.83' },
-        { table: 'system_settings', column: 'fare_maintenance', type: 'DECIMAL(10,2) DEFAULT 7.50' }
-      ];
-      for (const c of cols) {
-        const [rows] = await conn.query(
-          `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
-          [config.db.database, c.table, c.column]
-        );
-        if (!rows.length) {
-          await conn.query(`ALTER TABLE ${c.table} ADD COLUMN ${c.column} ${c.type}`);
-          console.log(`[Database] Added column ${c.column} to MySQL table ${c.table}`);
-        }
-      }
+      // 1. Ensure core auxiliary tables exist first
+      await conn.query(`
+        CREATE TABLE IF NOT EXISTS system_settings (
+          id INT PRIMARY KEY DEFAULT 1,
+          chatbot_enabled TINYINT(1) DEFAULT 1,
+          store_open_time VARCHAR(20) DEFAULT '09:00:00',
+          store_close_time VARCHAR(20) DEFAULT '21:00:00',
+          store_timezone VARCHAR(50) DEFAULT 'Asia/Manila',
+          is_manual_override TINYINT(1) DEFAULT 0,
+          override_at DATETIME NULL,
+          override_by VARCHAR(100) NULL,
+          fare_base DECIMAL(10,2) DEFAULT 49.00,
+          fare_per_05km DECIMAL(10,2) DEFAULT 12.00,
+          fare_fuel_cost DECIMAL(10,2) DEFAULT 2.83,
+          fare_maintenance DECIMAL(10,2) DEFAULT 7.50,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `).catch(err => console.warn('[Database] system_settings table check:', err.message));
 
       await conn.query(`
-        CREATE TABLE IF NOT EXISTS admin_gcash_transactions (
-          id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-          reference_number VARCHAR(100) NOT NULL UNIQUE,
-          amount DECIMAL(10,2) NOT NULL,
-          status ENUM('UNCLAIMED', 'MATCHED') NOT NULL DEFAULT 'UNCLAIMED',
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          INDEX idx_admin_gcash_ref (reference_number),
-          INDEX idx_admin_gcash_status (status)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-      `);
+        INSERT INTO system_settings (id, chatbot_enabled, store_open_time, store_close_time, store_timezone)
+        VALUES (1, 1, '09:00:00', '21:00:00', 'Asia/Manila')
+        ON DUPLICATE KEY UPDATE id=id;
+      `).catch(() => {});
 
       await conn.query(`
         CREATE TABLE IF NOT EXISTS store_status_audit (
@@ -710,7 +684,19 @@ async function initDatabase() {
           details TEXT,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-      `);
+      `).catch(err => console.warn('[Database] store_status_audit check:', err.message));
+
+      await conn.query(`
+        CREATE TABLE IF NOT EXISTS admin_gcash_transactions (
+          id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          reference_number VARCHAR(100) NOT NULL UNIQUE,
+          amount DECIMAL(10,2) NOT NULL,
+          status ENUM('UNCLAIMED', 'MATCHED') NOT NULL DEFAULT 'UNCLAIMED',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_admin_gcash_ref (reference_number),
+          INDEX idx_admin_gcash_status (status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `).catch(() => {});
 
       await conn.query(`
         CREATE TABLE IF NOT EXISTS order_audit_logs (
@@ -726,7 +712,7 @@ async function initDatabase() {
           INDEX idx_order_audit_order_id (order_id),
           INDEX idx_order_audit_action (action)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-      `);
+      `).catch(() => {});
 
       await conn.query(`
         CREATE TABLE IF NOT EXISTS delivery_fare_config (
@@ -738,13 +724,63 @@ async function initDatabase() {
           updated_by VARCHAR(100) DEFAULT 'Admin',
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-      `);
+      `).catch(() => {});
 
       await conn.query(`
         INSERT INTO delivery_fare_config (id, fare_base, fare_per_05km, fare_fuel_cost, fare_maintenance, updated_by)
         VALUES (1, 49.00, 12.00, 2.83, 7.50, 'Admin')
         ON DUPLICATE KEY UPDATE id=id;
-      `);
+      `).catch(() => {});
+
+      // 2. Ensure schema columns exist with isolated try-catches
+      const cols = [
+        { table: 'customers', column: 'session_json', type: 'TEXT NULL' },
+        { table: 'orders', column: 'feedback_requested_at', type: 'DATETIME NULL' },
+        { table: 'orders', column: 'gcash_ref', type: 'VARCHAR(100) NULL' },
+        { table: 'orders', column: 'receipt_url', type: 'TEXT NULL' },
+        { table: 'orders', column: 'is_preorder', type: 'TINYINT(1) DEFAULT 0' },
+        { table: 'orders', column: 'customer_phone', type: 'VARCHAR(50) NULL' },
+        { table: 'orders', column: 'payment_proof_image', type: 'VARCHAR(500) NULL' },
+        { table: 'orders', column: 'payment_ref_number', type: 'VARCHAR(100) NULL' },
+        { table: 'orders', column: 'payment_status', type: "VARCHAR(50) DEFAULT 'Pending'" },
+        { table: 'orders', column: 'customer_lat', type: 'DECIMAL(10, 7) NULL' },
+        { table: 'orders', column: 'customer_lng', type: 'DECIMAL(10, 7) NULL' },
+        { table: 'orders', column: 'void_status', type: 'VARCHAR(50) NULL' },
+        { table: 'orders', column: 'void_requested_by', type: 'VARCHAR(100) NULL' },
+        { table: 'orders', column: 'void_reason', type: 'TEXT NULL' },
+        { table: 'orders', column: 'void_requested_at', type: 'DATETIME NULL' },
+        { table: 'menu_items', column: 'category', type: 'VARCHAR(100) NULL AFTER category_id' },
+        { table: 'menu_items', column: 'status', type: "VARCHAR(50) DEFAULT 'AVAILABLE'" },
+        { table: 'menu_items', column: 'is_featured', type: 'TINYINT(1) DEFAULT 0' },
+        { table: 'menu_items', column: 'synonyms', type: 'VARCHAR(255) NULL' },
+        { table: 'menu_items', column: 'is_deleted', type: 'TINYINT(1) NOT NULL DEFAULT 0' },
+        { table: 'menu_items', column: 'stock_quantity', type: 'INT NOT NULL DEFAULT 0' },
+        { table: 'payments', column: 'receipt_url', type: 'TEXT NULL' },
+        { table: 'deliveries', column: 'customer_lat', type: 'DECIMAL(10, 7) NULL' },
+        { table: 'deliveries', column: 'customer_lng', type: 'DECIMAL(10, 7) NULL' },
+        { table: 'system_settings', column: 'is_manual_override', type: 'TINYINT(1) DEFAULT 0' },
+        { table: 'system_settings', column: 'override_at', type: 'DATETIME NULL' },
+        { table: 'system_settings', column: 'override_by', type: 'VARCHAR(100) NULL' },
+        { table: 'system_settings', column: 'fare_base', type: 'DECIMAL(10,2) DEFAULT 49.00' },
+        { table: 'system_settings', column: 'fare_per_05km', type: 'DECIMAL(10,2) DEFAULT 12.00' },
+        { table: 'system_settings', column: 'fare_fuel_cost', type: 'DECIMAL(10,2) DEFAULT 2.83' },
+        { table: 'system_settings', column: 'fare_maintenance', type: 'DECIMAL(10,2) DEFAULT 7.50' }
+      ];
+
+      for (const c of cols) {
+        try {
+          const [rows] = await conn.query(
+            `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+            [config.db.database, c.table, c.column]
+          );
+          if (!rows.length) {
+            await conn.query(`ALTER TABLE ${c.table} ADD COLUMN ${c.column} ${c.type}`);
+            console.log(`[Database] Added column ${c.column} to MySQL table ${c.table}`);
+          }
+        } catch (colErr) {
+          // Individual table/column check fallback
+        }
+      }
     } catch (migErr) {
       console.warn('[Database] MySQL migration check warning:', migErr.message);
     }

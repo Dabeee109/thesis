@@ -136,18 +136,10 @@ async function runMigration() {
   console.log('[Migration] Starting Menu Hard Reset and Full Population...');
 
   // Ensure columns exist on menu_items
-  try {
-    await db.query(`ALTER TABLE menu_items ADD COLUMN category VARCHAR(100) DEFAULT NULL`);
-  } catch (e) {}
-  try {
-    await db.query(`ALTER TABLE menu_items ADD COLUMN status VARCHAR(50) DEFAULT 'AVAILABLE'`);
-  } catch (e) {}
-  try {
-    await db.query(`ALTER TABLE menu_items ADD COLUMN is_featured BOOLEAN DEFAULT 0`);
-  } catch (e) {}
-  try {
-    await db.query(`ALTER TABLE menu_items ADD COLUMN stock_quantity INT DEFAULT 50`);
-  } catch (e) {}
+  try { await db.query(`ALTER TABLE menu_items ADD COLUMN category VARCHAR(100) DEFAULT NULL`); } catch (e) {}
+  try { await db.query(`ALTER TABLE menu_items ADD COLUMN status VARCHAR(50) DEFAULT 'AVAILABLE'`); } catch (e) {}
+  try { await db.query(`ALTER TABLE menu_items ADD COLUMN is_featured BOOLEAN DEFAULT 0`); } catch (e) {}
+  try { await db.query(`ALTER TABLE menu_items ADD COLUMN stock_quantity INT DEFAULT 50`); } catch (e) {}
 
   // 1. Seed or Upsert Categories
   console.log('[Migration] Upserting 8 board categories...');
@@ -182,15 +174,21 @@ async function runMigration() {
   console.log('[Migration] Truncating/clearing legacy menu_items and inventory...');
   try {
     // Disable FK check during reset
-    await db.query(`PRAGMA foreign_keys = OFF;`).catch(() => {});
-    await db.query(`SET FOREIGN_KEY_CHECKS = 0;`).catch(() => {});
+    if (db.isUsingFallback && db.isUsingFallback()) {
+      await db.query(`PRAGMA foreign_keys = OFF;`).catch(() => {});
+    } else {
+      await db.query(`SET FOREIGN_KEY_CHECKS = 0;`).catch(() => {});
+    }
 
     await db.query(`DELETE FROM inventory_logs`);
     await db.query(`DELETE FROM inventory`);
     await db.query(`DELETE FROM menu_items`);
 
-    await db.query(`PRAGMA foreign_keys = ON;`).catch(() => {});
-    await db.query(`SET FOREIGN_KEY_CHECKS = 1;`).catch(() => {});
+    if (db.isUsingFallback && db.isUsingFallback()) {
+      await db.query(`PRAGMA foreign_keys = ON;`).catch(() => {});
+    } else {
+      await db.query(`SET FOREIGN_KEY_CHECKS = 1;`).catch(() => {});
+    }
   } catch (clearErr) {
     console.error('[Migration Error during reset]', clearErr);
   }
