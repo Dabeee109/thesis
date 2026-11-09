@@ -22,7 +22,7 @@
  *  - 15%  (0.15) : extreme_heat (or automatic if currentTime is between 11:00 AM and 3:00 PM)
  * 
  * Final Fare:
- *  - Subtotal * (1 + weatherSurchargeRate), rounded to the nearest 5.00 PHP.
+ *  - Subtotal * (1 + weatherSurchargeRate), formatted to exact 2-decimal currency (no ₱5 rounding).
  */
 
 const MAX_DELIVERY_DISTANCE_KM = 3.0;
@@ -156,8 +156,8 @@ function calculateDeliveryFare(distanceKm, vehicleType = 'motorcycle', weatherCo
   const surchargeAmount = subtotal * surchargeRate;
   const rawFinalFare = subtotal * (1 + surchargeRate);
 
-  // Round to the nearest 5.00 PHP
-  const finalFare = Math.round(rawFinalFare / 5) * 5;
+  // Exact 2-decimal currency formatting (no ₱5 rounding)
+  const finalFare = Number(rawFinalFare.toFixed(2));
 
   return {
     distanceKm: parseFloat(dist.toFixed(2)),
