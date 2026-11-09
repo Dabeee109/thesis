@@ -295,10 +295,10 @@ CREATE TABLE IF NOT EXISTS `promotions` (
 -- 16. Store Settings Table (Branch profile, GPS coordinates & dispatch boundaries)
 CREATE TABLE IF NOT EXISTS `store_settings` (
   `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `gcash_account_name` VARCHAR(255) NOT NULL DEFAULT 'Diner\\'s Cafe',
+  `gcash_account_name` VARCHAR(255) NOT NULL DEFAULT 'Diner''s Cafe',
   `gcash_account_number` VARCHAR(20) NOT NULL DEFAULT '09XXXXXXXXX',
   `gcash_qr_image_url` VARCHAR(500) DEFAULT NULL,
-  `store_name` VARCHAR(255) NOT NULL DEFAULT 'Diner\\'s Cafe - Main Branch',
+  `store_name` VARCHAR(255) NOT NULL DEFAULT 'Diner''s Cafe - Main Branch',
   `store_address` TEXT NOT NULL,
   `store_latitude` DECIMAL(10,8) NOT NULL DEFAULT 14.57940000,
   `store_longitude` DECIMAL(11,8) NOT NULL DEFAULT 121.03590000,
@@ -307,5 +307,5 @@ CREATE TABLE IF NOT EXISTS `store_settings` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO `store_settings` (`id`, `gcash_account_name`, `gcash_account_number`, `gcash_qr_image_url`, `store_name`, `store_address`, `store_latitude`, `store_longitude`, `max_delivery_radius_km`)
-VALUES (1, 'Diner\\'s Cafe - Tondo Branch', '09171234567', '/uploads/qr/gcash_qr_CHECKOUT.png', 'Diner\\'s Cafe Tondo', 'Diner\\'s Cafe, Tondo, Manila', 14.61436860, 120.96423340, 3.00)
+VALUES (1, 'Diner''s Cafe - Tondo Branch', '09171234567', '/uploads/qr/gcash_qr_CHECKOUT.png', 'Diner''s Cafe Tondo', 'Diner''s Cafe, Tondo, Manila', 14.61436860, 120.96423340, 3.00)
 ON DUPLICATE KEY UPDATE `id` = `id`;
