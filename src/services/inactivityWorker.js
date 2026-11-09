@@ -37,14 +37,10 @@ async function checkInactivity(deps = {}) {
   const candidatePsids = new Set(userSessions.keys());
 
   try {
-    const timeFilter = (db.isUsingFallback && db.isUsingFallback()) 
-      ? "updated_at >= datetime('now', '-2 hours')" 
-      : "updated_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)";
-
     const [dbCustomers] = await db.query(
       `SELECT psid FROM customers 
        WHERE psid IS NOT NULL 
-         AND (conversation_state NOT IN ('IDLE', 'idle') OR (cart_json IS NOT NULL AND cart_json != '[]') OR ${timeFilter})`
+         AND (conversation_state NOT IN ('IDLE', 'idle') OR (cart_json IS NOT NULL AND cart_json != '[]') OR updated_at >= datetime('now', '-2 hours'))`
     );
     (dbCustomers || []).forEach(c => {
       if (c.psid) candidatePsids.add(String(c.psid));

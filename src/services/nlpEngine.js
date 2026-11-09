@@ -3093,10 +3093,8 @@ async function handleAddonSelection(psid, session, rawInput) {
  */
 async function handleAddItemPayload(psid, session, menuItemId) {
   const [rows] = await db.query(
-    `SELECT m.id, m.name, m.price, COALESCE(c.name, '') AS category, m.is_available, i.stock_quantity 
-     FROM menu_items m 
-     LEFT JOIN categories c ON c.id = m.category_id
-     JOIN inventory i ON i.menu_item_id = m.id 
+    `SELECT m.id, m.name, m.price, m.category, m.is_available, i.stock_quantity 
+     FROM menu_items m JOIN inventory i ON i.menu_item_id = m.id 
      WHERE m.id = ?`,
     [menuItemId]
   );
