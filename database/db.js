@@ -624,7 +624,15 @@ async function initDatabase() {
   }
 
   try {
-    pool = mysql.createPool({
+    const isCloudHost = config.db.host && (
+      config.db.host.includes('tidbcloud.com') ||
+      config.db.host.includes('aivencloud.com') ||
+      config.db.host.includes('clever-cloud.com') ||
+      process.env.DB_SSL === 'true' ||
+      process.env.DB_SSL === '1'
+    );
+
+    const poolOptions = {
       host: config.db.host,
       port: config.db.port,
       user: config.db.user,
@@ -633,8 +641,14 @@ async function initDatabase() {
       waitForConnections: true,
       connectionLimit: 10,
       queueLimit: 0,
-      connectTimeout: 2000
-    });
+      connectTimeout: 15000
+    };
+
+    if (isCloudHost) {
+      poolOptions.ssl = { minVersion: 'TLSv1.2', rejectUnauthorized: true };
+    }
+
+    pool = mysql.createPool(poolOptions);
 
     const conn = await pool.getConnection();
     await conn.ping();
