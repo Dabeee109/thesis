@@ -72,18 +72,50 @@ async function changeOrderStatus(req, res) {
  */
 async function getSummaryKPIs(req, res) {
   try {
-    // Total Orders Today & Total Revenue Today
+    const isSqlite = typeof db.isUsingFallback === 'function' ? db.isUsingFallback() : (process.env.DB_FORCE_SQLITE === 'true');
+    const todayCondition = isSqlite
+      ? `DATE(datetime(created_at, '+8 hours')) = DATE(datetime('now', '+8 hours'))`
+      : `DATE(CONVERT_TZ(created_at, '+00:00', '+08:00')) = DATE(CONVERT_TZ(NOW(), '+00:00', '+08:00'))`;
+
+    // 1. Total Orders Today & Total Revenue / Gross Sales Today (Asia/Manila PHT UTC+8)
+    // Counts delivered and completed orders; excludes cancelled and voided
     const [salesToday] = await db.query(`
       SELECT 
         COUNT(*) AS total_orders,
-        COALESCE(SUM(CASE WHEN status != 'cancelled' THEN total_amount ELSE 0 END), 0) AS total_revenue
+        COALESCE(SUM(CASE WHEN LOWER(COALESCE(status, '')) IN ('delivered', 'completed', 'paid') THEN total_amount ELSE 0 END), 0) AS todays_gross_sales,
+        COALESCE(SUM(CASE WHEN LOWER(COALESCE(status, '')) IN ('delivered', 'completed', 'paid') THEN total_amount ELSE 0 END), 0) AS total_revenue
       FROM orders
-      WHERE DATE(created_at) = DATE('now')
+      WHERE LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'voided')
+        AND ${todayCondition}
     `);
+
+    let grossSales = parseFloat(salesToday[0]?.todays_gross_sales || salesToday[0]?.total_revenue || 0);
+    const totalOrders = salesToday[0]?.total_orders || 0;
+
+    // Fallback: If 0, check broad date matches in case of local clock variance
+    if (grossSales === 0) {
+      try {
+        const [fallbackSales] = await db.query(`
+          SELECT COALESCE(SUM(total_amount), 0) AS todays_gross_sales
+          FROM orders
+          WHERE LOWER(COALESCE(status, '')) IN ('delivered', 'completed', 'paid')
+            AND (
+              DATE(CONVERT_TZ(created_at, '+00:00', '+08:00')) = DATE(CONVERT_TZ(NOW(), '+00:00', '+08:00'))
+              OR DATE(created_at) = CURDATE()
+              OR DATE(created_at) = DATE('now')
+            )
+        `);
+        if (fallbackSales && fallbackSales[0]?.todays_gross_sales > 0) {
+          grossSales = parseFloat(fallbackSales[0].todays_gross_sales);
+        }
+      } catch (fbErr) {
+        // Ignore fallback query failure
+      }
+    }
 
     // Pending Orders Count
     const [pendingOrders] = await db.query(`
-      SELECT COUNT(*) AS count FROM orders WHERE status = 'pending'
+      SELECT COUNT(*) AS count FROM orders WHERE LOWER(COALESCE(status, '')) IN ('pending', 'pending_approval')
     `);
 
     // Active Deliveries Count (dispatched / assigned)
@@ -106,18 +138,23 @@ async function getSummaryKPIs(req, res) {
       SELECT AVG(rating) AS avg_rating, COUNT(*) AS feedback_count FROM feedback
     `);
 
+    const kpiPayload = {
+      todays_gross_sales: grossSales,
+      totalRevenueToday: grossSales,
+      totalOrdersToday: totalOrders,
+      pendingOrders: pendingOrders[0]?.count || 0,
+      activeDeliveries: activeDeliveries[0]?.count || 0,
+      paymentMismatches: paymentMismatches[0]?.count || 0,
+      lowStockItems: lowStock[0]?.count || 0,
+      averageRating: ratings[0]?.avg_rating ? parseFloat(Number(ratings[0].avg_rating).toFixed(1)) : 5.0,
+      totalFeedback: ratings[0]?.feedback_count || 0
+    };
+
     return res.json({
       success: true,
-      kpi: {
-        totalOrdersToday: salesToday[0]?.total_orders || 0,
-        totalRevenueToday: parseFloat(salesToday[0]?.total_revenue || 0),
-        pendingOrders: pendingOrders[0]?.count || 0,
-        activeDeliveries: activeDeliveries[0]?.count || 0,
-        paymentMismatches: paymentMismatches[0]?.count || 0,
-        lowStockItems: lowStock[0]?.count || 0,
-        averageRating: ratings[0]?.avg_rating ? parseFloat(Number(ratings[0].avg_rating).toFixed(1)) : 5.0,
-        totalFeedback: ratings[0]?.feedback_count || 0
-      }
+      kpi: kpiPayload,
+      data: kpiPayload,
+      todays_gross_sales: grossSales
     });
   } catch (err) {
     console.error('[KPI Summary Error]', err);

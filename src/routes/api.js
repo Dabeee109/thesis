@@ -105,6 +105,8 @@ router.post('/feedback', feedbackController.submitFeedback);
 
 // 7. Reports & Business Analytics Routes (FR10)
 router.get('/reports/sales', authController.authMiddleware, reportController.getSalesReport);
+router.get('/analytics/reports', authController.authMiddleware, reportController.getSalesReport);
+router.get('/analytics/overview', authController.authMiddleware, orderController.getSummaryKPIs);
 router.get('/reports/delivery', authController.authMiddleware, reportController.getDeliveryReport);
 router.get('/reports/export-csv', authController.authMiddleware, reportController.exportOrdersCSV);
 

@@ -337,9 +337,12 @@ function handleRealtimeEvent(eventType, data) {
 async function loadKPIs() {
   try {
     const res = await API.get('/orders/summary/kpis');
-    if (res && res.kpi) {
-      const kpi = res.kpi;
-      document.getElementById('kpi-sales-today').innerText = `₱${kpi.totalRevenueToday.toFixed(2)}`;
+    if (res && (res.kpi || res.data)) {
+      const kpi = res.kpi || res.data;
+      const grossSales = (kpi.todays_gross_sales !== undefined)
+        ? parseFloat(kpi.todays_gross_sales)
+        : (kpi.totalRevenueToday !== undefined ? parseFloat(kpi.totalRevenueToday) : 0);
+      document.getElementById('kpi-sales-today').innerText = `₱${grossSales.toFixed(2)}`;
       document.getElementById('kpi-pending-orders').innerText = kpi.pendingOrders;
       document.getElementById('kpi-active-deliveries').innerText = kpi.activeDeliveries;
       document.getElementById('kpi-payment-mismatches').innerText = kpi.paymentMismatches;
@@ -2371,12 +2374,15 @@ async function loadReports() {
       const topTbody = document.getElementById('report-top-items-tbody');
       topTbody.innerHTML = '';
       (res.topItems || []).forEach(item => {
+        const catName = item.category_name || item.category || 'Uncategorized';
+        const units = item.total_units_sold !== undefined ? item.total_units_sold : (item.units_sold !== undefined ? item.units_sold : 0);
+        const rev = parseFloat(item.total_revenue !== undefined ? item.total_revenue : (item.revenue !== undefined ? item.revenue : 0));
         const tr = document.createElement('tr');
         tr.innerHTML = `
-          <td><strong>${item.item_name}</strong></td>
-          <td>${item.category_name}</td>
-          <td>${item.total_units_sold} units</td>
-          <td><strong>₱${parseFloat(item.total_revenue).toFixed(2)}</strong></td>
+          <td><strong>${escapeHtml(item.item_name || 'Item')}</strong></td>
+          <td>${escapeHtml(catName)}</td>
+          <td>${units} units</td>
+          <td><strong>₱${rev.toFixed(2)}</strong></td>
         `;
         topTbody.appendChild(tr);
       });

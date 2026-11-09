@@ -187,10 +187,7 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
       `SELECT id, name, price FROM menu_items WHERE id = ?`,
       [item.menuItemId]
     );
-    if (menuRows.length === 0) {
-      throw new Error(`Menu item #${item.menuItemId} not found.`);
-    }
-    const menuItem = menuRows[0];
+    const menuItem = menuRows && menuRows[0] ? menuRows[0] : null;
     let addonsCost = 0;
     const rawAddons = Array.isArray(item.addOns)
       ? item.addOns
@@ -199,14 +196,15 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
       addonsCost += typeof a === 'object' ? (parseFloat(a.price) || 20.0) : 20.0;
     });
 
-    const unitPrice = parseFloat(menuItem.price) + addonsCost;
+    const basePrice = menuItem ? parseFloat(menuItem.price) : parseFloat(item.unitPrice || item.price || item.price_at_time || 0);
+    const unitPrice = basePrice + addonsCost;
     const qty = parseInt(item.quantity, 10) || 1;
     const itemSubtotal = unitPrice * qty;
     subtotal += itemSubtotal;
 
     enrichedItems.push({
-      menuItemId: menuItem.id,
-      name: item.name || menuItem.name,
+      menuItemId: menuItem ? menuItem.id : (item.menuItemId || 0),
+      name: item.name || (menuItem ? menuItem.name : 'Cafe Item'),
       unitPrice,
       quantity: qty,
       subtotal: itemSubtotal,

@@ -16,9 +16,17 @@ function initSqliteFallback() {
     sqliteDb.pragma('journal_mode = WAL');
     sqliteDb.pragma('foreign_keys = ON');
 
-    // Register CONCAT function for cross-version SQLite compatibility
+    // Register CONCAT and CONVERT_TZ functions for cross-version SQLite compatibility
     try {
       sqliteDb.function('CONCAT', (...args) => args.filter(a => a !== null && a !== undefined).join(''));
+      sqliteDb.function('CONVERT_TZ', (val, fromTz, toTz) => {
+        if (!val) return null;
+        const d = (typeof val === 'string' && val.toLowerCase() === 'now') ? new Date() : new Date(val);
+        if (isNaN(d.getTime())) return val;
+        // Asia/Manila is UTC+8
+        const manilaTime = new Date(d.getTime() + 8 * 3600 * 1000);
+        return manilaTime.toISOString().replace('T', ' ').substring(0, 19);
+      });
     } catch (fnErr) {}
 
     // Create tables in SQLite

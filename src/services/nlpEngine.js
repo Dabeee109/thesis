@@ -430,7 +430,15 @@ async function finalizeOrderSummaryAndPayment(psid, session) {
         note: session.customer_notes || session.note || session.notes || null,
         paymentMethod: 'cash',
         amountPaid: 0,
-        items: (session.cart || []).map(c => ({ menuItemId: c.menuItemId || c.id, quantity: c.quantity || 1 })),
+        items: (session.cart || []).map(c => ({
+          menuItemId: c.menuItemId || c.id,
+          name: c.name,
+          quantity: c.quantity || 1,
+          unitPrice: c.price,
+          price: c.price,
+          price_at_time: c.price,
+          addOns: c.addOns || c.addons
+        })),
         deliveryFee,
         totalAmount: grandTotal,
         discountAmount,
@@ -473,7 +481,15 @@ async function finalizeOrderSummaryAndPayment(psid, session) {
         note: session.customer_notes || session.note || session.notes || null,
         paymentMethod: 'gcash',
         amountPaid: 0,
-        items: (session.cart || []).map(c => ({ menuItemId: c.menuItemId || c.id, quantity: c.quantity || 1 })),
+        items: (session.cart || []).map(c => ({
+          menuItemId: c.menuItemId || c.id,
+          name: c.name,
+          quantity: c.quantity || 1,
+          unitPrice: c.price,
+          price: c.price,
+          price_at_time: c.price,
+          addOns: c.addOns || c.addons
+        })),
         deliveryFee,
         totalAmount: grandTotal,
         discountAmount,
@@ -817,7 +833,15 @@ async function handlePaymentProofUpload(psid, session, imgAttachment) {
       note: pending.note || session.customer_notes || session.note || null,
       paymentMethod: 'gcash',
       amountPaid: 0,
-      items: (pending.items || session.cart || []).map(c => ({ menuItemId: c.menuItemId || c.id, quantity: c.quantity || 1 })),
+      items: (pending.items || session.cart || []).map(c => ({
+        menuItemId: c.menuItemId || c.id,
+        name: c.name,
+        quantity: c.quantity || 1,
+        unitPrice: c.price,
+        price: c.price,
+        price_at_time: c.price,
+        addOns: c.addOns || c.addons
+      })),
       deliveryFee: pending.deliveryFee || 0,
       totalAmount: pending.grandTotal || session.order_total || 0,
       paymentStatus: 'Pending Verification'
@@ -911,7 +935,15 @@ async function handlePaymentProofTextInput(psid, session, rawText) {
         paymentMethod: 'gcash',
         amountPaid: 0,
         referenceNo: refNum,
-        items: (pending.items || session.cart || []).map(c => ({ menuItemId: c.menuItemId || c.id, quantity: c.quantity || 1 })),
+        items: (pending.items || session.cart || []).map(c => ({
+        menuItemId: c.menuItemId || c.id,
+        name: c.name,
+        quantity: c.quantity || 1,
+        unitPrice: c.price,
+        price: c.price,
+        price_at_time: c.price,
+        addOns: c.addOns || c.addons
+      })),
         deliveryFee: pending.deliveryFee || 0,
         totalAmount: pending.grandTotal || session.order_total || 0,
         paymentStatus: 'Pending Verification'
