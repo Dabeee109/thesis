@@ -191,14 +191,22 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
       throw new Error(`Menu item #${item.menuItemId} not found.`);
     }
     const menuItem = menuRows[0];
-    const unitPrice = parseFloat(menuItem.price);
+    let addonsCost = 0;
+    const rawAddons = Array.isArray(item.addOns)
+      ? item.addOns
+      : (Array.isArray(item.addons) ? item.addons : (item.addon ? [item.addon] : []));
+    rawAddons.forEach(a => {
+      addonsCost += typeof a === 'object' ? (parseFloat(a.price) || 20.0) : 20.0;
+    });
+
+    const unitPrice = parseFloat(menuItem.price) + addonsCost;
     const qty = parseInt(item.quantity, 10) || 1;
     const itemSubtotal = unitPrice * qty;
     subtotal += itemSubtotal;
 
     enrichedItems.push({
       menuItemId: menuItem.id,
-      name: menuItem.name,
+      name: item.name || menuItem.name,
       unitPrice,
       quantity: qty,
       subtotal: itemSubtotal,

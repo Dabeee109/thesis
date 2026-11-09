@@ -253,21 +253,28 @@ function parseCustomerInfo(rawText, diningMode) {
  * Template 1: Dine In / Pick-up
  * Template 2: Delivery
  */
-function formatPlaintextOrderSummary({
-  name,
-  phone,
-  diningMode = 'Delivery',
-  address,
-  landmark = '',
-  note = '',
-  discountType = 'None',
-  paymentMode = 'Cash',
-  cart = [],
-  subtotal = 0,
-  discountAmount = 0,
-  deliveryFee = 0,
-  total = 0
-}) {
+function formatPlaintextOrderSummary(params = {}) {
+  const name = params.name;
+  const phone = params.phone || params.phone_number;
+  const diningMode = params.diningMode || params.dining_mode || 'Delivery';
+  const address = params.address || params.delivery_address;
+  const landmark = params.landmark || '';
+  const note = params.note || params.customer_note || '';
+  const discountType = params.discountType || (params.discount && params.discount.type) || 'None';
+  const paymentMode = params.paymentMode || params.payment_mode || params.paymentMethod || params.payment_method || 'Cash';
+  const cart = params.cart || [];
+  const subtotal = params.subtotal !== undefined
+    ? params.subtotal
+    : (params.order_subtotal !== undefined ? params.order_subtotal : (cart.length > 0 ? calculateCartSubtotal(cart) : 0));
+  const discountAmount = params.discountAmount !== undefined
+    ? params.discountAmount
+    : (params.discount_amount !== undefined ? params.discount_amount : (params.discount?.amount || 0));
+  const deliveryFee = params.deliveryFee !== undefined
+    ? params.deliveryFee
+    : (params.delivery_fee !== undefined ? params.delivery_fee : 0);
+  const total = params.total !== undefined
+    ? params.total
+    : (params.order_total !== undefined ? params.order_total : (params.total_amount !== undefined ? params.total_amount : (subtotal - discountAmount + deliveryFee)));
   let formattedDiningMode = diningMode;
   if (/dine[\s-]*in/i.test(diningMode)) formattedDiningMode = 'Dine In';
   else if (/pick[\s-]*up|pickup|take[\s-]*out|takeout/i.test(diningMode)) formattedDiningMode = 'Pick-up';
@@ -301,7 +308,10 @@ function formatPlaintextOrderSummary({
     const effectiveUnitPrice = basePrice + addonsCost;
     const lineTotal = (qty * effectiveUnitPrice).toFixed(2);
     const addonNames = rawAddons.map(a => typeof a === 'object' ? a.name : a);
-    const addonText = addonNames.length > 0 ? ` (+ ${addonNames.join(', ')})` : '';
+    let addonText = '';
+    if (addonNames.length > 0 && !item.name.toLowerCase().includes('w/')) {
+      addonText = ` (w/ ${addonNames.join(', ')})`;
+    }
 
     return `- ${qty}x ${item.name}${addonText} (₱${lineTotal})`;
   }).join('\n');
@@ -3128,10 +3138,11 @@ function isDrinkOrMilktea(item) {
  */
 function detectAddonInText(text) {
   if (!text) return null;
-  if (/\b(?:with|plus|may|lagyan\s*ng|add)?\s*(?:pearls?|tapioca|sago)\b/i.test(text)) return 'Tapioca Pearls';
-  if (/\b(?:with|plus|may|lagyan\s*ng|add)?\s*(?:cream\s*cheese|wall)\b/i.test(text)) return 'Cream Cheese Wall';
-  if (/\b(?:with|plus|may|lagyan\s*ng|add)?\s*(?:rainbow|crystals?|crystal|nata)\b/i.test(text)) return 'Rainbow Crystals';
+  if (/\b(?:with|plus|may|lagyan\s*ng|add)?\s*(?:pearls?|tapioca|sago)\b/i.test(text)) return 'Pearls';
+  if (/\b(?:with|plus|may|lagyan\s*ng|add)?\s*(?:nata\s*de\s*coco|nata|rainbow|crystals?)\b/i.test(text)) return 'Nata de Coco';
+  if (/\b(?:with|plus|may|lagyan\s*ng|add)?\s*(?:cream\s*cheese|creamcheese|wall)\b/i.test(text)) return 'Cream Cheese';
   if (/\b(?:with|plus|may|lagyan\s*ng|add)?\s*(?:coffee\s*jelly|espresso\s*jelly)\b/i.test(text)) return 'Coffee Jelly';
+  if (/\b(?:with|plus|may|lagyan\s*ng|add)?\s*(?:egg\s*pudding|pudding)\b/i.test(text)) return 'Egg Pudding';
   if (/\b(?:with|plus|may|lagyan\s*ng|add)?\s*(?:crushed\s*oreo|oreo)\b/i.test(text)) return 'Crushed Oreo';
   return null;
 }
@@ -3140,20 +3151,19 @@ function detectAddonInText(text) {
  * Prompt customer if they want to add add-ons for drinks & milk tea
  */
 async function promptDrinkAddons(psid, session, item, quantity) {
+  session.current_drink_item = { item, quantity };
   session.pendingDrinkOrder = { item, quantity };
   session.pendingItem = null;
   session.state = 'AWAITING_DRINK_ADDON';
   session.current_step = 'AWAITING_DRINK_ADDON';
   await saveSession(session);
 
-  const askAddonMsg = `Gusto niyo po ba itong lagyan ng Add-ons para sa inyong ${item.name}?\n\nAvailable Add-ons (+₱20 bawat isa):\n• Tapioca Pearls\n• Cream Cheese Wall\n• Rainbow Crystals\n• Coffee Jelly\n• Crushed Oreo`;
+  const askAddonMsg = "Nais niyo po ba itong lagyan ng Add-ons tulad ng Pearls, Nata de Coco, o Cream Cheese (+₱20 bawat isa)?";
   await sendQuickReplies(psid, askAddonMsg, [
-    { title: '+ Pearls (₱20)', payload: 'ADDON_PEARLS' },
-    { title: '+ Cream Cheese (₱20)', payload: 'ADDON_CREAM_CHEESE' },
-    { title: '+ Rainbow Jelly (₱20)', payload: 'ADDON_CRYSTALS' },
-    { title: '+ Coffee Jelly (₱20)', payload: 'ADDON_COFFEE_JELLY' },
-    { title: '+ Crushed Oreo (₱20)', payload: 'ADDON_OREO' },
-    { title: 'Wala na po / None', payload: 'ADDON_NONE' }
+    { title: 'Pearls (+₱20)', payload: 'ADDON_PEARLS' },
+    { title: 'Nata de Coco (+₱20)', payload: 'ADDON_NATA' },
+    { title: 'Cream Cheese (+₱20)', payload: 'ADDON_CREAM_CHEESE' },
+    { title: 'Wala / Skip', payload: 'ADDON_NONE' }
   ]);
 }
 
@@ -3161,53 +3171,119 @@ async function promptDrinkAddons(psid, session, item, quantity) {
  * Handle chosen add-on for drinks
  */
 async function handleAddonSelection(psid, session, rawInput) {
-  if (!session.pendingDrinkOrder) {
+  const pendingDrink = session.current_drink_item || session.pendingDrinkOrder;
+  if (!pendingDrink || !pendingDrink.item) {
     session.state = 'ORDERING';
     await sendTextMessage(psid, "Ano po ang nais ninyong i-order?");
     return;
   }
 
-  const { item, quantity } = session.pendingDrinkOrder;
+  const { item, quantity } = pendingDrink;
+  const qty = Math.max(1, parseInt(quantity, 10) || 1);
   const input = String(rawInput || '').trim();
 
+  // Scenario C: User Inquires About Options ("Ano ang mga add-ons?", "Anong meron?", "Options?", etc.)
+  const isInquiry = (
+    /ADDON_INQUIRY/i.test(input) ||
+    /\b(?:ano|anong|anu-ano|anu-anong|what|whats|what's|list|patingin|options?|choices?|available|pwede)\b.*\b(?:add[\s-]*ons?|addons?|meron|toppings?|idagdag)\b/i.test(input) ||
+    /^(?:ano|anong|anu-ano|anu-anong|what|whats|what's|ano\s*ba|patingin)\s+(?:ang|mga|ang\s*mga)?\s*(?:add[\s-]*ons?|addons?|toppings?|meron)\??$/i.test(input) ||
+    /^(?:anong\s*meron|ano\s*meron|options\??|choices\??|add[\s-]*ons?\??|addons\??|anong\s*add[\s-]*ons\??)$/i.test(input) ||
+    /\b(?:ano\s*ang\s*mga\s*add[\s-]*ons|anong\s*meron|options)\b/i.test(input)
+  );
+
+  if (isInquiry) {
+    session.state = 'AWAITING_DRINK_ADDON';
+    session.current_step = 'AWAITING_DRINK_ADDON';
+    await saveSession(session);
+
+    const catalogMsg = `Narito po ang mga available naming Add-ons (+₱20 bawat isa):
+• Pearls
+• Nata de Coco
+• Cream Cheese
+• Coffee Jelly
+• Egg Pudding
+
+Alin po rito ang nais ninyong idagdag? (O sabihin lamang ang 'Wala' kung ayaw mag-add).`;
+
+    await sendQuickReplies(psid, catalogMsg, [
+      { title: 'Pearls', payload: 'ADDON_PEARLS' },
+      { title: 'Nata de Coco', payload: 'ADDON_NATA' },
+      { title: 'Cream Cheese', payload: 'ADDON_CREAM_CHEESE' },
+      { title: 'Wala / Skip', payload: 'ADDON_NONE' }
+    ]);
+    return;
+  }
+
+  // Scenario B: User Declines ("Wala", "No", "Skip", "Wag na", etc.)
+  const isDecline = (
+    /ADDON_NONE/i.test(input) ||
+    /^(?:wala|wala\s*po|no|none|skip|ayaw|wag|huwag|wag\s*na|huwag\s*na|hindi|plain|only|no\s*thanks|pass|ayoko|ayaw\s*ko|wala\s*na|wala\s*na\s*po)$/i.test(input) ||
+    /\b(?:wala\s*na|wag\s*na|huwag\s*na|no\s*add[\s-]*ons?|ayaw\s*ng\s*add[\s-]*ons?)\b/i.test(input)
+  );
+
+  if (isDecline) {
+    if (!session.cart) session.cart = [];
+    const drinkToCart = { ...item };
+    addToCart(session.cart, drinkToCart, qty);
+
+    session.current_drink_item = null;
+    session.pendingDrinkOrder = null;
+    session.state = 'COLLECTING_CUSTOMER_INFO';
+    session.current_step = 'COLLECTING_CUSTOMER_INFO';
+    await saveSession(session);
+
+    await sendTextMessage(psid, "Sige po, walang add-ons.");
+    const prompt = getCheckoutInfoPrompt(session);
+    await sendTextMessage(psid, prompt);
+    return;
+  }
+
+  // Scenario A: User Selects an Add-on (Click or Text input matching an add-on)
   let selectedAddon = null;
   if (/ADDON_PEARLS|\b(?:pearls?|tapioca|sago)\b/i.test(input)) {
-    selectedAddon = 'Tapioca Pearls';
-  } else if (/ADDON_CREAM_CHEESE|\b(?:cream\s*cheese|wall)\b/i.test(input)) {
-    selectedAddon = 'Cream Cheese Wall';
-  } else if (/ADDON_CRYSTALS|\b(?:rainbow|crystals?|crystal|nata)\b/i.test(input)) {
-    selectedAddon = 'Rainbow Crystals';
-  } else if (/ADDON_COFFEE_JELLY|\b(?:coffee\s*jelly|espresso\s*jelly|jelly)\b/i.test(input)) {
+    selectedAddon = 'Pearls';
+  } else if (/ADDON_NATA|ADDON_CRYSTALS|\b(?:nata\s*de\s*coco|nata|rainbow|crystals?)\b/i.test(input)) {
+    selectedAddon = 'Nata de Coco';
+  } else if (/ADDON_CREAM_CHEESE|\b(?:cream\s*cheese|creamcheese|wall)\b/i.test(input)) {
+    selectedAddon = 'Cream Cheese';
+  } else if (/ADDON_COFFEE_JELLY|\b(?:coffee\s*jelly|espresso\s*jelly)\b/i.test(input)) {
     selectedAddon = 'Coffee Jelly';
-  } else if (/ADDON_OREO|\b(?:oreo|crushed\s*oreo|cookies?)\b/i.test(input)) {
+  } else if (/ADDON_PUDDING|\b(?:egg\s*pudding|pudding)\b/i.test(input)) {
+    selectedAddon = 'Egg Pudding';
+  } else if (/ADDON_OREO|\b(?:crushed\s*oreo|oreo)\b/i.test(input)) {
     selectedAddon = 'Crushed Oreo';
-  } else if (/ADDON_NONE|\b(?:wala|wala\s*po|no|none|skip|ayaw|wag|huwag|hindi|plain|only|no\s*thanks)\b/i.test(input)) {
-    selectedAddon = null;
-  } else {
-    selectedAddon = null;
   }
 
-  if (!session.cart) session.cart = [];
-  const drinkToCart = { ...item };
   if (selectedAddon) {
-    drinkToCart.addons = [selectedAddon];
-    drinkToCart.addOns = [{ name: selectedAddon, price: 20.0 }];
+    if (!session.cart) session.cart = [];
+    const modifiedName = `${item.name} (w/ ${selectedAddon})`;
+    const drinkToCart = {
+      ...item,
+      name: modifiedName,
+      addons: [selectedAddon],
+      addOns: [{ name: selectedAddon, price: 20.0 }]
+    };
+    addToCart(session.cart, drinkToCart, qty);
+
+    session.current_drink_item = null;
+    session.pendingDrinkOrder = null;
+    session.state = 'COLLECTING_CUSTOMER_INFO';
+    session.current_step = 'COLLECTING_CUSTOMER_INFO';
+    await saveSession(session);
+
+    await sendTextMessage(psid, `Sige po, nailagay na ang ${selectedAddon} (+₱20)!`);
+    const prompt = getCheckoutInfoPrompt(session);
+    await sendTextMessage(psid, prompt);
+    return;
   }
-  addToCart(session.cart, drinkToCart, quantity);
 
-  session.pendingDrinkOrder = null;
-  session.state = 'AWAITING_CHECKOUT_CONFIRM';
-  session.current_step = 'AWAITING_CHECKOUT_CONFIRM';
-  await saveSession(session);
-
-  const subtotal = calculateCartSubtotal(session.cart);
-  const addonLabel = selectedAddon ? ` (+ ${selectedAddon})` : '';
-  const confirmMsg = `Naidagdag na po ang ${quantity}x ${item.name}${addonLabel} sa inyong cart!\nSubtotal: ₱${subtotal.toFixed(2)}\n\nNais niyo na po bang mag-checkout o may gusto pa kayong idagdag?`;
-
-  await sendQuickReplies(psid, confirmMsg, [
-    { title: '✅ Checkout', payload: 'CONFIRM_CHECKOUT' },
-    { title: '☕ View Menu', payload: 'MENU_HOME' },
-    { title: '🛒 View Cart', payload: 'VIEW_CART' }
+  // Unrecognized input in add-ons state: politely re-prompt
+  const clarifyMsg = "Paki-pili po kung nais ninyo ng Add-ons o i-tap ang 'Wala / Skip':";
+  await sendQuickReplies(psid, clarifyMsg, [
+    { title: 'Pearls (+₱20)', payload: 'ADDON_PEARLS' },
+    { title: 'Nata de Coco (+₱20)', payload: 'ADDON_NATA' },
+    { title: 'Cream Cheese (+₱20)', payload: 'ADDON_CREAM_CHEESE' },
+    { title: 'Wala / Skip', payload: 'ADDON_NONE' }
   ]);
 }
 
@@ -3334,21 +3410,20 @@ async function handleOrderItemText(psid, session, rawText, nlu) {
         const detectedAddon = detectAddonInText(rawText);
         if (detectedAddon) {
           if (!session.cart) session.cart = [];
+          const modifiedName = `${matchedItem.name} (w/ ${detectedAddon})`;
           const drinkWithAddon = {
             ...matchedItem,
+            name: modifiedName,
             addons: [detectedAddon],
             addOns: [{ name: detectedAddon, price: 20.0 }]
           };
           addToCart(session.cart, drinkWithAddon, qty);
+          session.state = 'COLLECTING_CUSTOMER_INFO';
+          session.current_step = 'COLLECTING_CUSTOMER_INFO';
           await saveSession(session);
-          session.state = 'AWAITING_CHECKOUT_CONFIRM';
-          const subtotal = calculateCartSubtotal(session.cart);
-          const addedMsg = `Naidagdag na po ang ${qty}x ${matchedItem.name} (+ ${detectedAddon}) sa cart!\nSubtotal: ₱${subtotal.toFixed(2)}`;
-          await sendQuickReplies(psid, addedMsg, [
-            { title: '✅ Checkout', payload: 'CONFIRM_CHECKOUT' },
-            { title: '☕ View Menu', payload: 'MENU_HOME' },
-            { title: '🛒 View Cart', payload: 'VIEW_CART' }
-          ]);
+          await sendTextMessage(psid, `Sige po, nailagay na ang ${detectedAddon} (+₱20)!`);
+          const prompt = getCheckoutInfoPrompt(session);
+          await sendTextMessage(psid, prompt);
           return { intent: 'ORDER_ITEM', confidence: 1.0 };
         }
 
@@ -4459,5 +4534,9 @@ module.exports = {
   geocodeCustomerAddress,
   sanitizeCustomerAddress,
   handleCancellationRequest,
-  isCancelTriggerWord
+  isCancelTriggerWord,
+  promptDrinkAddons,
+  handleAddonSelection,
+  isDrinkOrMilktea,
+  detectAddonInText
 };
