@@ -630,6 +630,11 @@ async function viewOrderDetails(orderId) {
       currentOpenedOrder = o;
       document.getElementById('modal-order-number').innerText = `Order #${o.order_number}`;
 
+      const diningModeNorm = (o.dining_mode || (o.order_type === 'pickup' ? 'PICK_UP' : 'DELIVERY')).toUpperCase().replace(/[-\s]/g, '_');
+      const isPickupOrDineIn = diningModeNorm.includes('PICK') || diningModeNorm.includes('DINE');
+      const diningModeLabel = diningModeNorm.includes('DINE') ? 'Dine-In' : (diningModeNorm.includes('PICK') ? 'Store Pick-Up' : 'Delivery');
+      const customerNote = (o.note || o.customer_note || o.customer_notes || '').trim() || '-';
+
       const itemsHtml = (o.items || []).map(i => `
         <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed var(--border-subtle);">
           <div>
@@ -646,8 +651,31 @@ async function viewOrderDetails(orderId) {
             <span>Customer: <strong>${escapeHtml((o.first_name || '') + ' ' + (o.last_name || ''))}</strong></span>
             <span>Status: <span class="badge badge-${o.status}">${o.status}</span></span>
           </div>
-          <div style="font-size: 0.88rem; color: var(--text-secondary);">Phone: ${escapeHtml(o.customer_phone || 'N/A')}</div>
-          <div style="font-size: 0.88rem; color: var(--text-secondary);">Address: ${escapeHtml(o.delivery_address || 'Store Pickup')}</div>
+          <div style="font-size: 0.88rem; color: var(--text-secondary); margin-bottom: 3px;">Phone: <strong>${escapeHtml(o.customer_phone || 'N/A')}</strong></div>
+          <div style="font-size: 0.88rem; color: var(--text-secondary); margin-bottom: 3px;">Dining Mode: <strong>${escapeHtml(diningModeLabel)}</strong></div>
+
+          ${isPickupOrDineIn ? `
+            <div style="font-size: 0.88rem; color: var(--brand-gold); margin-bottom: 3px;">
+              ⏰ <strong>Arriving Time:</strong> ${escapeHtml(o.arriving_time || '-')}
+            </div>
+            <div style="font-size: 0.88rem; color: var(--text-secondary); margin-bottom: 3px;">
+              📍 Fulfillment: <em>${escapeHtml(diningModeLabel)} (In-Store)</em>
+            </div>
+          ` : `
+            <div style="font-size: 0.88rem; color: var(--text-secondary); margin-bottom: 3px;">
+              📍 Address: <strong>${escapeHtml(o.delivery_address || 'N/A')}</strong>
+            </div>
+            ${o.landmark ? `
+              <div style="font-size: 0.88rem; color: var(--text-secondary); margin-bottom: 3px;">
+                🚩 Landmark: <strong>${escapeHtml(o.landmark)}</strong>
+              </div>
+            ` : ''}
+          `}
+
+          <!-- Customer Note Field (Requirement 2) -->
+          <div style="font-size: 0.88rem; color: var(--text-secondary); margin-top: 6px; padding: 6px 10px; background: rgba(255,255,255,0.03); border-left: 3px solid var(--brand-primary); border-radius: 4px;">
+            <strong>Note:</strong> <span style="color: var(--text-primary);">${escapeHtml(customerNote)}</span>
+          </div>
         </div>
 
         <h4 style="font-size: 0.95rem; margin: 16px 0 8px 0; color: var(--brand-crema);">Ordered Items:</h4>
@@ -658,10 +686,12 @@ async function viewOrderDetails(orderId) {
             <span>Subtotal:</span>
             <span>₱${parseFloat(o.subtotal).toFixed(2)}</span>
           </div>
-          <div style="display: flex; justify-content: space-between; font-size: 0.88rem;">
-            <span>Delivery Fee:</span>
-            <span>₱${parseFloat(o.delivery_fee).toFixed(2)}</span>
-          </div>
+          ${!isPickupOrDineIn ? `
+            <div style="display: flex; justify-content: space-between; font-size: 0.88rem;">
+              <span>Delivery Fee:</span>
+              <span>₱${parseFloat(o.delivery_fee || 0).toFixed(2)}</span>
+            </div>
+          ` : ''}
           <div style="display: flex; justify-content: space-between; font-size: 1.15rem; font-weight: 800; color: var(--brand-gold); margin-top: 6px;">
             <span>Total Amount:</span>
             <span>₱${parseFloat(o.total_amount).toFixed(2)}</span>

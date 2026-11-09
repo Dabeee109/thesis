@@ -219,18 +219,33 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
 
   let orderResult = null;
   let orderNumber = '';
+  const effectiveLandmark = orderData.landmark || null;
+  const effectiveDiningMode = orderData.dining_mode || orderData.diningMode || (orderType === 'pickup' ? 'Pick-up' : 'Delivery');
+  const effectiveArrivingTime = orderData.arriving_time || orderData.arrivingTime || orderData.eta || null;
+  const effectiveNotes = customerNotes || orderData.customerNotes || orderData.customer_notes || orderData.note || orderData.notes || null;
+
   for (let attempt = 0; attempt < 5; attempt++) {
     orderNumber = generateOrderNumber();
     try {
       const [res] = await db.query(
         `INSERT INTO orders 
-         (order_number, customer_id, order_type, status, subtotal, delivery_fee, total_amount, delivery_address, customer_phone, distance_km, customer_notes, payment_status, payment_ref_number, payment_proof_image, customer_lat, customer_lng, is_preorder)
-         VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [orderNumber, customerId, orderType, subtotal, deliveryFee, totalAmount, effectiveDeliveryAddress, phone || null, effectiveDistanceKm, customerNotes, initialPaymentStatus, initialPaymentRef, initialPaymentProof, customerLat, customerLng, isPreorder]
+         (order_number, customer_id, order_type, dining_mode, status, subtotal, delivery_fee, total_amount, delivery_address, landmark, arriving_time, customer_phone, distance_km, customer_notes, note, payment_status, payment_ref_number, payment_proof_image, customer_lat, customer_lng, is_preorder)
+         VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [orderNumber, customerId, orderType, effectiveDiningMode, subtotal, deliveryFee, totalAmount, effectiveDeliveryAddress, effectiveLandmark, effectiveArrivingTime, phone || null, effectiveDistanceKm, effectiveNotes, effectiveNotes, initialPaymentStatus, initialPaymentRef, initialPaymentProof, customerLat, customerLng, isPreorder]
       );
       orderResult = res;
       break;
     } catch (insertErr) {
+      if ((insertErr.message || '').includes('Unknown column') || (insertErr.message || '').includes('no such column')) {
+        const [resFallback] = await db.query(
+          `INSERT INTO orders 
+           (order_number, customer_id, order_type, status, subtotal, delivery_fee, total_amount, delivery_address, customer_phone, distance_km, customer_notes, payment_status, payment_ref_number, payment_proof_image, customer_lat, customer_lng, is_preorder)
+           VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [orderNumber, customerId, orderType, subtotal, deliveryFee, totalAmount, effectiveDeliveryAddress, phone || null, effectiveDistanceKm, effectiveNotes, initialPaymentStatus, initialPaymentRef, initialPaymentProof, customerLat, customerLng, isPreorder]
+        );
+        orderResult = resFallback;
+        break;
+      }
       if ((insertErr.message || '').includes('UNIQUE') && attempt < 4) {
         continue;
       }
@@ -627,6 +642,11 @@ async function getOrdersList(filters = {}) {
       [order.id]
     );
     order.items = items;
+    order.note = order.note || order.customer_notes || '';
+    order.customer_note = order.note;
+    order.landmark = order.landmark || '';
+    order.dining_mode = order.dining_mode || (order.order_type === 'pickup' ? 'Pick-up' : 'Delivery');
+    order.arriving_time = order.arriving_time || '';
   }
 
   return orders;
@@ -678,6 +698,11 @@ async function getOrderDetails(orderIdentifier) {
     [order.id]
   );
   order.items = items;
+  order.note = order.note || order.customer_notes || '';
+  order.customer_note = order.note;
+  order.landmark = order.landmark || '';
+  order.dining_mode = order.dining_mode || (order.order_type === 'pickup' ? 'Pick-up' : 'Delivery');
+  order.arriving_time = order.arriving_time || '';
   return order;
 }
 

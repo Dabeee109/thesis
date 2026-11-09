@@ -386,6 +386,10 @@ async function finalizeOrderSummaryAndPayment(psid, session) {
         customerPhone: contactNumber,
         deliveryAddress: addressStr,
         orderType: isDelivery ? 'delivery' : 'pickup',
+        dining_mode: diningMode || (isDelivery ? 'Delivery' : 'Pick-up'),
+        landmark: session.landmark || null,
+        arriving_time: session.arriving_time || session.arrivingTime || session.eta || null,
+        note: session.customer_notes || session.note || session.notes || null,
         paymentMethod: 'cash',
         amountPaid: 0,
         items: (session.cart || []).map(c => ({ menuItemId: c.menuItemId || c.id, quantity: c.quantity || 1 })),
@@ -404,7 +408,10 @@ async function finalizeOrderSummaryAndPayment(psid, session) {
       await saveSession(session);
 
       const cashConfirmation = `Salamat po, ${customerName}! Na-receive na po namin ang inyong order #${orderNum} under Cash Payment. Ang inyong order ay Pending Approval. I-notify po namin kayo kapag approved na ng kitchen!`;
-      await sendTextMessage(psid, cashConfirmation);
+      await sendQuickReplies(psid, cashConfirmation, [
+        { title: '❌ Cancel Order', payload: `CANCEL_ORDER_${orderNum}` },
+        { title: '📋 Menu', payload: 'MENU' }
+      ]);
       return { intent: 'ORDER_PLACED_CASH', confidence: 1.0, replyLog: cashConfirmation, orderNumber: orderNum };
     } catch (err) {
       console.error('[Cash Order Placement Error]', err);
@@ -422,6 +429,10 @@ async function finalizeOrderSummaryAndPayment(psid, session) {
         customerPhone: contactNumber,
         deliveryAddress: addressStr,
         orderType: isDelivery ? 'delivery' : 'pickup',
+        dining_mode: diningMode || (isDelivery ? 'Delivery' : 'Pick-up'),
+        landmark: session.landmark || null,
+        arriving_time: session.arriving_time || session.arrivingTime || session.eta || null,
+        note: session.customer_notes || session.note || session.notes || null,
         paymentMethod: 'gcash',
         amountPaid: 0,
         items: (session.cart || []).map(c => ({ menuItemId: c.menuItemId || c.id, quantity: c.quantity || 1 })),
@@ -446,6 +457,10 @@ async function finalizeOrderSummaryAndPayment(psid, session) {
       customerName,
       contactNumber,
       address: addressStr,
+      landmark: session.landmark || null,
+      dining_mode: diningMode || (isDelivery ? 'Delivery' : 'Pick-up'),
+      arriving_time: session.arriving_time || session.arrivingTime || session.eta || null,
+      note: session.customer_notes || session.note || session.notes || null,
       deliveryFee,
       subtotal,
       discount: discountAmount,
@@ -476,7 +491,14 @@ async function finalizeOrderSummaryAndPayment(psid, session) {
 
     // Message 2: Send formatted text instructions (no external webview URL buttons)
     const detailsMsg = `💳 GCASH PAYMENT DETAILS:\nAccount Name: ${gcashName}\nAccount Number: ${gcashNumber}\nTotal Amount to Pay: ₱${grandTotal.toFixed(2)}\n\n📌 Paalala:\nI-save o i-scan ang QR code sa itaas gamit ang inyong GCash app. \nPagkatapos magbayad, paki-send po rito ang SCREENSHOT ng resibo o i-type ang 13-digit Reference Number upang maihanda na ang inyong order.`;
-    await sendTextMessage(psid, detailsMsg);
+    if (orderNum) {
+      await sendQuickReplies(psid, detailsMsg, [
+        { title: '❌ Cancel Order', payload: `CANCEL_ORDER_${orderNum}` },
+        { title: '📋 Menu', payload: 'MENU' }
+      ]);
+    } else {
+      await sendTextMessage(psid, detailsMsg);
+    }
 
     return { intent: 'AWAITING_PAYMENT_PROOF', confidence: 1.0, replyLog: detailsMsg, orderNumber: orderNum };
   }
@@ -751,6 +773,10 @@ async function handlePaymentProofUpload(psid, session, imgAttachment) {
       customerPhone: pending.contactNumber || session.contact_number || session.phone_number,
       deliveryAddress: pending.address || session.delivery_address || 'Store Pickup',
       orderType: pending.deliveryFee > 0 ? 'delivery' : 'pickup',
+      dining_mode: pending.dining_mode || (pending.deliveryFee > 0 ? 'Delivery' : 'Pick-up'),
+      landmark: pending.landmark || session.landmark || null,
+      arriving_time: pending.arriving_time || session.arriving_time || null,
+      note: pending.note || session.customer_notes || session.note || null,
       paymentMethod: 'gcash',
       amountPaid: 0,
       items: (pending.items || session.cart || []).map(c => ({ menuItemId: c.menuItemId || c.id, quantity: c.quantity || 1 })),
@@ -784,7 +810,11 @@ async function handlePaymentProofUpload(psid, session, imgAttachment) {
   }
 
   const confirmMsg = "Natanggap po namin ang proof of payment! I-verify po ito ng staff saglit.";
-  await sendTextMessage(psid, confirmMsg);
+  const cancelPayload = (session.activeOrderNumber || orderId) ? `CANCEL_ORDER_${session.activeOrderNumber || orderId}` : 'ACTION_CANCEL_ORDER';
+  await sendQuickReplies(psid, confirmMsg, [
+    { title: '❌ Cancel Order', payload: cancelPayload },
+    { title: '📋 Menu', payload: 'MENU' }
+  ]);
 
   session.checkout_step = null;
   session.state = 'IDLE';
@@ -836,6 +866,10 @@ async function handlePaymentProofTextInput(psid, session, rawText) {
         customerPhone: pending.contactNumber || session.contact_number || session.phone_number,
         deliveryAddress: pending.address || session.delivery_address || 'Store Pickup',
         orderType: pending.deliveryFee > 0 ? 'delivery' : 'pickup',
+        dining_mode: pending.dining_mode || (pending.deliveryFee > 0 ? 'Delivery' : 'Pick-up'),
+        landmark: pending.landmark || session.landmark || null,
+        arriving_time: pending.arriving_time || session.arriving_time || null,
+        note: pending.note || session.customer_notes || session.note || null,
         paymentMethod: 'gcash',
         amountPaid: 0,
         referenceNo: refNum,
@@ -868,7 +902,11 @@ async function handlePaymentProofTextInput(psid, session, rawText) {
     }
 
     const confirmMsg = "Natanggap po namin ang proof of payment! I-verify po ito ng staff saglit.";
-    await sendTextMessage(psid, confirmMsg);
+    const cancelPayload = (session.activeOrderNumber || orderId) ? `CANCEL_ORDER_${session.activeOrderNumber || orderId}` : 'ACTION_CANCEL_ORDER';
+    await sendQuickReplies(psid, confirmMsg, [
+      { title: '❌ Cancel Order', payload: cancelPayload },
+      { title: '📋 Menu', payload: 'MENU' }
+    ]);
 
     session.checkout_step = null;
     session.state = 'IDLE';
@@ -897,7 +935,7 @@ async function handlePaymentProofTextInput(psid, session, rawText) {
  * Helper: Detects cancellation trigger words or postback payloads
  */
 function isCancelTriggerWord(norm = '', rawText = '', eventPayload = '') {
-  if (eventPayload === 'ACTION_CANCEL_ORDER' || eventPayload === 'CANCEL_ORDER') return true;
+  if (eventPayload === 'ACTION_CANCEL_ORDER' || eventPayload === 'CANCEL_ORDER' || (typeof eventPayload === 'string' && eventPayload.startsWith('CANCEL_ORDER_'))) return true;
   const triggerPhrases = [
     'cancel',
     'cancel order',
@@ -929,18 +967,44 @@ function isCancelTriggerWord(norm = '', rawText = '', eventPayload = '') {
 /**
  * Dynamic Order Cancellation Guard (Status-Based Rules - Requirement 1)
  * Evaluates active order status:
- * 1. IN_PREPARATION: Block cancellation, reply with food waste prevention message
- * 2. DISPATCHED / ON_DELIVERY: Block cancellation, reply with rider on-the-way message
- * 3. PENDING: Allow cancellation, update status, restore stock in menu_items & inventory
+ * 1. IN_PREPARATION / DISPATCHED / DELIVERED: Block cancellation with kitchen/dispatch alert
+ * 2. PENDING / PENDING_APPROVAL: Allow cancellation, update status, restore stock in menu_items & inventory
  */
 async function handleCancellationRequest(psid, session, rawText = '') {
   let activeOrder = null;
-  if (session.activeOrderNumber) {
+  let targetOrderIdOrNum = null;
+
+  if (typeof rawText === 'string' && rawText.startsWith('CANCEL_ORDER_')) {
+    targetOrderIdOrNum = rawText.replace('CANCEL_ORDER_', '').trim();
+  }
+
+  if (targetOrderIdOrNum) {
+    const isNum = /^\d+$/.test(targetOrderIdOrNum);
+    const [rows] = await db.query(
+      `SELECT id, order_number, status, total_amount FROM orders WHERE ${isNum ? '(id = ? OR order_number = ?)' : 'order_number = ?'} LIMIT 1`,
+      isNum ? [targetOrderIdOrNum, targetOrderIdOrNum] : [targetOrderIdOrNum]
+    );
+    if (rows && rows.length > 0) {
+      activeOrder = rows[0];
+    }
+  }
+
+  if (!activeOrder && session.activeOrderNumber) {
     const [rows] = await db.query(
       `SELECT id, order_number, status, total_amount FROM orders WHERE order_number = ? LIMIT 1`,
       [session.activeOrderNumber]
     );
-    if (rows && rows.length > 0 && !['delivered', 'cancelled'].includes(String(rows[0].status).toLowerCase())) {
+    if (rows && rows.length > 0 && !['cancelled', 'voided'].includes(String(rows[0].status).toLowerCase())) {
+      activeOrder = rows[0];
+    }
+  }
+
+  if (!activeOrder && session.active_order_id) {
+    const [rows] = await db.query(
+      `SELECT id, order_number, status, total_amount FROM orders WHERE id = ? LIMIT 1`,
+      [session.active_order_id]
+    );
+    if (rows && rows.length > 0 && !['cancelled', 'voided'].includes(String(rows[0].status).toLowerCase())) {
       activeOrder = rows[0];
     }
   }
@@ -950,7 +1014,7 @@ async function handleCancellationRequest(psid, session, rawText = '') {
       `SELECT o.id, o.order_number, o.status, o.total_amount
        FROM orders o
        JOIN customers c ON c.id = o.customer_id
-       WHERE c.psid = ? AND LOWER(o.status) NOT IN ('delivered', 'cancelled')
+       WHERE c.psid = ? AND LOWER(o.status) NOT IN ('cancelled', 'voided')
        ORDER BY o.id DESC LIMIT 1`,
       [psid]
     );
@@ -963,32 +1027,34 @@ async function handleCancellationRequest(psid, session, rawText = '') {
     const s = String(activeOrder.status).toLowerCase();
     const { updateOrderStatus } = require('./orderService');
 
-    // Rule 1: IN_PREPARATION (In Kitchen) -> Block cancellation
-    if (s === 'preparing' || s === 'in_preparation' || s === 'in kitchen preparation') {
-      const reply = `Paumanhin po, kasalukuyan na pong inihahanda sa kusina ang inyong order #${activeOrder.order_number}. Hindi na po ito maaaring i-cancel upang maiwasan ang food waste. Maraming salamat po sa pag-unawa!`;
+    // Rule 1: If status has progressed to IN_PREPARATION, DISPATCHED, or DELIVERED:
+    const isProgressed = (
+      s === 'preparing' || s === 'in_preparation' || s === 'in kitchen preparation' ||
+      s === 'dispatched' || s === 'on_delivery' || s === 'dispatched / on delivery' ||
+      s === 'delivered' || s === 'completed'
+    );
+
+    if (isProgressed) {
+      const reply = "Paumanhin, hindi na po maaaring kanselahin ang inyong order dahil ito ay kasalukuyan nang inihahanda ng aming kusina o naipadala na. Mangyaring mag-iwan ng mensahe para sa aming staff.";
       await sendTextMessage(psid, reply);
-      return { intent: 'ORDER_CANCEL_BLOCKED_PREPARING', confidence: 1.0, replyLog: reply };
+      return { intent: 'ORDER_CANCEL_BLOCKED', confidence: 1.0, replyLog: reply };
     }
 
-    // Rule 2: DISPATCHED or ON_DELIVERY -> Block cancellation
-    if (s === 'dispatched' || s === 'on_delivery' || s === 'dispatched / on delivery') {
-      const reply = `Paumanhin po, na-dispatch na po ang inyong order #${activeOrder.order_number} at kasalukuyan na pong papunta ang ating rider sa inyong lokasyon. Hindi na po ito maaaring i-cancel. Pakihanda na lang po ang inyong bayad o pagtanggap. Salamat po!`;
-      await sendTextMessage(psid, reply);
-      return { intent: 'ORDER_CANCEL_BLOCKED_DISPATCHED', confidence: 1.0, replyLog: reply };
-    }
-
-    // Rule 3: PENDING or AWAITING_CONFIRMATION -> Allow cancellation & restore stock
-    if (s === 'pending' || s === 'awaiting_confirmation') {
+    // Rule 2: If status is strictly PENDING / PENDING_APPROVAL / awaiting_confirmation:
+    const isPending = (s === 'pending' || s === 'pending_approval' || s === 'awaiting_confirmation');
+    if (isPending) {
       await updateOrderStatus(activeOrder.id, 'cancelled', {
         cancellationReason: 'Cancelled by customer via Messenger'
       });
       session.activeOrderNumber = null;
+      session.active_order_id = null;
       session.current_step = 'idle';
       session.state = 'idle';
       session.cart = [];
       await saveSession(session);
 
-      const reply = `Na-cancel na po ang inyong order #${activeOrder.order_number}. Naibalik na po ang stock ng inyong items sa aming kusina. Kung nagbayad po kayo via online/GCash, mangyaring makipag-ugnayan sa amin para sa agarang refund. Maraming salamat po!`;
+      const orderIdentifier = activeOrder.order_number || activeOrder.id;
+      const reply = `Ang inyong order #${orderIdentifier} ay matagumpay nang nakansela. Kung nais ninyong mag-order muli, mag-type lamang po ng 'Menu'.`;
       await sendTextMessage(psid, reply);
       return { intent: 'ORDER_CANCELLED_PENDING', confidence: 1.0, replyLog: reply };
     }
@@ -996,13 +1062,24 @@ async function handleCancellationRequest(psid, session, rawText = '') {
 
   // If no placed active order: check for draft items in cart
   if (session.cart && session.cart.length > 0) {
-    session.cart = [];
-    session.state = 'IDLE';
-    session.current_step = 'idle';
-    await saveSession(session);
-    const reply = "Na-cancel na po ang inyong kasalukuyang cart selection. Maaari po kayong pumili muli sa ating menu anumang oras!";
-    await sendTextMessage(psid, reply);
-    return { intent: 'CANCEL_CART', confidence: 1.0, replyLog: reply };
+    if (typeof rawText === 'string' && (rawText.startsWith('CANCEL_ORDER') || rawText.startsWith('ACTION_CANCEL_ORDER'))) {
+      session.cart = [];
+      session.state = 'IDLE';
+      session.current_step = 'idle';
+      await saveSession(session);
+      const reply = "Na-cancel na po ang inyong kasalukuyang cart selection. Maaari po kayong pumili muli sa ating menu anumang oras!";
+      await sendTextMessage(psid, reply);
+      return { intent: 'CANCEL_CART', confidence: 1.0, replyLog: reply };
+    } else {
+      session.previous_step = (session.current_step && session.current_step !== 'idle') ? session.current_step : 'ordering';
+      session.current_step = 'AWAITING_CANCEL_CONFIRMATION';
+      session.state = 'AWAITING_CANCEL_CONFIRMATION';
+      await saveSession(session);
+
+      const reply = 'Sigurado ka ba na nais mong i-cancel ang iyong order? I-type ang yes o no.';
+      await sendTextMessage(psid, reply);
+      return { intent: 'CANCEL_ORDER_REQUESTED', confidence: 1.0, replyLog: reply };
+    }
   }
 
   const reply = "Wala po kayong kasalukuyang aktibong order na maaaring i-cancel. May maitutulong pa ba ako sa inyo?";
@@ -1559,6 +1636,58 @@ async function handlePayload(psid, session, payload) {
 async function handleTextInput(psid, session, rawText) {
   const norm = normalize(rawText);
 
+  // 0. State: AWAITING_CANCEL_CONFIRMATION (Intercept before any other logic or NLP)
+  if (session.state === 'AWAITING_CANCEL_CONFIRMATION' || session.current_step === 'AWAITING_CANCEL_CONFIRMATION') {
+    const words = norm.split(/\s+/).filter(Boolean);
+    const affirmativeWords = ['yes', 'oo', 'sige', 'yep', 'opo'];
+    const negativeWords = ['no', 'hindi', 'wag', 'huwag', 'wait'];
+
+    const hasAffirmative = affirmativeWords.some(w => words.includes(w) || norm === w) ||
+      classifyShort(rawText) === 'YES';
+    const hasNegative = negativeWords.some(w => words.includes(w) || norm === w) ||
+      norm.includes('hindi pa') ||
+      norm.includes('wag muna') ||
+      norm.includes('huwag muna') ||
+      classifyShort(rawText) === 'NO';
+
+    if (hasAffirmative && !hasNegative) {
+      if (session.activeOrderNumber) {
+        await db.query(`UPDATE orders SET status = 'cancelled' WHERE order_number = ?`, [session.activeOrderNumber]);
+      }
+      session.cart = [];
+      session.order_type = null;
+      session.delivery_address = null;
+      session.gcash_ref = null;
+      session.current_step = 'idle';
+      session.state = 'idle';
+      session.activeOrderNumber = null;
+      await saveSession(session);
+
+      const reply = 'Order has been cancelled.';
+      await sendTextMessage(psid, reply);
+      return { intent: 'ORDER_CANCELLED', confidence: 1.0, replyLog: reply };
+    }
+
+    if (hasNegative && !hasAffirmative) {
+      const targetState = (session.previous_step && session.previous_step !== 'AWAITING_CANCEL_CONFIRMATION' && session.previous_step !== 'idle')
+        ? session.previous_step
+        : 'ordering';
+      session.current_step = targetState;
+      session.state = targetState;
+      await saveSession(session);
+
+      const reply = 'Anything else?';
+      await sendTextMessage(psid, reply);
+      return { intent: 'CANCEL_ORDER_DECLINED', confidence: 1.0, replyLog: reply };
+    }
+
+    // Other / Ambiguous answer
+    await saveSession(session);
+    const reply = 'Pakisagot lamang ng yes o no kung nais mong i-cancel ang iyong order.';
+    await sendTextMessage(psid, reply);
+    return { intent: 'AWAITING_CANCEL_CONFIRMATION_RETRY', confidence: 1.0, replyLog: reply };
+  }
+
   // Dynamic Order Cancellation Guard (Status-Based Rules)
   if (isCancelTriggerWord(norm, rawText)) {
     return handleCancellationRequest(psid, session, rawText);
@@ -1597,44 +1726,6 @@ async function handleTextInput(psid, session, rawText) {
   const isAffirmativeConfirm = /(?:^|\b)(?:yes|oo|opo|confirm|proceed|tama|sige|push|g|ok na)(?:\b|$)/i.test(rawText);
   if (isAffirmativeConfirm && (session.state === 'AWAITING_STAGE5_CONFIRM' || session.pendingStage5)) {
     return handleStage5Confirmation(psid, session, { isAlreadyPaid: false });
-  }
-
-  // 0. State: AWAITING_CANCEL_CONFIRMATION (Intercept before any other logic or NLP)
-  if (session.state === 'AWAITING_CANCEL_CONFIRMATION' || session.current_step === 'AWAITING_CANCEL_CONFIRMATION') {
-    const words = norm.split(/\s+/).filter(Boolean);
-    const affirmativeWords = ['yes', 'oo', 'sige', 'yep', 'opo'];
-    const negativeWords = ['no', 'hindi', 'wag', 'huwag', 'wait'];
-
-    const hasAffirmative = affirmativeWords.some(w => words.includes(w) || norm === w) ||
-      classifyShort(rawText) === 'YES';
-    const hasNegative = negativeWords.some(w => words.includes(w) || norm === w) ||
-      norm.includes('hindi pa') ||
-      norm.includes('wag muna') ||
-      norm.includes('huwag muna') ||
-      classifyShort(rawText) === 'NO';
-
-    if (hasAffirmative && !hasNegative) {
-      return handleCancellationRequest(psid, session, rawText);
-    }
-
-    if (hasNegative && !hasAffirmative) {
-      const targetState = (session.previous_step && session.previous_step !== 'AWAITING_CANCEL_CONFIRMATION' && session.previous_step !== 'idle')
-        ? session.previous_step
-        : 'ordering';
-      session.current_step = targetState;
-      session.state = targetState;
-      await saveSession(session);
-
-      const reply = 'Anything else?';
-      await sendTextMessage(psid, reply);
-      return { intent: 'CANCEL_ORDER_DECLINED', confidence: 1.0, replyLog: reply };
-    }
-
-    // Other / Ambiguous answer
-    await saveSession(session);
-    const reply = 'Pakisagot lamang ng yes o no kung nais mong i-cancel ang iyong order.';
-    await sendTextMessage(psid, reply);
-    return { intent: 'AWAITING_CANCEL_CONFIRMATION_RETRY', confidence: 1.0, replyLog: reply };
   }
 
   // 0b. State: 'AWAITING_SUGGESTION_CONFIRMATION' (Bago dumaan sa ibang intent parser)

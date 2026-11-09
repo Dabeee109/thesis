@@ -26,19 +26,22 @@ async function runTests() {
 Name:
 Phone number:
 Address:
-Payment mode: (Cash or GCash)`;
-  assert.strictEqual(deliveryPrompt, expectedDeliveryPrompt, 'Delivery prompt must contain all 4 fields including Address');
+Landmark:
+Payment mode: (Cash or GCash)
+note:`;
+  assert.strictEqual(deliveryPrompt, expectedDeliveryPrompt, 'Delivery prompt must contain all delivery fields');
 
   const dineInPrompt = getCheckoutInfoPrompt({ dining_mode: 'Dine In' });
   const expectedDineInPrompt = `Pakibigay po ang sumusunod para sa inyong order:
 Name:
 Phone number:
-Payment mode: (Cash or GCash)`;
-  assert.strictEqual(dineInPrompt, expectedDineInPrompt, 'Dine In prompt must contain 3 fields omitting Address');
+Payment mode: (Cash or GCash)
+note:`;
+  assert.strictEqual(dineInPrompt, expectedDineInPrompt, 'Dine In prompt must omit Address');
 
   const pickupPrompt = getCheckoutInfoPrompt({ dining_mode: 'Pick-up' });
-  assert.strictEqual(pickupPrompt, expectedDineInPrompt, 'Pick-up prompt must contain 3 fields omitting Address');
-  console.log('✓ Test 1 Passed: Conditional prompts correctly return 4 fields for Delivery and 3 for Dine In / Pick-up.');
+  assert.strictEqual(pickupPrompt, expectedDineInPrompt, 'Pick-up prompt must omit Address');
+  console.log('✓ Test 1 Passed: Conditional prompts correctly return fields for Delivery and Dine In / Pick-up.');
 
   // Test 2: Slot-filling parser parseCustomerInfo with 3 fields for Dine In / Pick-up
   console.log('\n[Test 2] Testing parseCustomerInfo slot-filling for Dine In / Pick-up...');

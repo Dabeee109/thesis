@@ -371,6 +371,10 @@ function initSqliteFallback() {
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN customer_lng REAL DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE deliveries ADD COLUMN customer_lat REAL DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN is_preorder INTEGER DEFAULT 0;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN landmark TEXT DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN dining_mode TEXT DEFAULT 'Delivery';`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN arriving_time TEXT DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN note TEXT DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN chatbot_enabled INTEGER DEFAULT 1;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN store_status TEXT DEFAULT 'OPEN';`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN store_open_time TEXT DEFAULT '09:00:00';`); } catch (e) { }
@@ -665,6 +669,10 @@ async function initDatabase() {
         { table: 'orders', column: 'void_requested_by', type: 'VARCHAR(100) NULL' },
         { table: 'orders', column: 'void_reason', type: 'TEXT NULL' },
         { table: 'orders', column: 'void_requested_at', type: 'DATETIME NULL' },
+        { table: 'orders', column: 'landmark', type: 'VARCHAR(255) NULL' },
+        { table: 'orders', column: 'dining_mode', type: "VARCHAR(50) DEFAULT 'Delivery'" },
+        { table: 'orders', column: 'arriving_time', type: 'VARCHAR(100) NULL' },
+        { table: 'orders', column: 'note', type: 'TEXT NULL' },
         { table: 'payments', column: 'receipt_url', type: 'TEXT NULL' },
         { table: 'deliveries', column: 'customer_lat', type: 'DECIMAL(10, 7) NULL' },
         { table: 'deliveries', column: 'customer_lng', type: 'DECIMAL(10, 7) NULL' },
