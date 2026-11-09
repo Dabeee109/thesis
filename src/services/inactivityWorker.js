@@ -83,7 +83,7 @@ async function checkInactivity(deps = {}) {
         warnings20++;
         const msg = hasCart ? INACTIVITY_MESSAGES.WARNING_20M : INACTIVITY_MESSAGES.WARNING_20M_NOCART;
         console.log(`[InactivityWorker] Dispatching 20M warning to ${psid} (elapsed: ${elapsedMinutes.toFixed(1)}m, hasCart: ${hasCart})`);
-        await sendFn(psid, msg).catch(e => console.warn('[Inactivity Warning 20M Err]', e.message));
+        await sendFn(psid, msg, { messagingType: 'UPDATE' }).catch(e => console.warn('[Inactivity Warning 20M Err]', e.message));
         await saveSession(session);
       }
     }
@@ -95,7 +95,7 @@ async function checkInactivity(deps = {}) {
         warnings25++;
         const msg = hasCart ? INACTIVITY_MESSAGES.WARNING_25M : INACTIVITY_MESSAGES.WARNING_25M_NOCART;
         console.log(`[InactivityWorker] Dispatching 25M warning to ${psid} (elapsed: ${elapsedMinutes.toFixed(1)}m, hasCart: ${hasCart})`);
-        await sendFn(psid, msg).catch(e => console.warn('[Inactivity Warning 25M Err]', e.message));
+        await sendFn(psid, msg, { messagingType: 'UPDATE' }).catch(e => console.warn('[Inactivity Warning 25M Err]', e.message));
         await saveSession(session);
       }
     }
@@ -133,7 +133,7 @@ async function checkInactivity(deps = {}) {
         purges30++;
         const msg = hasCart ? INACTIVITY_MESSAGES.RESET_30M : INACTIVITY_MESSAGES.RESET_30M_NOCART;
         console.log(`[InactivityWorker] Dispatching 30M purge/reset to ${psid} (elapsed: ${elapsedMinutes.toFixed(1)}m, hadCart: ${hasCart})`);
-        await sendFn(psid, msg).catch(e => console.warn('[Inactivity Purge Err]', e.message));
+        await sendFn(psid, msg, { messagingType: 'UPDATE' }).catch(e => console.warn('[Inactivity Purge Err]', e.message));
         await saveSession(session);
       }
     }
