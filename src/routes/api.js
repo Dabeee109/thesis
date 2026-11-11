@@ -79,6 +79,7 @@ router.get('/rider/orders/active', deliveryController.getActiveRiderOrders);
 router.post('/rider/orders/:id/complete', deliveryController.completeRiderDelivery);
 router.get('/rider/history', deliveryController.getRiderHistory);
 router.post('/deliveries/compute-fare', deliveryController.computeFare);
+router.post('/delivery/calculate-fare', deliveryController.calculateFareFromAddress);
 router.post('/deliveries/assign-rider', authController.authMiddleware, deliveryController.assignRider);
 router.patch('/deliveries/:id/override-fare', authController.authMiddleware, deliveryController.overrideFare);
 router.post('/delivery/quote', quoteLimiter, deliveryQuoteController.getQuote);

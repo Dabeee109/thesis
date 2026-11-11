@@ -55,6 +55,7 @@ const { haversineKm } = require('./maps');
 const { quoteForAddress, FALLBACK_KM } = require('./deliveryFeeAdapter');
 const { calculateDeliveryFee, computeDeliveryFee, getStoreOrigin } = require('./deliveryFeeCalculator');
 const { geocodeCustomerAddress, sanitizeCustomerAddress } = require('./customerGeocodingService');
+const fareEngine = require('./fareEngine');
 const {
   addToCart,
   removeFromCart,
@@ -1461,6 +1462,13 @@ async function handlePayload(psid, session, payload) {
     return handleTextInput(psid, session, '2');
   }
 
+  if (payload === 'SWITCH_TO_PICKUP') {
+    session.state = 'AWAITING_BOUNDARY_PICKUP_SWITCH';
+    session.checkout_step = 'AWAITING_BOUNDARY_PICKUP_SWITCH';
+    session.current_step = 'AWAITING_BOUNDARY_PICKUP_SWITCH';
+    return handleTextInput(psid, session, 'SWITCH_TO_PICKUP');
+  }
+
   if (payload === 'DISCOUNT_YES') {
     session.state = 'AWAITING_DISCOUNT_PROOF';
     session.current_step = 'AWAITING_DISCOUNT_PROOF';
@@ -1721,6 +1729,92 @@ async function handlePayload(psid, session, payload) {
   // Fallback for unknown / stale buttons
   const stale = botMessages.staleButton();
   await sendQuickReplies(psid, stale.text, stale.quickReplies);
+}
+
+/**
+ * Shared delivery address + landmark geocoding, OSRM routing, boundary check, and exact fare resolver
+ */
+async function resolveDeliveryAddressAndFare(psid, session, addressStr, landmarkStr, meta = {}) {
+  const customerName = meta.customerName || session.customer_name || 'Customer';
+  const contactNumber = meta.contactNumber || session.contact_number || session.phone_number || '';
+  const paymentMode = meta.paymentMode || session.payment_mode || 'Cash';
+  const customerNote = meta.customerNote !== undefined ? meta.customerNote : (session.customer_notes || '');
+
+  session.customer_name = customerName;
+  session.contact_number = contactNumber;
+  session.phone_number = contactNumber;
+  session.payment_mode = paymentMode;
+  session.landmark = landmarkStr || session.landmark || '';
+  session.customer_notes = customerNote;
+  session.note = customerNote;
+
+  let fareResult;
+  try {
+    fareResult = await fareEngine.calculateFareForAddress(addressStr, session.landmark);
+  } catch (geoErr) {
+    const notFoundMsg = 'Paumanhin po, hindi namin mahanap ang eksaktong lokasyon. Pakisama po ang mas malinaw na street address, Barangay, Siyudad, o kilalang Landmark (hal. Tapat ng MRT Boni o Puregold).';
+    session.state = 'AWAITING_ADDRESS_RETRY';
+    session.checkout_step = 'AWAITING_ADDRESS_RETRY';
+    session.current_step = 'AWAITING_ADDRESS_RETRY';
+    await saveSession(session);
+    await sendTextMessage(psid, notFoundMsg);
+    return { intent: 'AWAITING_ADDRESS_RETRY', confidence: 1.0, replyLog: notFoundMsg };
+  }
+
+  const distance = fareResult.distanceKm;
+  const maxRadiusKm = fareResult.maxRadiusKm || 3;
+  const calculatedFee = fareResult.breakdown.finalFare;
+  const formatted_address = fareResult.formattedAddress || addressStr;
+
+  if (fareResult.isOutOfBounds) {
+    session.delivery_distance_km = distance;
+    session.state = 'AWAITING_BOUNDARY_PICKUP_SWITCH';
+    session.checkout_step = 'AWAITING_BOUNDARY_PICKUP_SWITCH';
+    session.current_step = 'AWAITING_BOUNDARY_PICKUP_SWITCH';
+    await saveSession(session);
+
+    const boundaryPrompt = `Paumanhin po, ang inyong address ay nasa ${distance} km at lampas sa aming ${maxRadiusKm} km store delivery limit. Nais niyo po ba itong i-switch sa Store Pick-up?`;
+    await sendQuickReplies(psid, boundaryPrompt, [
+      { title: '🏪 Store Pick-up', payload: 'SWITCH_TO_PICKUP' },
+      { title: '📍 Ibahin Address', payload: 'CONFIRM_ADDRESS_NO' }
+    ]);
+    try {
+      notificationService.broadcastSSE('COURIER_ESCALATION_NEEDED', {
+        psid,
+        distanceKm: distance,
+        maxRadiusKm,
+        address: formatted_address
+      });
+    } catch (notifErr) { }
+    return { intent: 'AWAITING_BOUNDARY_PICKUP_SWITCH', confidence: 1.0, replyLog: boundaryPrompt };
+  }
+
+  session.delivery_address = formatted_address;
+  session.address = formatted_address;
+  session.customer_lat = fareResult.coordinates.latitude;
+  session.customer_lng = fareResult.coordinates.longitude;
+  session.delivery_distance_km = distance;
+  session.delivery_fee = calculatedFee;
+  session.deliveryFee = calculatedFee;
+  if (!session.details) session.details = {};
+  session.details.name = customerName;
+  session.details.phone = contactNumber;
+  session.details.address = formatted_address;
+  session.details.landmark = session.landmark;
+  session.details.note = customerNote;
+  session.details.paymentMode = paymentMode;
+
+  session.state = 'AWAITING_ADDRESS_CONFIRMATION';
+  session.checkout_step = 'AWAITING_ADDRESS_CONFIRMATION';
+  session.current_step = 'AWAITING_ADDRESS_CONFIRMATION';
+  await saveSession(session);
+
+  const confirmPrompt = `📍 Nai-locate po namin ang inyong drop-off:\n"${formatted_address}" (${distance} km)\nDelivery Fee: ₱${calculatedFee.toFixed(2)}\n\nTama po ba ang lokasyong ito?\n[1] Oo, tama ito\n[2] Ibahin ang address`;
+  await sendQuickReplies(psid, confirmPrompt, [
+    { title: 'Oo, tama ito', payload: 'CONFIRM_ADDRESS_YES' },
+    { title: 'Ibahin ang address', payload: 'CONFIRM_ADDRESS_NO' }
+  ]);
+  return { intent: 'AWAITING_ADDRESS_CONFIRMATION', confidence: 1.0, replyLog: confirmPrompt };
 }
 
 /**
@@ -2249,88 +2343,17 @@ async function handleTextInput(psid, session, rawText) {
         await sendTextMessage(psid, askAddrMsg);
         return { intent: 'AWAITING_CUSTOMER_INFO_RETRY', confidence: 1.0, replyLog: askAddrMsg };
       }
-      // 1. Geocode customer address with local biasing & PH component filtering
-      let geocoded = await geocodeCustomerAddress(addressStr);
-      if (!geocoded || !geocoded.success || geocoded.error === 'ZERO_RESULTS') {
-        const notFoundMsg = 'Paumanhin po, hindi namin mahanap ang eksaktong lokasyon. Pakisama po ang Barangay, Siyudad, o kilalang Landmark (hal. Tapat ng MRT Boni o Puregold).';
-        session.state = 'AWAITING_ADDRESS_RETRY';
-        session.checkout_step = 'AWAITING_ADDRESS_RETRY';
-        session.current_step = 'AWAITING_ADDRESS_RETRY';
-        session.customer_name = customerName;
-        session.contact_number = contactNumber;
-        session.phone_number = contactNumber;
-        session.payment_mode = parsed.paymentMode || parsePaymentModeValue(rawText) || 'Cash';
-        session.landmark = parsed.landmark || session.landmark || '';
-        session.customer_notes = parsed.note || session.customer_notes || '';
-        await saveSession(session);
-        await sendTextMessage(psid, notFoundMsg);
-        return { intent: 'AWAITING_ADDRESS_RETRY', confidence: 1.0, replyLog: notFoundMsg };
-      }
 
-      const resolved_lat = geocoded.resolved_lat;
-      const resolved_lng = geocoded.resolved_lng;
-      const formatted_address = geocoded.formatted_address || addressStr;
+      const landmarkStr = parsed.landmark || session.landmark || '';
+      const paymentModeResolved = parsed.paymentMode || parsePaymentModeValue(rawText) || 'Cash';
+      const noteStr = parsed.note || session.customer_notes || '';
 
-      // 2. Compute distance & fee
-      const feeRes = await calculateDeliveryFee(resolved_lat, resolved_lng);
-      const distance = feeRes.distanceKm;
-      const calculatedFee = feeRes.deliveryFee;
-
-      // Check 10 km limit
-      if (distance > 10.0 || feeRes.isDeliverable === false) {
-        const nonDeliverableNotice = `Paunawa: Ang inyong lokasyon (${distance} km) ay lagpas sa aming 10 km delivery limit at hindi na po ito sakop para sa delivery. Maaari po kayong pumili ng Dine In o Pick-up.`;
-        await sendTextMessage(psid, nonDeliverableNotice);
-        return { intent: 'DELIVERY_NON_DELIVERABLE', confidence: 1.0, replyLog: nonDeliverableNotice };
-      }
-
-      // Check > 3.0 km escalation rule
-      if (distance > 3.0) {
-        const escalationNotice = `Paunawa: Ang inyong lokasyon (${distance} km) ay lagpas sa aming in-house delivery radius (3.0 km). Maaari po itong i-book sa Grab/Lalamove ng aming staff para sa inyong order.`;
-        await sendTextMessage(psid, escalationNotice);
-        try {
-          notificationService.broadcastSSE('COURIER_ESCALATION_NEEDED', {
-            psid,
-            distanceKm: distance,
-            maxRadiusKm: 3.0,
-            address: formatted_address
-          });
-        } catch (notifErr) { }
-      }
-
-      // Save to session
-      session.delivery_address = formatted_address;
-      session.address = formatted_address;
-      session.customer_lat = resolved_lat;
-      session.customer_lng = resolved_lng;
-      session.delivery_distance_km = distance;
-      session.delivery_fee = calculatedFee;
-      session.deliveryFee = calculatedFee;
-      session.customer_name = customerName;
-      session.contact_number = contactNumber;
-      session.phone_number = contactNumber;
-      session.payment_mode = parsed.paymentMode || parsePaymentModeValue(rawText) || 'Cash';
-      session.landmark = parsed.landmark || session.landmark || '';
-      session.customer_notes = parsed.note || session.customer_notes || '';
-      if (!session.details) session.details = {};
-      session.details.name = customerName;
-      session.details.phone = contactNumber;
-      session.details.address = formatted_address;
-      session.details.landmark = session.landmark;
-      session.details.note = session.customer_notes;
-      session.details.paymentMode = session.payment_mode;
-
-      // Transition to address confirmation
-      session.state = 'AWAITING_ADDRESS_CONFIRMATION';
-      session.checkout_step = 'AWAITING_ADDRESS_CONFIRMATION';
-      session.current_step = 'AWAITING_ADDRESS_CONFIRMATION';
-      await saveSession(session);
-
-      const confirmPrompt = `📍 Nai-locate po namin ang inyong drop-off:\n"${formatted_address}" (${distance} km)\nDelivery Fee: ₱${calculatedFee.toFixed(2)}\n\nTama po ba ang lokasyong ito?\n[1] Oo, tama ito\n[2] Ibahin ang address`;
-      await sendQuickReplies(psid, confirmPrompt, [
-        { title: 'Oo, tama ito', payload: 'CONFIRM_ADDRESS_YES' },
-        { title: 'Ibahin ang address', payload: 'CONFIRM_ADDRESS_NO' }
-      ]);
-      return { intent: 'AWAITING_ADDRESS_CONFIRMATION', confidence: 1.0, replyLog: confirmPrompt };
+      return await resolveDeliveryAddressAndFare(psid, session, addressStr, landmarkStr, {
+        customerName,
+        contactNumber,
+        paymentMode: paymentModeResolved,
+        customerNote: noteStr
+      });
     }
 
     // For Dine In / Pick-up: Skip address confirmation, auto-assign store address, set fee 0, and proceed directly to discount
@@ -2408,6 +2431,51 @@ async function handleTextInput(psid, session, rawText) {
     return { intent: 'AWAITING_ADDRESS_CONFIRMATION', confidence: 1.0, replyLog: reconfirmMsg };
   }
 
+  // 2a-1b. State: 'AWAITING_BOUNDARY_PICKUP_SWITCH' (Out-of-bounds > 3km switch to Store Pick-up)
+  if (
+    session.state === 'AWAITING_BOUNDARY_PICKUP_SWITCH' ||
+    session.checkout_step === 'AWAITING_BOUNDARY_PICKUP_SWITCH' ||
+    session.current_step === 'AWAITING_BOUNDARY_PICKUP_SWITCH'
+  ) {
+    const switchYes = rawText === 'SWITCH_TO_PICKUP' ||
+      /\b(?:oo|opo|yes|sige|ok|okay|switch|pick[\s-]*up|pickup|oo\s*switch)\b/i.test(norm);
+    const changeAddr = rawText === 'CONFIRM_ADDRESS_NO' ||
+      /\b(?:hindi|no|ibahin|change|palitan|address)\b/i.test(norm);
+
+    if (switchYes && !changeAddr) {
+      const storeAddr = getStoreAddress();
+      session.dining_mode = 'Pick-up';
+      session.orderType = 'pickup';
+      session.order_type = 'pickup';
+      session.delivery_fee = 0;
+      session.deliveryFee = 0;
+      session.delivery_address = storeAddr;
+      session.address = storeAddr;
+      if (session.details) session.details.address = storeAddr;
+
+      session.state = 'AWAITING_DISCOUNT_CONFIRMATION';
+      session.current_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+      session.checkout_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+      await saveSession(session);
+
+      const switchedMsg = 'Na-switch na po ang inyong order sa Store Pick-up (Delivery Fee: ₱0.00). Mayroon po ba kayong Senior Citizen o PWD ID para sa 20% discount?';
+      await sendQuickReplies(psid, switchedMsg, [
+        { title: 'Mayroon', payload: 'DISCOUNT_YES' },
+        { title: 'Wala po', payload: 'DISCOUNT_NO' }
+      ]);
+      return { intent: 'AWAITING_DISCOUNT_CONFIRMATION', confidence: 1.0, replyLog: switchedMsg };
+    }
+
+    session.state = 'AWAITING_ADDRESS_RETRY';
+    session.current_step = 'AWAITING_ADDRESS_RETRY';
+    session.checkout_step = 'AWAITING_ADDRESS_RETRY';
+    await saveSession(session);
+
+    const askRetryMsg = 'Pakibigay po ng bagong Delivery Address at kalapit na Landmark sa loob ng 3 km radius:';
+    await sendTextMessage(psid, askRetryMsg);
+    return { intent: 'AWAITING_ADDRESS_RETRY', confidence: 1.0, replyLog: askRetryMsg };
+  }
+
   // 2a-2. State: 'AWAITING_ADDRESS_RETRY' (Revised address input)
   if (
     session.state === 'AWAITING_ADDRESS_RETRY' ||
@@ -2415,61 +2483,11 @@ async function handleTextInput(psid, session, rawText) {
     session.current_step === 'AWAITING_ADDRESS_RETRY'
   ) {
     const rawAddressInput = rawText.trim();
-    const geocoded = await geocodeCustomerAddress(rawAddressInput);
+    const parsedRetry = parseCustomerInfo(rawAddressInput, 'Delivery');
+    const retryAddr = parsedRetry.address || rawAddressInput;
+    const retryLandmark = parsedRetry.landmark || session.landmark || '';
 
-    if (!geocoded || !geocoded.success || geocoded.error === 'ZERO_RESULTS') {
-      const retryMsg = 'Paumanhin po, hindi pa rin namin mahanap ang eksaktong lokasyon. Pakisama po ang Barangay, Siyudad, o kilalang Landmark (hal. Tapat ng MRT Boni o Puregold).';
-      await sendTextMessage(psid, retryMsg);
-      return { intent: 'AWAITING_ADDRESS_RETRY', confidence: 1.0, replyLog: retryMsg };
-    }
-
-    const resolved_lat = geocoded.resolved_lat;
-    const resolved_lng = geocoded.resolved_lng;
-    const formatted_address = geocoded.formatted_address || rawAddressInput;
-
-    const feeRes = await calculateDeliveryFee(resolved_lat, resolved_lng);
-    const distance = feeRes.distanceKm;
-    const calculatedFee = feeRes.deliveryFee;
-
-    if (distance > 10.0 || feeRes.isDeliverable === false) {
-      const nonDeliverableNotice = `Paunawa: Ang inyong lokasyon (${distance} km) ay lagpas sa aming 10 km delivery limit at hindi na po ito sakop para sa delivery. Maaari po kayong pumili ng Dine In o Pick-up.`;
-      await sendTextMessage(psid, nonDeliverableNotice);
-      return { intent: 'DELIVERY_NON_DELIVERABLE', confidence: 1.0, replyLog: nonDeliverableNotice };
-    }
-
-    if (distance > 3.0) {
-      const escalationNotice = `Paunawa: Ang inyong lokasyon (${distance} km) ay lagpas sa aming in-house delivery radius (3.0 km). Maaari po itong i-book sa Grab/Lalamove ng aming staff para sa inyong order.`;
-      await sendTextMessage(psid, escalationNotice);
-      try {
-        notificationService.broadcastSSE('COURIER_ESCALATION_NEEDED', {
-          psid,
-          distanceKm: distance,
-          maxRadiusKm: 3.0,
-          address: formatted_address
-        });
-      } catch (notifErr) { }
-    }
-
-    session.delivery_address = formatted_address;
-    session.address = formatted_address;
-    session.customer_lat = resolved_lat;
-    session.customer_lng = resolved_lng;
-    session.delivery_distance_km = distance;
-    session.delivery_fee = calculatedFee;
-    session.deliveryFee = calculatedFee;
-    if (session.details) session.details.address = formatted_address;
-
-    session.state = 'AWAITING_ADDRESS_CONFIRMATION';
-    session.checkout_step = 'AWAITING_ADDRESS_CONFIRMATION';
-    session.current_step = 'AWAITING_ADDRESS_CONFIRMATION';
-    await saveSession(session);
-
-    const confirmPrompt = `📍 Nai-locate po namin ang inyong drop-off:\n"${formatted_address}" (${distance} km)\nDelivery Fee: ₱${calculatedFee.toFixed(2)}\n\nTama po ba ang lokasyong ito?\n[1] Oo, tama ito\n[2] Ibahin ang address`;
-    await sendQuickReplies(psid, confirmPrompt, [
-      { title: 'Oo, tama ito', payload: 'CONFIRM_ADDRESS_YES' },
-      { title: 'Ibahin ang address', payload: 'CONFIRM_ADDRESS_NO' }
-    ]);
-    return { intent: 'AWAITING_ADDRESS_CONFIRMATION', confidence: 1.0, replyLog: confirmPrompt };
+    return await resolveDeliveryAddressAndFare(psid, session, retryAddr, retryLandmark);
   }
 
   // 2b. State: 'AWAITING_DISCOUNT_CONFIRMATION' (Requirement 1)
@@ -4573,6 +4591,7 @@ module.exports = {
   computeDeliveryFee,
   geocodeCustomerAddress,
   sanitizeCustomerAddress,
+  resolveDeliveryAddressAndFare,
   handleCancellationRequest,
   isCancelTriggerWord,
   promptDrinkAddons,

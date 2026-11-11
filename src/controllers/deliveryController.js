@@ -5,6 +5,7 @@
 
 const db = require('../../database/db');
 const { calculateDeliveryFare } = require('../services/fareCalculator');
+const fareEngine = require('../services/fareEngine');
 const { broadcastSSE } = require('../services/notificationService');
 const orderService = require('../services/orderService');
 const systemSettingsService = require('../services/systemSettingsService');
@@ -364,10 +365,46 @@ async function getRiderHistory(req, res) {
   }
 }
 
+/**
+ * Compute Delivery Fare from Address & Optional Landmark (Nominatim + OSRM Engine)
+ * POST /api/delivery/calculate-fare
+ */
+async function calculateFareFromAddress(req, res) {
+  try {
+    const { address = '', landmark = '' } = req.body || {};
+
+    if (!String(address || '').trim() && !String(landmark || '').trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'address or landmark is required.'
+      });
+    }
+
+    const result = await fareEngine.calculateFareForAddress(address, landmark);
+    return res.json({
+      success: true,
+      distanceKm: result.distanceKm,
+      isOutOfBounds: result.isOutOfBounds,
+      maxRadiusKm: result.maxRadiusKm,
+      coordinates: result.coordinates,
+      formattedAddress: result.formattedAddress,
+      breakdown: result.breakdown
+    });
+  } catch (err) {
+    const status = err.code === 'GEOCODE_NOT_FOUND' ? 422 : 400;
+    return res.status(status).json({
+      success: false,
+      code: err.code || 'FARE_CALCULATION_ERROR',
+      message: err.message || 'Unable to compute delivery fare.'
+    });
+  }
+}
+
 module.exports = {
   getDeliveries,
   getRiders,
   computeFare,
+  calculateFareFromAddress,
   assignRider,
   overrideFare,
   getActiveRiderOrders,
