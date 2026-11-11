@@ -58,6 +58,12 @@ const { geocodeCustomerAddress, sanitizeCustomerAddress } = require('./customerG
 const fareEngine = require('./fareEngine');
 const { applyStrikethrough, buildTextMenuPayload } = require('./textMenuService');
 const {
+  isItemPhotoRequest,
+  extractPhotoItemQuery,
+  lookupMenuItemForPhoto,
+  resolvePhotoAttachmentUrl
+} = require('./itemPhotoService');
+const {
   addToCart,
   removeFromCart,
   getCartRemoveButtons,
@@ -2695,6 +2701,11 @@ async function handleTextInput(psid, session, rawText) {
     return { intent: 'BROWSE_MENU', confidence: 1.0 };
   }
 
+  // 4b. On-Demand Item Photo Request (e.g., "Patingin ng picture ng Biscoff Cheesecake")
+  if (isItemPhotoRequest(rawText)) {
+    return await handleItemPhotoRequest(psid, session, rawText);
+  }
+
   if (['cart', 'my cart', 'view cart', 'show cart', 'whats in my cart'].includes(norm)) {
     await renderCartSummary(psid, session);
     return { intent: 'VIEW_CART', confidence: 1.0 };
@@ -3078,6 +3089,66 @@ async function getActivePromotionForPreMenu() {
 async function getActivePromotionsForToday() {
   const promo = await getActivePromotionForPreMenu();
   return promo ? [promo] : [];
+}
+
+/**
+ * Handle on-demand customer photo inquiry for a specific menu item.
+ * Dispatches image attachment (if uploaded) + price/description + [+ Order] / [View Menu] Quick Replies.
+ */
+async function handleItemPhotoRequest(psid, session, rawText) {
+  const queryName = extractPhotoItemQuery(rawText);
+  const item = await lookupMenuItemForPhoto(queryName);
+
+  // Scenario C: Item not found
+  if (!item) {
+    const notFoundMsg = "Paumanhin po, hindi ko po nahanap ang item na iyon. Maaari niyo pong i-type ang 'Menu' para makita ang listahan ng available nating pagkain at inumin.";
+    await sendQuickReplies(psid, notFoundMsg, [
+      { title: '📋 View Menu', payload: 'MENU_HOME' }
+    ]);
+    return { intent: 'ITEM_PHOTO_NOT_FOUND', confidence: 1.0, replyLog: notFoundMsg };
+  }
+
+  const priceStr = Number(item.price || 0).toFixed(2);
+  const isAvailable = Number(item.is_available) === 1 && Number(item.stock) > 0;
+  const descText = item.description ? ` ${String(item.description).trim()}` : '';
+  const photoUrl = resolvePhotoAttachmentUrl(item.image_url);
+  const orderTitle = `+ Order ${item.name}`.substring(0, 20);
+
+  // Scenario A: Item and image_url exist
+  if (photoUrl) {
+    await sendImageAttachment(psid, photoUrl);
+
+    if (isAvailable) {
+      const followUp = `Ito po ang ating ${item.name} (₱${priceStr}).${descText}`;
+      await sendQuickReplies(psid, followUp, [
+        { title: orderTitle, payload: `ADD_ITEM_${item.id}` },
+        { title: '📋 View Menu', payload: 'MENU_HOME' }
+      ]);
+      return { intent: 'ITEM_PHOTO_SENT', confidence: 1.0, replyLog: followUp, itemId: item.id };
+    } else {
+      const oosFollowUp = `Ito po ang ating ${item.name} (₱${priceStr}).${descText}\n\n⚠️ Paumanhin po, kasalukuyan itong Out of Stock sa ngayon.`;
+      await sendQuickReplies(psid, oosFollowUp, [
+        { title: '📋 View Menu', payload: 'MENU_HOME' }
+      ]);
+      return { intent: 'ITEM_PHOTO_SENT_OOS', confidence: 1.0, replyLog: oosFollowUp, itemId: item.id };
+    }
+  }
+
+  // Scenario B: Item exists but image_url is null/empty
+  if (isAvailable) {
+    const noPhotoMsg = `Paumanhin po, wala pa pong uploaded na picture para sa ${item.name}, pero available po ito sa halagang ₱${priceStr}. Nais niyo po ba itong subukan?`;
+    await sendQuickReplies(psid, noPhotoMsg, [
+      { title: orderTitle, payload: `ADD_ITEM_${item.id}` },
+      { title: '📋 View Menu', payload: 'MENU_HOME' }
+    ]);
+    return { intent: 'ITEM_PHOTO_MISSING', confidence: 1.0, replyLog: noPhotoMsg, itemId: item.id };
+  }
+
+  const noPhotoOosMsg = `Paumanhin po, wala pa pong uploaded na picture para sa ${item.name} (₱${priceStr}), at kasalukuyan po itong Out of Stock sa ngayon.`;
+  await sendQuickReplies(psid, noPhotoOosMsg, [
+    { title: '📋 View Menu', payload: 'MENU_HOME' }
+  ]);
+  return { intent: 'ITEM_PHOTO_MISSING_OOS', confidence: 1.0, replyLog: noPhotoOosMsg, itemId: item.id };
 }
 
 /**
@@ -4571,5 +4642,7 @@ module.exports = {
   handleAddonSelection,
   isDrinkOrMilktea,
   detectAddonInText,
-  applyStrikethrough
+  applyStrikethrough,
+  isItemPhotoRequest,
+  handleItemPhotoRequest
 };

@@ -1,7 +1,14 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
+const path = require('path');
 
-process.env.DB_FORCE_SQLITE = 'true';
+const testDbPath = path.join(__dirname, 'test_xendit.sqlite');
+try { if (fs.existsSync(testDbPath)) fs.unlinkSync(testDbPath); } catch (_) {}
+
+process.env.DB_FORCE_SQLITE = '1';
+process.env.SQLITE_PATH = testDbPath;
+process.env.NODE_ENV = 'test';
 process.env.XENDIT_SECRET_KEY = 'xnd_development_test_key_123';
 process.env.XENDIT_CALLBACK_TOKEN = 'test_callback_token_abc';
 process.env.APP_BASE_URL = 'https://diners-cafe-bot1.onrender.com';
@@ -263,6 +270,10 @@ test('Xendit Payment Gateway Integration Suite', async (t) => {
     assert.strictEqual(orderRows[0].payment_status, 'Paid');
     assert.strictEqual(orderRows[0].status, 'preparing');
     assert.ok(orderRows[0].payment_ref_number.includes('PH_GCASH (ewc_live_555)'));
+  });
+
+  t.after(() => {
+    try { if (fs.existsSync(testDbPath)) fs.unlinkSync(testDbPath); } catch (_) {}
   });
 });
 

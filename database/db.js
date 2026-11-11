@@ -6,6 +6,7 @@ const path = require('path');
 let pool = null;
 let useFallback = false;
 let sqliteDb = null;
+let menuRefreshPromise = null;
 
 // Helper to initialize SQLite fallback database if MySQL is unreachable
 function initSqliteFallback() {
@@ -527,10 +528,10 @@ function initSqliteFallback() {
     // Auto-refresh menu to verified 91 items if legacy or unpopulated
     try {
       const biscoffCheck = sqliteDb.prepare("SELECT COUNT(*) as count FROM menu_items WHERE name = 'Biscoff Cheesecake'").get();
-      if (!biscoffCheck || biscoffCheck.count === 0) {
+      if ((!biscoffCheck || biscoffCheck.count === 0) && !menuRefreshPromise) {
         console.log('[Database] Populating verified fresh menu board items...');
         const { runMigration } = require('./migrations/refresh_full_menu');
-        runMigration().catch(err => console.warn('[Database] Auto-refresh menu error:', err.message));
+        menuRefreshPromise = runMigration().catch(err => console.warn('[Database] Auto-refresh menu error:', err.message));
       }
     } catch (menuCheckErr) {
       console.warn('[Database] Menu verification check skipped:', menuCheckErr.message);
@@ -659,7 +660,11 @@ async function initDatabase() {
   if (process.env.DB_FORCE_SQLITE === '1') {
     console.log('[Database] DB_FORCE_SQLITE is set. Using SQLite database...');
     useFallback = true;
-    return initSqliteFallback();
+    const ok = initSqliteFallback();
+    if (menuRefreshPromise) {
+      await menuRefreshPromise;
+    }
+    return ok;
   }
 
   try {
@@ -878,7 +883,11 @@ async function initDatabase() {
   } catch (err) {
     console.warn(`[Database] MySQL unavailable (${err.message}). Activating SQLite local fallback engine...`);
     useFallback = true;
-    return initSqliteFallback();
+    const ok = initSqliteFallback();
+    if (menuRefreshPromise) {
+      await menuRefreshPromise;
+    }
+    return ok;
   }
 }
 
