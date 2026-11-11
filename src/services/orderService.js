@@ -13,7 +13,7 @@ const { processPayment } = require('./paymentService');
 const { broadcastSSE, sendNotification } = require('./notificationService');
 const { verifyQuote } = require('./geoService');
 const { sendFeedbackPrompt, sendTextMessage } = require('./messengerService');
-const { getSession, saveSession } = require('./sessionManager');
+const { getSession, saveSession, resetUserSession } = require('./sessionManager');
 const feedbackService = require('./feedbackService');
 
 /**
@@ -482,9 +482,11 @@ async function updateOrderStatus(orderId, newStatus, extraData = {}) {
     });
   }
 
-  // Automated customer notifications based on status (Module 2.C)
+  const normStatus = String(newStatus || '').toLowerCase().trim();
+
+  // Automated customer notifications & session reset based on status (Module 2.C)
   let notifMessage = '';
-  if (newStatus === 'preparing') {
+  if (normStatus === 'preparing') {
     notifMessage = "Update po sa inyong order: Kasalukuyan na po itong In Kitchen Preparation! Inihahanda na po ng aming kitchen/barista team ang inyong order.";
     await sendNotification(order.psid, 'preparing', `Order #${order.order_number} is Preparing`, notifMessage);
     if (order.psid && !order.psid.startsWith('POS_MANUAL_')) {
@@ -492,7 +494,7 @@ async function updateOrderStatus(orderId, newStatus, extraData = {}) {
         console.warn('[orderService] Failed to send preparing push to Messenger:', err.message);
       });
     }
-  } else if (newStatus === 'dispatched') {
+  } else if (normStatus === 'dispatched') {
     notifMessage = "Update po sa inyong order: Ang inyong order ay Dispatched na! Hawak na po ito ng ating rider at on the way na sa inyong location.";
     await sendNotification(order.psid, 'dispatched', `Order #${order.order_number} Dispatched`, notifMessage);
     if (order.psid && !order.psid.startsWith('POS_MANUAL_')) {
@@ -500,14 +502,29 @@ async function updateOrderStatus(orderId, newStatus, extraData = {}) {
         console.warn('[orderService] Failed to send dispatched push to Messenger:', err.message);
       });
     }
-  } else if (newStatus === 'delivered') {
+  } else if (normStatus === 'delivered' || normStatus === 'completed') {
     notifMessage = `Order #${order.order_number} delivered.`;
     await sendNotification(order.psid, 'delivered', `Order #${order.order_number} Delivered`, notifMessage);
 
-    // Asynchronously request feedback via feedbackService (without blocking status change)
-    feedbackService.requestFeedback(orderId).catch(err => {
+    // Send delivery rating/feedback request (if enabled & eligible)
+    let feedbackStatus = null;
+    try {
+      feedbackStatus = await feedbackService.requestFeedback(orderId);
+    } catch (err) {
       console.warn('[orderService] feedback request failed:', err.message);
-    });
+    }
+
+    if (
+      order.psid &&
+      !String(order.psid).startsWith('POS_MANUAL_') &&
+      !String(order.psid).startsWith('WEB_') &&
+      feedbackStatus !== 'sent'
+    ) {
+      const completionMsg = `Na-deliver na po ang inyong Order #${order.order_number}! Maraming salamat po sa pag-order sa Diner's Cafe. Mag-type lamang po ng 'Menu' kung nais ninyong umorder muli.`;
+      await sendTextMessage(order.psid, completionMsg).catch(err => {
+        console.warn('[orderService] Failed to send delivery completion push:', err.message);
+      });
+    }
 
     // Keep existing FEEDBACK_PROMPT_TRIGGERED SSE event for dashboard
     broadcastSSE('FEEDBACK_PROMPT_TRIGGERED', {
@@ -515,7 +532,14 @@ async function updateOrderStatus(orderId, newStatus, extraData = {}) {
       orderNumber: order.order_number,
       psid: order.psid
     });
-  } else if (newStatus === 'cancelled') {
+
+    // Purge customer conversational session so next inbound message starts fresh
+    if (order.psid) {
+      await resetUserSession(order.psid).catch(err => {
+        console.warn('[orderService] Failed to reset user session on delivered:', err.message);
+      });
+    }
+  } else if (normStatus === 'cancelled' || normStatus === 'voided') {
     const rawReason = extraData.cancellationReason || order.cancellation_reason || '';
     const normReason = String(rawReason).trim();
     const isTestOrDuplicate = /test|testing|duplicate/i.test(normReason);
@@ -524,13 +548,20 @@ async function updateOrderStatus(orderId, newStatus, extraData = {}) {
       console.log(`[orderService] Silent cancellation for Order #${order.order_number} (Reason: "${normReason}"). Skipping Meta Send API notification.`);
     } else {
       const cleanReason = normReason || 'Out of stock / customer request';
-      notifMessage = `Paumanhin po, ang inyong Order #${order.order_number} ay na-cancel dahil sa sumusunod na dahilan: ${cleanReason}.`;
+      notifMessage = `Paumanhin po, ang inyong Order #${order.order_number} ay na-cancel dahil sa sumusunod na dahilan: ${cleanReason}. Kung nais ninyong mag-order muli, mag-type lamang po ng 'Menu'.`;
       await sendNotification(order.psid, 'cancelled', `Order #${order.order_number} Cancelled`, notifMessage);
       if (order.psid && !order.psid.startsWith('POS_MANUAL_')) {
         await sendTextMessage(order.psid, notifMessage).catch(err => {
           console.warn('[orderService] Failed to send cancelled push to Messenger:', err.message);
         });
       }
+    }
+
+    // Purge customer conversational session so next inbound message starts fresh
+    if (order.psid) {
+      await resetUserSession(order.psid).catch(err => {
+        console.warn('[orderService] Failed to reset user session on cancelled:', err.message);
+      });
     }
   }
 

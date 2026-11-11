@@ -140,18 +140,34 @@ async function getSession(psid) {
     cart,
     pendingItem: extras.pendingItem || null,
     pendingDrinkOrder: extras.pendingDrinkOrder || null,
+    current_drink_item: extras.current_drink_item || null,
+    temp_drink_id: extras.temp_drink_id || null,
     pending_suggestion: extras.pending_suggestion || null,
+    pendingStage5: extras.pendingStage5 || null,
+    pendingGCashOrder: extras.pendingGCashOrder || null,
     pendingQuantity: null,
     pendingAction: null,
     pendingIntent: null,
     pendingDisambiguation: null,
+    awaiting_field: extras.awaiting_field || null,
+    editingField: extras.editingField || null,
+    checkout_step: extras.checkout_step || null,
     activeOrderNumber: extras.activeOrderNumber || null,
+    active_order_id: extras.active_order_id || null,
+    order_id: extras.order_id || null,
     pendingRating: extras.pendingRating || null,
     pendingFeedbackOrderId: null,
     pendingFeedbackOrderNumber: extras.pendingFeedbackOrderNumber || null,
     geminiInteractionId: extras.geminiInteractionId || null,
-    dining_mode: extras.dining_mode || extras.orderType || null,
+    dining_mode: extras.dining_mode !== undefined ? extras.dining_mode : (extras.orderType || null),
+    payment_mode: extras.payment_mode || null,
+    landmark: extras.landmark || null,
+    arriving_time: extras.arriving_time || null,
+    arrivingTime: extras.arrivingTime || null,
+    customer_notes: extras.customer_notes || null,
+    note: extras.note || null,
     discount_info: extras.discount_info || null,
+    discount_amount: extras.discount_amount || 0,
     chatHistory: Array.isArray(extras.chatHistory) ? extras.chatHistory.slice(-10) : [],
     failedAttempts: extras.failedAttempts || 0,
     lastInteraction: extras.lastInteraction || Date.now(),
@@ -216,15 +232,31 @@ async function saveSession(session) {
       checkout: session.checkout || null,
       pendingRating: session.pendingRating || null,
       activeOrderNumber: session.activeOrderNumber || null,
+      active_order_id: session.active_order_id || null,
+      order_id: session.order_id || null,
+      awaiting_field: session.awaiting_field || null,
+      editingField: session.editingField || null,
+      checkout_step: session.checkout_step || null,
       lastInteraction: session.lastInteraction,
       failedAttempts: session.failedAttempts || 0,
       pendingFeedbackOrderNumber: session.pendingFeedbackOrderNumber || null,
       pendingItem: session.pendingItem || null,
       pendingDrinkOrder: session.pendingDrinkOrder || null,
+      current_drink_item: session.current_drink_item || null,
+      temp_drink_id: session.temp_drink_id || null,
       pending_suggestion: session.pending_suggestion || null,
+      pendingStage5: session.pendingStage5 || null,
+      pendingGCashOrder: session.pendingGCashOrder || null,
       geminiInteractionId: session.geminiInteractionId || null,
-      dining_mode: session.dining_mode || session.orderType || null,
+      dining_mode: session.dining_mode !== undefined ? session.dining_mode : (session.orderType || null),
+      payment_mode: session.payment_mode || null,
+      landmark: session.landmark || null,
+      arriving_time: session.arriving_time || null,
+      arrivingTime: session.arrivingTime || null,
+      customer_notes: session.customer_notes || null,
+      note: session.note || null,
       discount_info: session.discount_info || null,
+      discount_amount: session.discount_amount || 0,
       chatHistory: Array.isArray(session.chatHistory) ? session.chatHistory.slice(-10) : [],
       warning20Sent: !!session.warning20Sent,
       warning25Sent: !!session.warning25Sent,
@@ -306,6 +338,97 @@ async function clearSessionCart(session) {
 }
 
 /**
+ * Completely reset a customer's conversational session state and purge all transaction drafts.
+ * Triggered automatically when an order is DELIVERED or CANCELLED / VOIDED.
+ *
+ * @param {string} psid - Customer Facebook PSID
+ * @returns {Promise<Object|null>} Reset session object
+ */
+async function resetUserSession(psid, options = {}) {
+  if (!psid) return null;
+  const psidStr = String(psid);
+  const targetState = options.targetState || 'IDLE';
+
+  // Load or initialize session object so in-memory Map reference stays consistent
+  const session = await getSession(psidStr);
+
+  // 1. Reset conversational state & step pointers
+  session.state = targetState;
+  session.current_step = targetState;
+  session.previous_step = null;
+  session.checkout_step = null;
+
+  // 2. Clear active cart & order transaction pointers
+  session.cart = [];
+  session.ordered_items = null;
+  session.activeOrderNumber = null;
+  session.active_order_id = null;
+  session.order_id = null;
+  session.awaiting_field = null;
+  session.editingField = null;
+  session.temp_drink_id = null;
+  session.current_drink_item = null;
+
+  // 3. Purge temporary add-ons, checkout drafts, and feedback/payment pointers
+  session.pendingItem = null;
+  session.pendingDrinkOrder = null;
+  session.pending_suggestion = null;
+  session.pendingQuantity = null;
+  session.pendingAction = null;
+  session.pendingIntent = null;
+  session.pendingDisambiguation = null;
+  session.pendingStage5 = null;
+  session.pendingGCashOrder = null;
+  session.pendingRating = null;
+  session.pendingFeedbackOrderId = null;
+  session.pendingFeedbackOrderNumber = null;
+  session.partial_paid = null;
+  session.gcash_ref = null;
+  session.receipt_url = null;
+
+  // 4. Purge delivery address, fare quote, dining mode, and pricing drafts
+  session.quote = null;
+  session.quoteToken = null;
+  session.checkout = null;
+  session.details = null;
+  session.orderType = null;
+  session.order_type = null;
+  session.dining_mode = null;
+  session.payment_mode = null;
+  session.delivery_address = null;
+  session.address = '';
+  session.landmark = null;
+  session.arriving_time = null;
+  session.arrivingTime = null;
+  session.customer_notes = null;
+  session.note = null;
+  session.distance_km = null;
+  session.delivery_fee = null;
+  session.deliveryFee = 0;
+  session.customer_lat = null;
+  session.customer_lng = null;
+  session.delivery_coordinates = null;
+  session.order_subtotal = null;
+  session.order_total = null;
+  session.discount = null;
+  session.discount_amount = 0;
+  session.discount_info = null;
+  session.is_preorder = false;
+
+  // 5. Reset AI conversation thread & inactivity flags
+  session.geminiInteractionId = null;
+  session.chatHistory = [];
+  session.failedAttempts = 0;
+  session.warning20Sent = false;
+  session.warning25Sent = false;
+  session.purged30Sent = false;
+  session.lastInteraction = Date.now();
+
+  await saveSession(session);
+  return session;
+}
+
+/**
  * Clear in-memory cache (primarily for tests)
  */
 function clearMemorySessions() {
@@ -317,6 +440,7 @@ module.exports = {
   getSession,
   saveSession,
   clearSessionCart,
+  resetUserSession,
   clearMemorySessions,
   userSessions
 };

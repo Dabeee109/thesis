@@ -38,7 +38,7 @@ const {
 } = require('./batchCartService');
 const notificationService = require('./notificationService');
 const { queryWitAi, localNluParse } = require('./witAiService');
-const { getSession, saveSession, clearSessionCart } = require('./sessionManager');
+const { getSession, saveSession, clearSessionCart, resetUserSession } = require('./sessionManager');
 const { botMessages, LABELS } = require('./botMessages');
 const {
   normalize,
@@ -1147,12 +1147,7 @@ async function handleCancellationRequest(psid, session, rawText = '') {
       await updateOrderStatus(activeOrder.id, 'cancelled', {
         cancellationReason: 'Cancelled by customer via Messenger'
       });
-      session.activeOrderNumber = null;
-      session.active_order_id = null;
-      session.current_step = 'idle';
-      session.state = 'idle';
-      session.cart = [];
-      await saveSession(session);
+      await resetUserSession(psid);
 
       const orderIdentifier = activeOrder.order_number || activeOrder.id;
       const reply = `Ang inyong order #${orderIdentifier} ay matagumpay nang nakansela. Kung nais ninyong mag-order muli, mag-type lamang po ng 'Menu'.`;
@@ -1164,10 +1159,7 @@ async function handleCancellationRequest(psid, session, rawText = '') {
   // If no placed active order: check for draft items in cart
   if (session.cart && session.cart.length > 0) {
     if (typeof rawText === 'string' && (rawText.startsWith('CANCEL_ORDER') || rawText.startsWith('ACTION_CANCEL_ORDER'))) {
-      session.cart = [];
-      session.state = 'IDLE';
-      session.current_step = 'idle';
-      await saveSession(session);
+      await resetUserSession(psid);
       const reply = "Na-cancel na po ang inyong kasalukuyang cart selection. Maaari po kayong pumili muli sa ating menu anumang oras!";
       await sendTextMessage(psid, reply);
       return { intent: 'CANCEL_CART', confidence: 1.0, replyLog: reply };
@@ -1755,14 +1747,7 @@ async function handleTextInput(psid, session, rawText) {
       if (session.activeOrderNumber) {
         await db.query(`UPDATE orders SET status = 'cancelled' WHERE order_number = ?`, [session.activeOrderNumber]);
       }
-      session.cart = [];
-      session.order_type = null;
-      session.delivery_address = null;
-      session.gcash_ref = null;
-      session.current_step = 'idle';
-      session.state = 'idle';
-      session.activeOrderNumber = null;
-      await saveSession(session);
+      await resetUserSession(psid, { targetState: 'idle' });
 
       const reply = 'Order has been cancelled.';
       await sendTextMessage(psid, reply);
@@ -1978,11 +1963,7 @@ async function handleTextInput(psid, session, rawText) {
         await updateOrderStatus(activeOrder.id, 'cancelled', {
           cancellationReason: 'Cancelled by customer'
         });
-        session.activeOrderNumber = null;
-        session.current_step = 'idle';
-        session.state = 'idle';
-        session.cart = [];
-        await saveSession(session);
+        await resetUserSession(psid);
 
         const reply = "Na-cancel na po ang inyong order. Ang refund po (kung bayad via online) ay papasok within 5-10 minutes.";
         await sendTextMessage(psid, reply);
