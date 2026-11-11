@@ -81,6 +81,9 @@ async function createInvoice({
   }
 
   const baseUrl = getBaseUrl();
+  const cleanPhone = String(customerPhone || '').replace(/[^\d+]/g, '');
+  const hasValidPhone = /\d{7,}/.test(cleanPhone);
+
   const payload = {
     external_id: String(orderNumber),
     amount: numericAmount,
@@ -89,7 +92,7 @@ async function createInvoice({
     invoice_duration: durationSeconds,
     customer: {
       given_names: String(customerName || 'Customer').slice(0, 100),
-      ...(customerPhone ? { mobile_number: String(customerPhone).slice(0, 30) } : {})
+      ...(hasValidPhone ? { mobile_number: cleanPhone.slice(0, 30) } : {})
     },
     success_redirect_url: `${baseUrl}/payment/xendit/return?status=success&order=${encodeURIComponent(orderNumber)}`,
     failure_redirect_url: `${baseUrl}/payment/xendit/return?status=failed&order=${encodeURIComponent(orderNumber)}`
@@ -117,3 +120,4 @@ module.exports = {
   createInvoice,
   verifyCallbackToken
 };
+

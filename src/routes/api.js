@@ -66,6 +66,7 @@ router.post('/admin/orders/:id/cancel', authController.authMiddleware, orderCont
 router.post('/orders/:id/verify-payment', authController.authMiddleware, orderController.verifyPayment);
 router.post('/orders/:id/invalid-payment', authController.authMiddleware, orderController.invalidPayment);
 router.post('/payment/xendit/webhook', xenditController.handleWebhook);
+router.get('/payment/xendit/status', xenditController.getStatus);
 router.post('/orders/:id/request-void', authController.authMiddleware, orderController.requestVoid);
 router.post('/orders/:id/authorize-void', authController.authMiddleware, orderController.authorizeVoid);
 router.post('/orders/:id/reject-void', authController.authMiddleware, orderController.rejectVoid);

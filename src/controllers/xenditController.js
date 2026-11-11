@@ -109,5 +109,17 @@ async function handleWebhook(req, res) {
 }
 
 module.exports = {
-  handleWebhook
+  handleWebhook,
+  getStatus(req, res) {
+    const hasSecretKey = Boolean((process.env.XENDIT_SECRET_KEY || '').trim());
+    const hasCallbackToken = Boolean((process.env.XENDIT_CALLBACK_TOKEN || '').trim());
+    const baseUrl = (process.env.APP_BASE_URL || process.env.APP_URL || '').trim() || null;
+    return res.json({
+      success: true,
+      configured: hasSecretKey,
+      hasCallbackToken,
+      baseUrl
+    });
+  }
 };
+
