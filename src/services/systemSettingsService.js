@@ -137,6 +137,20 @@ async function updateSystemSettings(data = {}) {
     cachedSettings.override_by = override_by;
   }
 
+  // If schedule hours changed without a manual override active, sync store_status to new schedule
+  if ((store_open_time || store_close_time) && store_status === undefined && !cachedSettings.is_manual_override) {
+    cachedSettings.store_status = isStoreOpen().isScheduleOpen ? 'OPEN' : 'CLOSED';
+  }
+
+  // Format override_at safely for SQL DATETIME ('YYYY-MM-DD HH:MM:SS')
+  let sqlOverrideAt = null;
+  if (cachedSettings.override_at) {
+    const d = new Date(cachedSettings.override_at);
+    sqlOverrideAt = !isNaN(d.getTime())
+      ? d.toISOString().slice(0, 19).replace('T', ' ')
+      : String(cachedSettings.override_at).slice(0, 19).replace('T', ' ');
+  }
+
   cachedSettings.updated_at = new Date().toISOString();
 
   // Persist to database
@@ -155,7 +169,7 @@ async function updateSystemSettings(data = {}) {
           cachedSettings.store_close_time,
           cachedSettings.store_timezone,
           cachedSettings.is_manual_override,
-          cachedSettings.override_at,
+          sqlOverrideAt,
           cachedSettings.override_by
         ]
       );
@@ -170,7 +184,7 @@ async function updateSystemSettings(data = {}) {
           cachedSettings.store_close_time,
           cachedSettings.store_timezone,
           cachedSettings.is_manual_override,
-          cachedSettings.override_at,
+          sqlOverrideAt,
           cachedSettings.override_by
         ]
       );
@@ -517,7 +531,17 @@ async function evaluateStoreSchedule(now = new Date()) {
   const scheduledState = scheduleInfo.isScheduleOpen ? 'OPEN' : 'CLOSED';
 
   if (isOverride) {
-    const overrideDate = cachedSettings.override_at ? new Date(cachedSettings.override_at) : null;
+    let overrideDate = null;
+    if (cachedSettings.override_at) {
+      if (cachedSettings.override_at instanceof Date) {
+        overrideDate = cachedSettings.override_at;
+      } else {
+        const s = String(cachedSettings.override_at).trim();
+        overrideDate = (s.includes('T') || s.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(s))
+          ? new Date(s)
+          : new Date(s.replace(' ', 'T') + 'Z');
+      }
+    }
     const crossedMilestone = checkMilestoneCrossing(overrideDate, now, openTime, closeTime);
 
     if (crossedMilestone) {

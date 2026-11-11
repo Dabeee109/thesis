@@ -422,6 +422,8 @@ async function updateOperatingHoursSettings(req, res) {
       store_open_time: updated.store_open_time,
       store_close_time: updated.store_close_time,
       store_timezone: updated.store_timezone,
+      store_status: schedule.status,
+      isOpen: schedule.isOpen,
       schedule,
       updated_by: user
     });
@@ -429,6 +431,10 @@ async function updateOperatingHoursSettings(req, res) {
     return res.json({
       success: true,
       message: 'Store operating hours updated successfully.',
+      store_open_time: updated.store_open_time,
+      store_close_time: updated.store_close_time,
+      store_status: schedule.status,
+      isOpen: schedule.isOpen,
       settings: updated,
       schedule
     });
@@ -448,10 +454,13 @@ async function getStoreStatus(req, res) {
     const schedule = systemSettingsService.isStoreOpen();
     const nextMilestone = systemSettingsService.getNextScheduleMilestone();
     const isOverride = (sys.is_manual_override === 1 || sys.is_manual_override === true);
+    const effectiveStatus = isOverride
+      ? (sys.store_status || (schedule.isOpen ? 'OPEN' : 'CLOSED'))
+      : (schedule.isOpen ? 'OPEN' : 'CLOSED');
 
     return res.json({
       success: true,
-      store_status: sys.store_status || (schedule.isOpen ? 'OPEN' : 'CLOSED'),
+      store_status: effectiveStatus,
       isOpen: schedule.isOpen,
       is_manual_override: isOverride,
       override_at: sys.override_at || null,

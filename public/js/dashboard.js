@@ -3480,7 +3480,8 @@ function renderStoreStatusUI(status, isOpen, hours, isOverride = false, nextMile
   const overrideBadge = document.getElementById('store-override-badge');
   const overrideDetail = document.getElementById('store-override-detail');
 
-  const isStoreOpen = (status === 'OPEN');
+  const isStoreOpen = (typeof isOpen === 'boolean') ? isOpen : (status === 'OPEN');
+  currentStoreStatus = isStoreOpen ? 'OPEN' : 'CLOSED';
 
   if (btn) {
     if (isStoreOpen) {

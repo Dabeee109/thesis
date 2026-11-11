@@ -694,6 +694,31 @@ async function initDatabase() {
 
     // MySQL idempotent migrations
     try {
+      await conn.query(`
+        CREATE TABLE IF NOT EXISTS system_settings (
+          id INT PRIMARY KEY DEFAULT 1,
+          chatbot_enabled TINYINT(1) DEFAULT 1,
+          store_status VARCHAR(20) DEFAULT 'OPEN',
+          store_open_time VARCHAR(20) DEFAULT '09:00:00',
+          store_close_time VARCHAR(20) DEFAULT '21:00:00',
+          store_timezone VARCHAR(50) DEFAULT 'Asia/Manila',
+          is_manual_override TINYINT(1) DEFAULT 0,
+          override_at DATETIME NULL,
+          override_by VARCHAR(100) NULL,
+          fare_base DECIMAL(10,2) DEFAULT 49.00,
+          fare_per_05km DECIMAL(10,2) DEFAULT 12.00,
+          fare_fuel_cost DECIMAL(10,2) DEFAULT 2.83,
+          fare_maintenance DECIMAL(10,2) DEFAULT 7.50,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+
+      await conn.query(`
+        INSERT INTO system_settings (id, chatbot_enabled, store_status, store_open_time, store_close_time, store_timezone)
+        VALUES (1, 1, 'OPEN', '09:00:00', '21:00:00', 'Asia/Manila')
+        ON DUPLICATE KEY UPDATE id = id;
+      `).catch(() => {});
+
       const cols = [
         { table: 'customers', column: 'session_json', type: 'TEXT NULL' },
         { table: 'orders', column: 'feedback_requested_at', type: 'DATETIME NULL' },
@@ -719,6 +744,11 @@ async function initDatabase() {
         { table: 'payments', column: 'receipt_url', type: 'TEXT NULL' },
         { table: 'deliveries', column: 'customer_lat', type: 'DECIMAL(10, 7) NULL' },
         { table: 'deliveries', column: 'customer_lng', type: 'DECIMAL(10, 7) NULL' },
+        { table: 'system_settings', column: 'chatbot_enabled', type: 'TINYINT(1) DEFAULT 1' },
+        { table: 'system_settings', column: 'store_status', type: "VARCHAR(20) DEFAULT 'OPEN'" },
+        { table: 'system_settings', column: 'store_open_time', type: "VARCHAR(20) DEFAULT '09:00:00'" },
+        { table: 'system_settings', column: 'store_close_time', type: "VARCHAR(20) DEFAULT '21:00:00'" },
+        { table: 'system_settings', column: 'store_timezone', type: "VARCHAR(50) DEFAULT 'Asia/Manila'" },
         { table: 'system_settings', column: 'is_manual_override', type: 'TINYINT(1) DEFAULT 0' },
         { table: 'system_settings', column: 'override_at', type: 'DATETIME NULL' },
         { table: 'system_settings', column: 'override_by', type: 'VARCHAR(100) NULL' },
@@ -728,13 +758,17 @@ async function initDatabase() {
         { table: 'system_settings', column: 'fare_maintenance', type: 'DECIMAL(10,2) DEFAULT 7.50' }
       ];
       for (const c of cols) {
-        const [rows] = await conn.query(
-          `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
-          [config.db.database, c.table, c.column]
-        );
-        if (!rows.length) {
-          await conn.query(`ALTER TABLE ${c.table} ADD COLUMN ${c.column} ${c.type}`);
-          console.log(`[Database] Added column ${c.column} to MySQL table ${c.table}`);
+        try {
+          const [rows] = await conn.query(
+            `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+            [config.db.database, c.table, c.column]
+          );
+          if (!rows.length) {
+            await conn.query(`ALTER TABLE ${c.table} ADD COLUMN ${c.column} ${c.type}`);
+            console.log(`[Database] Added column ${c.column} to MySQL table ${c.table}`);
+          }
+        } catch (colErr) {
+          console.warn(`[Database] Column migration notice (${c.table}.${c.column}):`, colErr.message);
         }
       }
 
