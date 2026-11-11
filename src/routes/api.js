@@ -13,6 +13,7 @@ const deliveryQuoteController = require('../controllers/deliveryQuoteController'
 const settingsController = require('../controllers/settingsController');
 const promotionController = require('../controllers/promotionController');
 const xenditController = require('../controllers/xenditController');
+const webhookController = require('../controllers/webhookController');
 const rateLimit = require('express-rate-limit');
 
 const quoteLimiter = rateLimit({
@@ -67,6 +68,7 @@ router.post('/orders/:id/verify-payment', authController.authMiddleware, orderCo
 router.post('/orders/:id/invalid-payment', authController.authMiddleware, orderController.invalidPayment);
 router.post('/payment/xendit/webhook', xenditController.handleWebhook);
 router.get('/payment/xendit/status', xenditController.getStatus);
+router.post('/payment/gcash/sms-webhook', webhookController.gcashSmsWebhook);
 router.post('/orders/:id/request-void', authController.authMiddleware, orderController.requestVoid);
 router.post('/orders/:id/authorize-void', authController.authMiddleware, orderController.authorizeVoid);
 router.post('/orders/:id/reject-void', authController.authMiddleware, orderController.rejectVoid);

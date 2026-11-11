@@ -57,19 +57,25 @@ async function processPayment({ orderId, paymentMethod, amountPaid = 0, referenc
       }
     }
   } else if (pMethod === 'gcash') {
-    const diff = paid - amountExpected;
-    if (Math.abs(diff) > 0.01) {
-      isMismatch = 1;
-      status = 'mismatch_flagged';
-      if (diff < 0) {
-        mismatchNotes = `Underpaid by ₱${Math.abs(diff).toFixed(2)}. Entered ₱${paid.toFixed(2)}, expected ₱${amountExpected.toFixed(2)}.`;
-      } else {
-        mismatchNotes = `Overpaid by ₱${diff.toFixed(2)}. Entered ₱${paid.toFixed(2)}, expected ₱${amountExpected.toFixed(2)}.`;
-      }
-    } else {
+    if (paid <= 0) {
       isMismatch = 0;
-      status = 'verified';
-      mismatchNotes = 'Exact amount verified against order total.';
+      status = 'pending';
+      mismatchNotes = 'Awaiting GCash receipt verification.';
+    } else {
+      const diff = paid - amountExpected;
+      if (Math.abs(diff) > 0.01) {
+        isMismatch = 1;
+        status = 'mismatch_flagged';
+        if (diff < 0) {
+          mismatchNotes = `Underpaid by ₱${Math.abs(diff).toFixed(2)}. Entered ₱${paid.toFixed(2)}, expected ₱${amountExpected.toFixed(2)}.`;
+        } else {
+          mismatchNotes = `Overpaid by ₱${diff.toFixed(2)}. Entered ₱${paid.toFixed(2)}, expected ₱${amountExpected.toFixed(2)}.`;
+        }
+      } else {
+        isMismatch = 0;
+        status = 'verified';
+        mismatchNotes = 'Exact amount verified against order total.';
+      }
     }
   } else {
     // Cash on Pickup / Delivery

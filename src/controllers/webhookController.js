@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const config = require('../config/config');
 const db = require('../../database/db');
 const systemSettingsService = require('../services/systemSettingsService');
+const storeSettingsService = require('../services/storeSettingsService');
 const { handleMessageEvent, getSession, saveSession, generateSummaryReceipt } = require('../services/nlpEngine');
 const { verifyPaymentTransaction, resolveOrderTotal, formatAmount } = require('../services/paymentVerificationService');
 const { sendTextMessage } = require('../services/messengerService');
@@ -197,6 +198,7 @@ async function gcashRedirect(req, res) {
 
   const query = req?.query || {};
   const psid = (query.psid || '').trim();
+  const isPersonalMode = String(query.mode || '').trim().toLowerCase() === 'personal';
   let session = null;
 
   if (psid) {
@@ -207,13 +209,19 @@ async function gcashRedirect(req, res) {
     }
   }
 
-  const orderTotal = resolveOrderTotal(session) || (query.amount ? parseFloat(query.amount) : 145.00);
+  const storeGcash = await storeSettingsService.getStoreSettings();
+  const gcashAccountName = String(storeGcash?.gcash_account_name || config.store?.gcashName || "Diner's Cafe - Tondo Branch");
+  const gcashAccountNumber = String(storeGcash?.gcash_account_number || config.store?.gcashNumber || '0928 176 2895');
+  const gcashQrUrl = String(storeGcash?.gcash_qr_image_url || '/images/gcash_official_qr.jpg');
+
+  const pendingDraft = session?.pendingGCashOrder || null;
+  const orderTotal = pendingDraft?.grandTotal || resolveOrderTotal(session) || (query.amount ? parseFloat(query.amount) : 145.00);
   const formattedTotal = formatAmount(orderTotal);
-  const customerName = session?.customer_name || session?.details?.name || 'Customer';
-  const deliveryAddress = session?.delivery_address || session?.details?.address || 'Metro Manila';
-  const items = (session?.cart && session?.cart.length > 0)
-    ? session.cart
-    : (session?.ordered_items || []);
+  const customerName = pendingDraft?.customerName || session?.customer_name || session?.details?.name || 'Customer';
+  const deliveryAddress = pendingDraft?.address || session?.delivery_address || session?.details?.address || 'Metro Manila';
+  const items = (pendingDraft?.items && pendingDraft.items.length > 0)
+    ? pendingDraft.items
+    : ((session?.cart && session?.cart.length > 0) ? session.cart : (session?.ordered_items || []));
 
   const itemsHtml = items.length > 0
     ? items.map(it => {
@@ -362,6 +370,7 @@ async function gcashRedirect(req, res) {
       }
     };
 
+    ${isPersonalMode ? '' : `
     async function submitGcashPayment() {
       const payBtn = document.getElementById('payBtn');
       const statusBox = document.getElementById('statusBox');
@@ -389,10 +398,10 @@ async function gcashRedirect(req, res) {
           statusBox.style.display = 'block';
           statusBox.style.background = '#e8f5e9';
           statusBox.style.border = '2px solid #4caf50';
-          statusBox.innerHTML = \`
+          statusBox.innerHTML = \\\`
             <h2 style="color:#2e7d32; margin-top:0;">Kumpirmado ang Bayad!</h2>
-            <p style="font-size:24px; font-weight:800; color:#1b5e20; margin:8px 0;">PHP \${Number(data.amount).toFixed(2)}</p>
-            <p style="font-size:14px; color:#555;"><strong>GCash Ref No:</strong> \${data.referenceNumber}</p>
+            <p style="font-size:24px; font-weight:800; color:#1b5e20; margin:8px 0;">PHP \\\${Number(data.amount).toFixed(2)}</p>
+            <p style="font-size:14px; color:#555;"><strong>GCash Ref No:</strong> \\\${data.referenceNumber}</p>
             <div style="background:#ffffff; border-radius:8px; padding:12px; margin:15px 0; border:1px solid #c8e6c9;">
               <p style="margin:0; font-size:14px; color:#2e7d32; font-weight:bold;">
                 Naipadala na ang resibo sa inyong Messenger!
@@ -404,7 +413,7 @@ async function gcashRedirect(req, res) {
             <button onclick="window.close()" style="width:100%; padding:12px; background:#007dfe; color:#fff; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">
               Bumalik sa Messenger
             </button>
-          \`;
+          \\\`;
         } else {
           alert('Error: ' + (data.message || 'Hindi maiproseso ang bayad.'));
           payBtn.disabled = false;
@@ -416,6 +425,7 @@ async function gcashRedirect(req, res) {
         payBtn.innerText = 'Bayaran ang PHP ${formattedTotal} sa GCash';
       }
     }
+    `}
   </script>
 </head>
 <body>
@@ -436,7 +446,7 @@ async function gcashRedirect(req, res) {
 
         <div class="detail-row">
           <span class="detail-label">Tindahan / Recipient</span>
-          <span class="detail-val">FR****S DA*E F.<br><small style="color:#007dfe;">0928 176 2895</small></span>
+          <span class="detail-val">${gcashAccountName}<br><small style="color:#007dfe;">${gcashAccountNumber}</small>${isPersonalMode ? ` <button type="button" onclick="navigator.clipboard && navigator.clipboard.writeText('${gcashAccountNumber}'); this.innerText='Copied!';" style="margin-left:6px; font-size:11px; padding:2px 8px; border:1px solid #007dfe; background:#eef6ff; color:#007dfe; border-radius:4px; cursor:pointer;">Copy</button>` : ''}</span>
         </div>
 
         <div class="detail-row">
@@ -449,17 +459,30 @@ async function gcashRedirect(req, res) {
           <span class="detail-val">${deliveryAddress}</span>
         </div>
 
+        ${isPersonalMode ? `
+        <div style="text-align:center; margin:14px 0 18px; padding:12px; background:#f7faff; border:1px solid #d6e9ff; border-radius:10px;">
+          <div style="font-size:12px; font-weight:bold; color:#0056b3; margin-bottom:8px;">I-scan ang Official GCash QR ng Tindahan:</div>
+          <img src="${gcashQrUrl}" alt="Diner's Cafe GCash QR" style="max-width:200px; width:100%; border-radius:8px; border:1px solid #ddd;" />
+        </div>
+        ` : ''}
+
         <div style="font-size:13px; font-weight:bold; color:#555; margin:16px 0 8px;">Order Details:</div>
         <div class="items-container">
           ${itemsHtml}
         </div>
 
+        ${isPersonalMode ? `
+        <div style="background:#fff8e1; border:1px solid #ffe082; border-radius:10px; padding:12px; margin-bottom:16px; font-size:13px; color:#5d4037; line-height:1.45;">
+          <strong>Paalala:</strong> Pagkatapos magpadala ng <strong>PHP ${formattedTotal}</strong> sa GCash App, bumalik sa <strong>Facebook Messenger</strong> at i-send ang <strong>screenshot ng GCash receipt</strong> (o 13-digit Ref No.) upang masimulan ang paghahanda ng iyong order.
+        </div>
+        ` : `
         <button id="payBtn" class="btn-pay" onclick="submitGcashPayment()">
           Bayaran ang PHP ${formattedTotal} sa GCash
         </button>
+        `}
 
         <div style="margin-top:20px; text-align:center;">
-          <p style="font-size:12px; color:#888; margin:0 0 8px;">O magbayad gamit ang GCash App:</p>
+          ${isPersonalMode ? '' : '<p style="font-size:12px; color:#888; margin:0 0 8px;">O magbayad gamit ang GCash App:</p>'}
           <a href="intent://#Intent;scheme=gcash;package=com.globe.gcash.android;end" 
              id="gcashAppBtn"
              class="btn-app"
@@ -480,7 +503,13 @@ async function gcashRedirect(req, res) {
  */
 async function confirmGcashPayment(req, res) {
   try {
-    const { psid, amount } = req.body;
+    const { psid, amount, mode } = req.body;
+    if (String(mode || '').trim().toLowerCase() === 'personal') {
+      return res.status(403).json({
+        success: false,
+        message: 'Direct self-confirmation is disabled in personal GCash mode. Please upload your GCash receipt in Messenger.'
+      });
+    }
     if (!psid) {
       return res.status(400).json({ success: false, message: 'Missing psid parameter' });
     }
@@ -533,10 +562,102 @@ async function confirmGcashPayment(req, res) {
   }
 }
 
+/**
+ * Incoming GCash SMS / App Notification Ingest Webhook (POST /api/payment/gcash/sms-webhook)
+ * Allows an authorized SMS/Notification forwarder on the store phone to record incoming
+ * GCash transfers into `admin_gcash_transactions` and auto-verify any waiting customer order.
+ */
+async function gcashSmsWebhook(req, res) {
+  try {
+    const expectedToken = String(process.env.GCASH_SMS_WEBHOOK_TOKEN || '').trim();
+    if (expectedToken) {
+      const provided = String(
+        req.headers['x-gcash-webhook-token'] ||
+        req.headers['x-callback-token'] ||
+        req.body?.token ||
+        ''
+      ).trim();
+      if (!safeCompare(provided, expectedToken)) {
+        return res.status(401).json({ success: false, message: 'Unauthorized GCash webhook token.' });
+      }
+    }
+
+    const { parseGcashSmsNotification } = require('../services/personalGcashService');
+    const orderService = require('../services/orderService');
+
+    const rawText = req.body?.text || req.body?.message || req.body?.raw_text || '';
+    const parsed = parseGcashSmsNotification(rawText);
+    const referenceNumber = String(req.body?.reference_number || req.body?.referenceNumber || parsed.referenceNumber || '').trim();
+    const amount = Number(req.body?.amount ?? parsed.amount ?? 0);
+
+    if (!referenceNumber || !Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Could not extract valid reference_number and positive amount.'
+      });
+    }
+
+    const [existingLedger] = await db.query(
+      `SELECT id, status FROM admin_gcash_transactions WHERE reference_number = ? LIMIT 1`,
+      [referenceNumber]
+    );
+
+    if (!existingLedger || existingLedger.length === 0) {
+      await db.query(
+        `INSERT INTO admin_gcash_transactions (reference_number, amount, status, created_at)
+         VALUES (?, ?, 'UNCLAIMED', CURRENT_TIMESTAMP)`,
+        [referenceNumber, amount]
+      );
+    }
+
+    // Check if an order is already awaiting verification with this exact reference number
+    const [pendingOrders] = await db.query(
+      `SELECT id, order_number, total_amount, payment_status
+       FROM orders
+       WHERE (gcash_ref = ? OR payment_ref_number = ?)
+         AND LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'voided', 'delivered')
+       ORDER BY id DESC
+       LIMIT 1`,
+      [referenceNumber, referenceNumber]
+    );
+
+    let autoVerifiedOrder = null;
+    if (pendingOrders && pendingOrders.length > 0) {
+      const ord = pendingOrders[0];
+      const alreadyPaid = String(ord.payment_status || '').toLowerCase() === 'paid';
+      const diff = Math.abs(Number(ord.total_amount) - amount);
+
+      if (!alreadyPaid && diff <= 0.01) {
+        await db.query(
+          `UPDATE admin_gcash_transactions SET status = 'MATCHED' WHERE reference_number = ?`,
+          [referenceNumber]
+        );
+        await db.query(
+          `UPDATE payments SET amount_paid = ?, updated_at = CURRENT_TIMESTAMP WHERE order_id = ?`,
+          [amount, ord.id]
+        );
+        await orderService.verifyOrderPayment(ord.id, { username: 'GCash SMS Auto-Verify' });
+        autoVerifiedOrder = ord.order_number;
+      }
+    }
+
+    return res.json({
+      success: true,
+      referenceNumber,
+      amount,
+      autoVerifiedOrder
+    });
+  } catch (err) {
+    console.error('[gcashSmsWebhook Error]', err);
+    return res.status(500).json({ success: false, message: err.message || 'GCash SMS webhook error' });
+  }
+}
+
 module.exports = {
   verifyWebhook,
   verifyWebhookSignature,
   processWebhookEvents,
   gcashRedirect,
-  confirmGcashPayment
+  confirmGcashPayment,
+  gcashSmsWebhook
 };
