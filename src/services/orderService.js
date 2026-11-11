@@ -216,7 +216,8 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
   const totalAmount = subtotal + deliveryFee;
 
   // 5. Insert order record with duplicate collision prevention
-  const initialPaymentStatus = orderData.paymentStatus || orderData.payment_status || (paymentMethod === 'gcash' ? (referenceNo ? 'Pending Verification' : 'Pending') : 'Paid');
+  const isOnlinePayment = paymentMethod === 'gcash' || paymentMethod === 'xendit';
+  const initialPaymentStatus = orderData.paymentStatus || orderData.payment_status || (isOnlinePayment ? (referenceNo ? 'Pending Verification' : 'Pending') : 'Paid');
   const initialPaymentRef = orderData.paymentRefNumber || orderData.payment_ref_number || referenceNo || null;
   const initialPaymentProof = orderData.paymentProofImage || orderData.payment_proof_image || null;
   const customerLat = (orderData.customer_lat !== undefined ? orderData.customer_lat : (orderData.customerLat !== undefined ? orderData.customerLat : (orderData.lat !== undefined ? orderData.lat : (claims && claims.lat ? claims.lat : null))));
@@ -272,11 +273,11 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
   // 7. Deduct inventory stock
   await deductStockForOrder(items, orderNumber);
 
-  // 8. Process payment (validate GCash amount or record cash)
+  // 8. Process payment (validate GCash/Xendit amount or record cash)
   const paymentResult = await processPayment({
     orderId,
     paymentMethod,
-    amountPaid: paymentMethod === 'gcash' ? amountPaid : totalAmount,
+    amountPaid: isOnlinePayment ? amountPaid : totalAmount,
     referenceNo
   });
 

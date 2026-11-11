@@ -217,6 +217,46 @@ app.get('/pay/gcash', (req, res) => {
 </html>`);
 });
 
+// Xendit Payment Return Screen
+app.get('/payment/xendit/return', (req, res) => {
+  const isSuccess = String(req.query.status || '').toLowerCase() !== 'failed';
+  const rawOrder = String(req.query.order || '').replace(/[<>&"']/g, '');
+  const title = isSuccess ? 'Payment Completed' : 'Payment Incomplete';
+  const badgeColor = isSuccess ? '#22c55e' : '#ef4444';
+  const icon = isSuccess ? '&#9989;' : '&#10060;';
+  const message = isSuccess
+    ? 'Matagumpay ang inyong online payment via Xendit! Paki-check ang Facebook Messenger para sa kumpirmasyon ng inyong order.'
+    : 'Hindi nakumpleto ang inyong pagbabayad. Maaari kayong bumalik sa Facebook Messenger upang subukan muli.';
+
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title} | Diner's Cafe</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: #0d0906; color: #f5ebe0; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+    .card { background: #1c140e; border: 1px solid #3d2b1f; border-radius: 20px; max-width: 420px; width: 100%; padding: 28px; text-align: center; box-shadow: 0 12px 36px rgba(0,0,0,0.6); }
+    .icon { font-size: 48px; margin-bottom: 12px; }
+    h2 { font-size: 1.4rem; color: #fff; margin-bottom: 8px; }
+    .order-tag { display: inline-block; background: rgba(255,255,255,0.06); border: 1px solid ${badgeColor}; color: ${badgeColor}; padding: 4px 12px; border-radius: 999px; font-size: 0.85rem; font-weight: 700; margin-bottom: 16px; }
+    p { font-size: 0.95rem; color: #d5c5b8; line-height: 1.5; margin-bottom: 22px; }
+    .btn { display: inline-block; background: #d4a373; color: #1c140e; text-decoration: none; padding: 12px 24px; border-radius: 12px; font-weight: 700; font-size: 0.95rem; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">${icon}</div>
+    <h2>${title}</h2>
+    ${rawOrder ? `<div class="order-tag">Order #${rawOrder}</div>` : ''}
+    <p>${message}</p>
+    <a href="https://m.me" class="btn">Bumalik sa Messenger</a>
+  </div>
+</body>
+</html>`);
+});
+
 // Health check endpoint for cloud hosting / Render
 app.get('/health', (req, res) => {
   res.status(200).send('OK');

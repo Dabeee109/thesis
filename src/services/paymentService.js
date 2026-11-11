@@ -37,7 +37,26 @@ async function processPayment({ orderId, paymentMethod, amountPaid = 0, referenc
   let mismatchNotes = null;
   let status = 'pending';
 
-  if (pMethod === 'gcash') {
+  if (pMethod === 'xendit') {
+    if (paid <= 0) {
+      isMismatch = 0;
+      status = 'pending';
+      mismatchNotes = 'Awaiting Xendit online payment completion.';
+    } else {
+      const diff = paid - amountExpected;
+      if (Math.abs(diff) > 0.01) {
+        isMismatch = 1;
+        status = 'mismatch_flagged';
+        mismatchNotes = diff < 0
+          ? `Underpaid by ₱${Math.abs(diff).toFixed(2)}. Paid ₱${paid.toFixed(2)}, expected ₱${amountExpected.toFixed(2)}.`
+          : `Overpaid by ₱${diff.toFixed(2)}. Paid ₱${paid.toFixed(2)}, expected ₱${amountExpected.toFixed(2)}.`;
+      } else {
+        isMismatch = 0;
+        status = 'verified';
+        mismatchNotes = 'Exact amount verified via Xendit gateway.';
+      }
+    }
+  } else if (pMethod === 'gcash') {
     const diff = paid - amountExpected;
     if (Math.abs(diff) > 0.01) {
       isMismatch = 1;

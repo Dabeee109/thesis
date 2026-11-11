@@ -157,10 +157,11 @@ function initSqliteFallback() {
       CREATE TABLE IF NOT EXISTS payments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         order_id INTEGER UNIQUE NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-        payment_method TEXT CHECK(payment_method IN ('cash', 'gcash')) NOT NULL DEFAULT 'cash',
+        payment_method TEXT CHECK(payment_method IN ('cash', 'gcash', 'xendit')) NOT NULL DEFAULT 'cash',
         amount_expected REAL NOT NULL,
         amount_paid REAL NOT NULL DEFAULT 0.00,
         reference_no TEXT,
+        receipt_url TEXT DEFAULT NULL,
         status TEXT CHECK(status IN ('pending', 'verified', 'mismatch_flagged', 'completed')) NOT NULL DEFAULT 'pending',
         is_mismatch INTEGER NOT NULL DEFAULT 0,
         mismatch_notes TEXT,
@@ -383,6 +384,7 @@ function initSqliteFallback() {
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN dining_mode TEXT DEFAULT 'Delivery';`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN arriving_time TEXT DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN note TEXT DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE payments ADD COLUMN receipt_url TEXT DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN chatbot_enabled INTEGER DEFAULT 1;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN store_status TEXT DEFAULT 'OPEN';`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN store_open_time TEXT DEFAULT '09:00:00';`); } catch (e) { }
@@ -464,6 +466,39 @@ function initSqliteFallback() {
       }
     } catch (migErr) {
       console.warn('[Database] Deliveries table migration notice:', migErr.message);
+    }
+
+    // Migration: Update payments payment_method check constraint to include 'xendit'
+    try {
+      const paySql = sqliteDb.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='payments'").get();
+      if (paySql && paySql.sql && !paySql.sql.includes("'xendit'")) {
+        sqliteDb.exec(`
+          PRAGMA foreign_keys=off;
+          CREATE TABLE payments_migration_temp (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER UNIQUE NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+            payment_method TEXT CHECK(payment_method IN ('cash', 'gcash', 'xendit')) NOT NULL DEFAULT 'cash',
+            amount_expected REAL NOT NULL,
+            amount_paid REAL NOT NULL DEFAULT 0.00,
+            reference_no TEXT,
+            receipt_url TEXT DEFAULT NULL,
+            status TEXT CHECK(status IN ('pending', 'verified', 'mismatch_flagged', 'completed')) NOT NULL DEFAULT 'pending',
+            is_mismatch INTEGER NOT NULL DEFAULT 0,
+            mismatch_notes TEXT,
+            verified_at DATETIME,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
+          INSERT INTO payments_migration_temp (id, order_id, payment_method, amount_expected, amount_paid, reference_no, status, is_mismatch, mismatch_notes, verified_at, created_at, updated_at)
+          SELECT id, order_id, payment_method, amount_expected, amount_paid, reference_no, status, is_mismatch, mismatch_notes, verified_at, created_at, updated_at FROM payments;
+          DROP TABLE payments;
+          ALTER TABLE payments_migration_temp RENAME TO payments;
+          PRAGMA foreign_keys=on;
+        `);
+        console.log('[Database] payments table check constraint updated with xendit method.');
+      }
+    } catch (payMigErr) {
+      console.warn('[Database] Payments table migration notice:', payMigErr.message);
     }
 
     // Populate synonyms for existing items if missing
@@ -701,6 +736,15 @@ async function initDatabase() {
           await conn.query(`ALTER TABLE ${c.table} ADD COLUMN ${c.column} ${c.type}`);
           console.log(`[Database] Added column ${c.column} to MySQL table ${c.table}`);
         }
+      }
+
+      // Expand payments.payment_method ENUM to support 'xendit' in MySQL/TiDB
+      try {
+        await conn.query(
+          `ALTER TABLE payments MODIFY COLUMN payment_method ENUM('cash', 'gcash', 'xendit') NOT NULL DEFAULT 'cash'`
+        );
+      } catch (payEnumErr) {
+        console.warn('[Database] payments.payment_method ENUM update notice:', payEnumErr.message);
       }
 
       await conn.query(`

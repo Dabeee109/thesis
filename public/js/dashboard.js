@@ -471,7 +471,16 @@ function renderKanban(orders) {
     const itemsSummary = (order.items || []).map(i => `${i.quantity}x ${i.item_name}`).join(', ');
 
     let paymentBadge = '';
-    if ((order.payment_method || '').toLowerCase() === 'gcash') {
+    const pMethodLower = (order.payment_method || '').toLowerCase();
+    if (pMethodLower === 'xendit') {
+      if (order.payment_mismatch) {
+        paymentBadge = `<span class="badge badge-mismatch">⚠️ Xendit Mismatch</span>`;
+      } else if (order.payment_status === 'Paid') {
+        paymentBadge = `<span class="badge badge-gcash">💳 Xendit Paid</span>`;
+      } else {
+        paymentBadge = `<span class="badge badge-pending">💳 Xendit Pending</span>`;
+      }
+    } else if (pMethodLower === 'gcash') {
       if (order.payment_mismatch) {
         paymentBadge = `<span class="badge badge-mismatch">⚠️ GCash Mismatch</span>`;
       } else if (order.payment_status === 'Pending Verification') {
@@ -578,7 +587,7 @@ function renderOrdersTable(orders) {
       <td>${itemsCount} items</td>
       <td><strong>₱${parseFloat(order.total_amount).toFixed(2)}</strong></td>
       <td>
-        <span class="badge ${order.payment_mismatch ? 'badge-mismatch' : order.payment_method === 'gcash' ? 'badge-gcash' : 'badge-cash'}">
+        <span class="badge ${order.payment_mismatch ? 'badge-mismatch' : (order.payment_method === 'gcash' || order.payment_method === 'xendit') ? 'badge-gcash' : 'badge-cash'}">
           ${order.payment_mismatch ? '⚠️ Mismatch' : order.payment_method}
         </span>
       </td>
@@ -602,7 +611,7 @@ function renderOverviewOrders(orders) {
       <td>${escapeHtml(order.customer_name || 'Customer')}</td>
       <td><span class="badge badge-info">${order.order_type}</span></td>
       <td><strong>₱${parseFloat(order.total_amount).toFixed(2)}</strong></td>
-      <td><span class="badge ${order.payment_mismatch ? 'badge-mismatch' : 'badge-cash'}">${order.payment_method}</span></td>
+      <td><span class="badge ${order.payment_mismatch ? 'badge-mismatch' : (order.payment_method === 'gcash' || order.payment_method === 'xendit') ? 'badge-gcash' : 'badge-cash'}">${order.payment_method}</span></td>
       <td><span class="badge badge-${order.status}">${order.status}</span></td>
       <td><button class="btn btn-secondary btn-sm" onclick="viewOrderDetails(${order.id})">View</button></td>
     `;
@@ -641,7 +650,7 @@ async function viewOrderDetails(orderId) {
       const orderStatusNorm = String(o.status || o.order_status || '').toLowerCase().trim();
       const isPendingApprovalStatus = (orderStatusNorm === 'pending' || orderStatusNorm === 'pending_approval' || orderStatusNorm === 'awaiting_confirmation');
       const showPaymentActionButtons = isPendingApprovalStatus && (
-        (o.payment_method || '').toLowerCase() === 'gcash' ||
+        ['gcash', 'xendit'].includes((o.payment_method || '').toLowerCase()) ||
         o.payment_status === 'Pending Verification' ||
         Boolean(o.payment_ref_number || o.reference_no || o.gcash_ref) ||
         Boolean(o.payment_proof_image || o.receipt_url)
@@ -735,19 +744,30 @@ async function viewOrderDetails(orderId) {
             </div>
           ` : ''}
 
-          <!-- Clickable thumbnail preview for payment_proof_image -->
-          ${(o.payment_proof_image || o.receipt_url) ? `
-            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border-subtle);">
-              <div style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 6px;">
-                📸 Proof of Payment (Click to view full image):
+          <!-- Clickable thumbnail preview for payment_proof_image OR Xendit Invoice Link -->
+          ${(o.payment_proof_image || o.receipt_url) ? (
+            ((o.payment_method || '').toLowerCase() === 'xendit' || /xendit\.co/i.test(o.payment_proof_image || o.receipt_url)) ? `
+              <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border-subtle);">
+                <div style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 6px;">
+                  💳 Xendit Checkout Invoice:
+                </div>
+                <a href="${escapeHtml(o.payment_proof_image || o.receipt_url)}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 6px; text-decoration: none;">
+                  🔗 Open Xendit Invoice Page
+                </a>
               </div>
-              <a href="${escapeHtml(o.payment_proof_image || o.receipt_url)}" target="_blank" rel="noopener noreferrer" title="View Full Payment Proof in new tab">
-                <img src="${escapeHtml(o.payment_proof_image || o.receipt_url)}" alt="GCash Receipt" 
-                     style="max-height: 125px; max-width: 220px; object-fit: contain; border-radius: 6px; border: 1px solid var(--border-subtle); background: #111; box-shadow: 0 2px 8px rgba(0,0,0,0.4); cursor: pointer; transition: transform 0.2s;" 
-                     onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'" />
-              </a>
-            </div>
-          ` : `
+            ` : `
+              <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border-subtle);">
+                <div style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 6px;">
+                  📸 Proof of Payment (Click to view full image):
+                </div>
+                <a href="${escapeHtml(o.payment_proof_image || o.receipt_url)}" target="_blank" rel="noopener noreferrer" title="View Full Payment Proof in new tab">
+                  <img src="${escapeHtml(o.payment_proof_image || o.receipt_url)}" alt="GCash Receipt" 
+                       style="max-height: 125px; max-width: 220px; object-fit: contain; border-radius: 6px; border: 1px solid var(--border-subtle); background: #111; box-shadow: 0 2px 8px rgba(0,0,0,0.4); cursor: pointer; transition: transform 0.2s;" 
+                       onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'" />
+                </a>
+              </div>
+            `
+          ) : `
             ${((o.payment_method || '').toLowerCase() === 'gcash' && o.payment_status !== 'Paid') ? `
               <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 6px; font-style: italic;">
                 ℹ️ Customer has not uploaded an image receipt yet.

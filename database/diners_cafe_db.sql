@@ -179,7 +179,7 @@ CREATE TABLE `admin_gcash_transactions` (
 CREATE TABLE `payments` (
   `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   `order_id` INT UNSIGNED NOT NULL UNIQUE,
-  `payment_method` ENUM('cash', 'gcash') NOT NULL DEFAULT 'cash',
+  `payment_method` ENUM('cash', 'gcash', 'xendit') NOT NULL DEFAULT 'cash',
   `amount_expected` DECIMAL(10,2) NOT NULL,
   `amount_paid` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
   `reference_no` VARCHAR(100) DEFAULT NULL,

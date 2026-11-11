@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-let resolvedAppUrl = process.env.APP_URL || '';
+let resolvedAppUrl = process.env.APP_BASE_URL || process.env.APP_URL || '';
 if (process.env.RENDER_EXTERNAL_URL) {
   if (!resolvedAppUrl || resolvedAppUrl.includes('ngrok') || resolvedAppUrl.includes('localhost') || resolvedAppUrl.includes('127.0.0.1')) {
     resolvedAppUrl = process.env.RENDER_EXTERNAL_URL;
@@ -80,5 +80,11 @@ module.exports = {
   weather: {
     openWeatherKey: process.env.OPENWEATHER_API_KEY || '',
     heavyRainMmPerHour: parseFloat(process.env.HEAVY_RAIN_MM_H || '7.5')
+  },
+
+  xendit: {
+    secretKey: process.env.XENDIT_SECRET_KEY || '',
+    callbackToken: process.env.XENDIT_CALLBACK_TOKEN || '',
+    baseUrl: (process.env.APP_BASE_URL || resolvedAppUrl || 'http://localhost:3000').trim().replace(/\/+$/, '')
   }
 };

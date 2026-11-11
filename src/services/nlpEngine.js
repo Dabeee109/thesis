@@ -13,6 +13,7 @@ const storeSettingsService = require('./storeSettingsService');
 const systemSettingsService = require('./systemSettingsService');
 const jwt = require('jsonwebtoken');
 const { createOrder } = require('./orderService');
+const xenditService = require('./xenditService');
 const {
   sendTextMessage,
   sendImageAttachment,
@@ -107,6 +108,18 @@ function isDeliveryDiningMode(diningMode) {
   return /delivery/i.test(String(diningMode).trim());
 }
 
+function parsePaymentModeValue(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  if (/\b(?:xendit|online(?:\s*payment)?|gcash|g-?cash|maya|paymaya|grabpay|e-?wallet|bank|card)\b/i.test(s)) {
+    return 'Xendit';
+  }
+  if (/\b(?:cash|cod|kaliwaan)\b/i.test(s)) {
+    return 'Cash';
+  }
+  return null;
+}
+
 /**
  * Conditional Checkout Information Prompt (Slot-Filling)
  * CASE A: Delivery -> Name, Phone number, Address, Landmark, Payment mode, note
@@ -120,14 +133,14 @@ Name:
 Phone number:
 Address:
 Landmark:
-Payment mode: (Cash or GCash)
+Payment mode: (Cash or Online Payment / Xendit)
 note:`;
   } else {
     return `Pakibigay po ang sumusunod para sa inyong order:
 Name:
 Phone number:
 Arriving time:
-Payment mode: (Cash or GCash)
+Payment mode: (Cash or Online Payment / Xendit)
 note:`;
   }
 }
@@ -167,11 +180,9 @@ function parseCustomerInfo(rawText, diningMode) {
   if (noteMatch) note = noteMatch[1].trim();
 
   if (payMatch) {
-    paymentMode = /gcash|g-cash/i.test(payMatch[1]) ? 'GCash' : 'Cash';
-  } else if (/\b(?:gcash|g-cash)\b/i.test(clean)) {
-    paymentMode = 'GCash';
-  } else if (/\b(?:cash|cod|kaliwaan)\b/i.test(clean)) {
-    paymentMode = 'Cash';
+    paymentMode = parsePaymentModeValue(payMatch[1]) || 'Cash';
+  } else {
+    paymentMode = parsePaymentModeValue(clean) || 'Cash';
   }
 
   // 2. Multiline or delimiter-based fallback
@@ -201,7 +212,7 @@ function parseCustomerInfo(rawText, diningMode) {
         contact = line.replace(/^(?:contact(?:\s*number)?|phone(?:\s*number)?|mobile)[:=-]?\s*/i, '').trim();
         lines.splice(i, 1);
       } else if (/^(?:payment(?:\s*mode|\s*option)?|bayad)[:=-]?\s*/i.test(line)) {
-        paymentMode = /gcash|g-cash/i.test(line) ? 'GCash' : 'Cash';
+        paymentMode = parsePaymentModeValue(line) || 'Cash';
         lines.splice(i, 1);
       }
     }
@@ -364,7 +375,70 @@ TOTAL AMOUNT DUE: ₱${formattedTotal}`;
 const formatPlaintextSummaryReceipt = formatPlaintextOrderSummary;
 
 /**
- * Finalize Order Summary, send receipt, and initiate payment (Cash/GCash)
+ * Create a Xendit Invoice and send the checkout button template + cancel/menu quick replies to Messenger.
+ */
+async function dispatchXenditCheckout(psid, session, { orderId, orderNum, totalAmount, customerName, customerPhone }) {
+  const invoice = await xenditService.createInvoice({
+    orderNumber: orderNum,
+    amount: totalAmount,
+    customerName,
+    customerPhone,
+    description: `Diner's Cafe Order #${orderNum}`
+  });
+
+  if (orderId) {
+    await db.query(
+      `UPDATE orders
+       SET payment_ref_number = ?, receipt_url = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [invoice.id || null, invoice.invoice_url || null, orderId]
+    ).catch(() => {});
+
+    await db.query(
+      `UPDATE payments
+       SET reference_no = ?, receipt_url = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE order_id = ?`,
+      [invoice.id || null, invoice.invoice_url || null, orderId]
+    ).catch(() => {});
+  }
+
+  session.activeOrderNumber = orderNum;
+  session.active_order_id = orderId;
+  session.order_id = orderId;
+  session.cart = [];
+  await clearSessionCart(psid);
+  session.checkout_step = null;
+  session.state = 'IDLE';
+  session.current_step = 'IDLE';
+  await saveSession(session);
+
+  const payText = `💳 XENDIT ONLINE PAYMENT\nOrder #${orderNum}\nTotal Amount: ₱${Number(totalAmount).toFixed(2)}\n\nPindutin ang button sa ibaba upang magbayad gamit ang GCash, Maya, GrabPay, Online Banking, o 7-Eleven. Awtomatikong makukumpirma ang inyong order pagkabayad!`;
+
+  await sendButtonTemplate(psid, payText, [
+    {
+      type: 'web_url',
+      url: invoice.invoice_url,
+      title: '💳 Pay via Xendit',
+      webview_height_ratio: 'full'
+    }
+  ]);
+
+  await sendQuickReplies(psid, 'Kung nais ninyong i-cancel o bumalik sa menu:', [
+    { title: '❌ Cancel Order', payload: `CANCEL_ORDER_${orderNum}` },
+    { title: '📋 Menu', payload: 'MENU' }
+  ]);
+
+  return {
+    intent: 'ORDER_PLACED_XENDIT',
+    confidence: 1.0,
+    replyLog: `${payText}\nCheckout Link: ${invoice.invoice_url}`,
+    orderNumber: orderNum,
+    invoiceUrl: invoice.invoice_url
+  };
+}
+
+/**
+ * Finalize Order Summary, send receipt, and initiate payment (Cash or Xendit Online)
  */
 async function finalizeOrderSummaryAndPayment(psid, session) {
   const subtotal = session.order_subtotal || (session.cart ? calculateCartSubtotal(session.cart) : 0);
@@ -466,9 +540,7 @@ async function finalizeOrderSummaryAndPayment(psid, session) {
       return { intent: 'ORDER_ERROR', confidence: 1.0 };
     }
   } else {
-    // GCash Flow (Manual GCash Proof of Payment Workflow)
-    let orderNum = null;
-    let orderId = null;
+    // Online Payment Flow via Xendit Invoice Gateway
     try {
       const order = await createOrder(psid, {
         customerName,
@@ -479,7 +551,7 @@ async function finalizeOrderSummaryAndPayment(psid, session) {
         landmark: session.landmark || null,
         arriving_time: session.arriving_time || session.arrivingTime || session.eta || null,
         note: session.customer_notes || session.note || session.notes || null,
-        paymentMethod: 'gcash',
+        paymentMethod: 'xendit',
         amountPaid: 0,
         items: (session.cart || []).map(c => ({
           menuItemId: c.menuItemId || c.id,
@@ -496,65 +568,22 @@ async function finalizeOrderSummaryAndPayment(psid, session) {
         is_preorder: Boolean(session.is_preorder),
         paymentStatus: 'Pending'
       });
-      orderNum = order.orderNumber || order.order_number;
-      orderId = order.orderId || order.id;
-      session.activeOrderNumber = orderNum;
-      session.active_order_id = orderId;
-      session.order_id = orderId;
-    } catch (ordErr) {
-      console.warn('[GCash Order Pre-creation Warning]', ordErr.message);
+
+      const orderNum = order.orderNumber || order.order_number;
+      const orderId = order.orderId || order.id;
+      return await dispatchXenditCheckout(psid, session, {
+        orderId,
+        orderNum,
+        totalAmount: grandTotal,
+        customerName,
+        customerPhone: contactNumber
+      });
+    } catch (err) {
+      console.error('[Xendit Order Placement Error]', err);
+      const errMsg = 'Paumanhin, nagkaroon ng error sa paggawa ng Xendit payment link. Pakisubukan muli o pumili ng Cash payment.';
+      await sendTextMessage(psid, errMsg);
+      return { intent: 'ORDER_ERROR', confidence: 1.0, replyLog: errMsg };
     }
-
-    session.pendingGCashOrder = {
-      orderId,
-      orderNumber: orderNum,
-      customerName,
-      contactNumber,
-      address: addressStr,
-      landmark: session.landmark || null,
-      dining_mode: diningMode || (isDelivery ? 'Delivery' : 'Pick-up'),
-      arriving_time: session.arriving_time || session.arrivingTime || session.eta || null,
-      note: session.customer_notes || session.note || session.notes || null,
-      deliveryFee,
-      subtotal,
-      discount: discountAmount,
-      grandTotal,
-      isPickupOrDineIn: deliveryFee === 0,
-      items: [...(session.cart || [])]
-    };
-
-    // Requirement 1: Set user session state: session.checkout_step = 'AWAITING_PAYMENT_PROOF'
-    session.checkout_step = 'AWAITING_PAYMENT_PROOF';
-    session.state = 'AWAITING_PAYMENT_PROOF';
-    session.current_step = 'AWAITING_PAYMENT_PROOF';
-    await saveSession(session);
-
-    const currentSettings = storeSettingsService.getCachedStoreSettings();
-    const gcashNumber = currentSettings.gcash_account_number || config.store?.gcashNumber || '0928 176 2895';
-    const gcashName = currentSettings.gcash_account_name || config.store?.gcashName || "Diner's Cafe";
-    const qrImageUrl = currentSettings.gcash_qr_image_url || '/assets/gcash_qr.png';
-    const baseAppUrl = (config.appUrl || 'http://localhost:3000').replace(/\/+$/, '');
-    const fullQrUrl = qrImageUrl.startsWith('http') ? qrImageUrl : `${baseAppUrl}${qrImageUrl.startsWith('/') ? '' : '/'}${qrImageUrl}`;
-
-    // Message 1: Send the cafe's GCash QR Code as an image attachment
-    try {
-      await sendImageAttachment(psid, fullQrUrl);
-    } catch (qrErr) {
-      console.warn('[GCash Checkout] Could not dispatch QR code image:', qrErr.message);
-    }
-
-    // Message 2: Send formatted text instructions (no external webview URL buttons)
-    const detailsMsg = `💳 GCASH PAYMENT DETAILS:\nAccount Name: ${gcashName}\nAccount Number: ${gcashNumber}\nTotal Amount to Pay: ₱${grandTotal.toFixed(2)}\n\n📌 Paalala:\nI-save o i-scan ang QR code sa itaas gamit ang inyong GCash app. \nPagkatapos magbayad, paki-send po rito ang SCREENSHOT ng resibo o i-type ang 13-digit Reference Number upang maihanda na ang inyong order.`;
-    if (orderNum) {
-      await sendQuickReplies(psid, detailsMsg, [
-        { title: '❌ Cancel Order', payload: `CANCEL_ORDER_${orderNum}` },
-        { title: '📋 Menu', payload: 'MENU' }
-      ]);
-    } else {
-      await sendTextMessage(psid, detailsMsg);
-    }
-
-    return { intent: 'AWAITING_PAYMENT_PROOF', confidence: 1.0, replyLog: detailsMsg, orderNumber: orderNum };
   }
 }
 
@@ -1560,8 +1589,8 @@ async function handlePayload(psid, session, payload) {
     return;
   }
 
-  if (payload === 'PAY_GCASH') {
-    await initiateGCashPayment(psid, session);
+  if (payload === 'PAY_XENDIT' || payload === 'PAY_GCASH') {
+    await placeCustomerOrder(psid, session, 'xendit');
     return;
   }
 
@@ -2218,7 +2247,7 @@ async function handleTextInput(psid, session, rawText) {
       session.customer_name = customerName;
       session.contact_number = contactNumber;
       session.phone_number = contactNumber;
-      session.payment_mode = parsed.paymentMode || (/\bgcash\b/i.test(rawText) ? 'GCash' : 'Cash');
+      session.payment_mode = parsed.paymentMode || parsePaymentModeValue(rawText) || 'Cash';
       session.customer_notes = parsed.note || session.customer_notes || '';
       session.note = session.customer_notes;
       session.arriving_time = parsed.arrivingTime || parsed.arriving_time || session.arriving_time || '';
@@ -2247,7 +2276,7 @@ async function handleTextInput(psid, session, rawText) {
         session.customer_name = customerName;
         session.contact_number = contactNumber;
         session.phone_number = contactNumber;
-        session.payment_mode = parsed.paymentMode || (/\bgcash\b/i.test(rawText) ? 'GCash' : 'Cash');
+        session.payment_mode = parsed.paymentMode || parsePaymentModeValue(rawText) || 'Cash';
         session.landmark = parsed.landmark || session.landmark || '';
         session.customer_notes = parsed.note || session.customer_notes || '';
         await saveSession(session);
@@ -2296,7 +2325,7 @@ async function handleTextInput(psid, session, rawText) {
       session.customer_name = customerName;
       session.contact_number = contactNumber;
       session.phone_number = contactNumber;
-      session.payment_mode = parsed.paymentMode || (/\bgcash\b/i.test(rawText) ? 'GCash' : 'Cash');
+      session.payment_mode = parsed.paymentMode || parsePaymentModeValue(rawText) || 'Cash';
       session.landmark = parsed.landmark || session.landmark || '';
       session.customer_notes = parsed.note || session.customer_notes || '';
       if (!session.details) session.details = {};
@@ -2322,7 +2351,7 @@ async function handleTextInput(psid, session, rawText) {
     }
 
     // For Dine In / Pick-up: Skip address confirmation, auto-assign store address, set fee 0, and proceed directly to discount
-    const paymentMode = parsed.paymentMode || (/\bgcash\b/i.test(rawText) ? 'GCash' : 'Cash');
+    const paymentMode = parsed.paymentMode || parsePaymentModeValue(rawText) || 'Cash';
     session.customer_name = customerName;
     session.contact_number = contactNumber;
     session.phone_number = contactNumber;
@@ -2586,9 +2615,9 @@ async function handleTextInput(psid, session, rawText) {
           await placeCustomerOrder(psid, session, 'cash');
           return { intent: 'PAY_CASH', confidence: 1.0 };
         }
-        if (norm === 'gcash') {
-          await initiateGCashPayment(psid, session);
-          return { intent: 'PAY_GCASH', confidence: 1.0 };
+        if (parsePaymentModeValue(rawText) === 'Xendit') {
+          await placeCustomerOrder(psid, session, 'xendit');
+          return { intent: 'PAY_XENDIT', confidence: 1.0 };
         }
       }
     }
@@ -3992,6 +4021,18 @@ async function placeCustomerOrder(psid, session, paymentMethod = 'cash') {
     const order = await createOrder(psid, orderData);
 
     const orderNum = order.orderNumber || order.order_number;
+    const orderId = order.orderId || order.id;
+
+    if (paymentMethod === 'xendit' || paymentMethod === 'gcash') {
+      return await dispatchXenditCheckout(psid, session, {
+        orderId,
+        orderNum,
+        totalAmount: orderData.totalAmount || 0,
+        customerName: orderData.customerName || 'Customer',
+        customerPhone: orderData.customerPhone || ''
+      });
+    }
+
     session.activeOrderNumber = orderNum;
     session.cart = [];
     session.state = 'IDLE';
@@ -4011,17 +4052,10 @@ async function placeCustomerOrder(psid, session, paymentMethod = 'cash') {
 }
 
 /**
- * Initiate GCash Payment
+ * Initiate Online Payment (Xendit)
  */
 async function initiateGCashPayment(psid, session) {
-  session.state = 'AWAITING_GCASH_AMOUNT';
-  const totalFormatted = peso(session.checkout?.total || 0);
-  const gcashMsg = botMessages.gcashPay(
-    totalFormatted,
-    config.store.gcashNumber,
-    config.store.gcashName
-  );
-  await sendTextMessage(psid, gcashMsg.text);
+  return placeCustomerOrder(psid, session, 'xendit');
 }
 
 async function handleGCashAmountInput(psid, session, text) {
@@ -4211,7 +4245,8 @@ async function handleStage5Confirmation(psid, session, options = {}) {
   const customerName = p.name || session.customer_name || session.details?.name || 'Customer';
   const deliveryAddress = p.address || session.delivery_address || session.details?.address || 'Inside Cafe (Open Seating / Counter Pickup)';
   const orderType = (p.orderType === 'pickup' || p.orderType === 'dine_in') ? 'pickup' : 'delivery';
-  const paymentMethod = p.paymentMethod || 'gcash';
+  const rawMethod = (p.paymentMethod || 'xendit').toLowerCase();
+  const paymentMethod = (rawMethod === 'gcash' || rawMethod === 'xendit') ? 'xendit' : 'cash';
   const totalAmount = p.total || session.order_total || 0;
 
   let items = [];
@@ -4257,7 +4292,7 @@ async function handleStage5Confirmation(psid, session, options = {}) {
     deliveryAddress,
     orderType,
     paymentMethod,
-    amountPaid: paymentMethod === 'gcash' ? totalAmount : 0,
+    amountPaid: (isAlreadyPaid && paymentMethod === 'xendit') ? totalAmount : 0,
     items,
     deliveryFee: session.delivery_fee || 0,
     totalAmount,
@@ -4299,31 +4334,21 @@ async function handleStage5Confirmation(psid, session, options = {}) {
     return { intent: 'ORDER_CONFIRMED_PAID', confidence: 1.0, replyLog: reply };
   }
 
-  if (paymentMethod === 'gcash') {
-    session.checkout_step = 'AWAITING_PAYMENT_PROOF';
-    session.state = 'AWAITING_PAYMENT_PROOF';
-    session.current_step = 'AWAITING_PAYMENT_PROOF';
-    await saveSession(session);
-
-    const currentSettings = storeSettingsService.getCachedStoreSettings();
-    const gcashNumber = currentSettings.gcash_account_number || config.store?.gcashNumber || '0928 176 2895';
-    const gcashName = currentSettings.gcash_account_name || config.store?.gcashName || "Diner's Cafe";
-    const qrImageUrl = currentSettings.gcash_qr_image_url || '/assets/gcash_qr.png';
-    const baseAppUrl = (config.appUrl || 'http://localhost:3000').replace(/\/+$/, '');
-    const fullQrUrl = qrImageUrl.startsWith('http') ? qrImageUrl : `${baseAppUrl}${qrImageUrl.startsWith('/') ? '' : '/'}${qrImageUrl}`;
-
-    // Message 1: Send the cafe's GCash QR Code as an image attachment
+  if (paymentMethod === 'xendit') {
     try {
-      await sendImageAttachment(psid, fullQrUrl);
-    } catch (qrErr) {
-      console.warn('[GCash Order] Could not dispatch QR code image:', qrErr.message);
+      return await dispatchXenditCheckout(psid, session, {
+        orderId: newOrder.orderId || newOrder.id,
+        orderNum,
+        totalAmount,
+        customerName,
+        customerPhone: session.phone_number || session.contact_number || session.details?.phone || ''
+      });
+    } catch (xErr) {
+      console.error('[Xendit Stage 5 Checkout Error]', xErr);
+      const errMsg = 'Paumanhin, nagkaroon ng error sa paggawa ng Xendit payment link. Pakisubukan muli o pumili ng Cash payment.';
+      await sendTextMessage(psid, errMsg);
+      return { intent: 'ORDER_ERROR', confidence: 1.0, replyLog: errMsg };
     }
-
-    // Message 2: Send formatted text instructions (no external webview URL buttons)
-    const detailsMsg = `💳 GCASH PAYMENT DETAILS:\nAccount Name: ${gcashName}\nAccount Number: ${gcashNumber}\nTotal Amount to Pay: ₱${parseFloat(totalAmount).toFixed(2)}\n\n📌 Paalala:\nI-save o i-scan ang QR code sa itaas gamit ang inyong GCash app. \nPagkatapos magbayad, paki-send po rito ang SCREENSHOT ng resibo o i-type ang 13-digit Reference Number upang maihanda na ang inyong order.`;
-    await sendTextMessage(psid, detailsMsg);
-
-    return { intent: 'ORDER_PLACED_AWAITING_GCASH', confidence: 1.0, replyLog: detailsMsg };
   } else {
     session.state = 'ORDER_PLACED';
     session.current_step = 'ORDER_PLACED';
@@ -4434,7 +4459,7 @@ async function tryGeminiConversationalTurn(psid, session, rawText) {
       session.pendingStage5 = {
         name: nameMatch?.[1]?.trim() || session.customer_name || 'Customer',
         address: locMatch?.[1]?.trim() || session.delivery_address || 'Inside Cafe',
-        paymentMethod: /gcash/i.test(payMatch?.[1] || '') ? 'gcash' : 'cash',
+        paymentMethod: parsePaymentModeValue(payMatch?.[1] || '') === 'Xendit' ? 'xendit' : 'cash',
         orderType: /take\s*out/i.test(diningMatch?.[1] || '') ? 'pickup' : (/dine/i.test(diningMatch?.[1] || '') ? 'dine_in' : 'delivery'),
         total: totalMatch ? parseFloat(totalMatch[1].replace(/,/g, '')) : (session.order_total || 0),
         rawSummary: geminiRes.replyText

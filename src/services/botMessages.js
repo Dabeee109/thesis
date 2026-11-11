@@ -276,7 +276,7 @@ const botMessages = {
     text: 'Pay with?',
     quickReplies: [
       { title: '💵 Cash', payload: 'PAY_CASH' },
-      { title: '📱 GCash', payload: 'PAY_GCASH' },
+      { title: '💳 Online / Xendit', payload: 'PAY_XENDIT' },
       { title: 'Back', payload: 'BACK_TO_SUMMARY' }
     ]
   }),
