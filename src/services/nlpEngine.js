@@ -56,6 +56,7 @@ const { quoteForAddress, FALLBACK_KM } = require('./deliveryFeeAdapter');
 const { calculateDeliveryFee, computeDeliveryFee, getStoreOrigin } = require('./deliveryFeeCalculator');
 const { geocodeCustomerAddress, sanitizeCustomerAddress } = require('./customerGeocodingService');
 const fareEngine = require('./fareEngine');
+const { applyStrikethrough, buildTextMenuPayload } = require('./textMenuService');
 const {
   addToCart,
   removeFromCart,
@@ -1428,8 +1429,18 @@ async function handlePayload(psid, session, payload) {
     return;
   }
 
-  if (payload === 'MENU_HOME') {
-    await sendFullMenu(psid, session);
+  if (payload === 'MENU_HOME' || payload === 'MENU') {
+    await sendFullMenu(psid, session, { view: 'all' });
+    return;
+  }
+
+  if (payload === 'VIEW_DRINKS') {
+    await sendFullMenu(psid, session, { view: 'drinks' });
+    return;
+  }
+
+  if (payload === 'VIEW_FOOD') {
+    await sendFullMenu(psid, session, { view: 'food' });
     return;
   }
 
@@ -2855,8 +2866,18 @@ async function handleTextInput(psid, session, rawText) {
     return { intent: 'CHECKOUT', confidence: conf };
   }
 
+  if (/^(?:view\s*drinks?|drinks?\s*menu|show\s*drinks?|drinks?\s*lang)$/i.test(norm)) {
+    await sendFullMenu(psid, session, { view: 'drinks' });
+    return { intent: 'VIEW_DRINKS', confidence: 1.0 };
+  }
+
+  if (/^(?:view\s*food|food\s*menu|show\s*food|meals?\s*menu)$/i.test(norm)) {
+    await sendFullMenu(psid, session, { view: 'food' });
+    return { intent: 'VIEW_FOOD', confidence: 1.0 };
+  }
+
   if (intent === 'BROWSE_MENU') {
-    await sendFullMenu(psid, session);
+    await sendFullMenu(psid, session, { view: 'all' });
     return { intent: 'BROWSE_MENU', confidence: conf };
   }
 
@@ -3060,26 +3081,27 @@ async function getActivePromotionsForToday() {
 }
 
 /**
- * Task 3: Send Full Menu as Horizontal Carousel (R1, R2, Decision 2)
- * Multi-Message Sequential Dispatch Pattern:
- * Branch A (Active Promo exists):
- *   Message 1: Send Poster Image Attachment
- *   Message 2: Send Structured Text Announcement
- *   Message 3: Send Full Menu Catalog (Carousel)
- * Branch B (No Active Promo):
- *   Skip Messages 1 and 2 entirely, dispatch Menu Catalog directly
+ * Send Categorized Plain-Text Menu (replaces image carousel cards).
+ * Groups active items by category, renders out-of-stock items with Unicode
+ * combining strikethrough (\u0336), splits cleanly under 2,000 chars per bubble,
+ * and attaches Quick Replies for fast filtering ([View Drinks], [View Food], [My Cart]).
  */
-async function sendFullMenu(psid, session) {
+async function sendFullMenu(psid, session, options = {}) {
   session.state = 'BROWSING';
+  await saveSession(session).catch(() => {});
 
   const [items] = await db.query(`
-    SELECT m.id, m.name, m.description, m.price, m.image_url, m.is_bestseller,
-           c.name AS category_name, c.display_order, i.stock_quantity, i.low_stock_threshold
+    SELECT m.id, m.name, m.price, m.is_available,
+           COALESCE(i.stock_quantity, m.stock_quantity, 0) AS stock,
+           COALESCE(c.name, 'Uncategorized') AS category_name,
+           c.slug AS category_slug,
+           COALESCE(c.display_order, 999) AS display_order
     FROM menu_items m
-    JOIN categories c ON c.id = m.category_id AND c.is_active = 1
-    JOIN inventory i ON i.menu_item_id = m.id
-    WHERE m.is_available = 1 AND i.stock_quantity > 0 AND COALESCE(m.is_deleted, 0) = 0
-    ORDER BY c.display_order ASC, m.is_bestseller DESC, m.name ASC
+    LEFT JOIN categories c ON m.category_id = c.id
+    LEFT JOIN inventory i ON i.menu_item_id = m.id
+    WHERE COALESCE(m.is_deleted, 0) = 0
+      AND (c.id IS NULL OR c.is_active = 1)
+    ORDER BY COALESCE(c.display_order, 999) ASC, m.name ASC
   `);
 
   if (!items || items.length === 0) {
@@ -3087,74 +3109,35 @@ async function sendFullMenu(psid, session) {
     return;
   }
 
-  // Present intro to Menu Catalog directly (Special Event / Promotion Announcement Removed)
-  const intro = botMessages.menuIntro();
-  await sendTextMessage(psid, intro.text);
-
-  // Message 3: Send Full Menu Catalog (Carousel of 10)
-
-  // 2. Build cards and chunk into carousels of 10
-  const displayedItems = items.slice(0, MENU_MAX_ITEMS);
-  const elements = displayedItems.map(it => {
-    const priceFormatted = peso(it.price);
-    const title = `${it.name} · ${priceFormatted}`.substring(0, 80);
-
-    let subtitle = `${it.category_name} · ${it.description || ''}`;
-    if (it.stock_quantity <= it.low_stock_threshold) {
-      subtitle += ` · Only ${it.stock_quantity} left`;
-    }
-    subtitle = subtitle.substring(0, 80);
-
-    const isSimulator = typeof psid === 'string' && psid.startsWith('sim_');
-    const imageUrl = resolveMessengerImageUrl(it.image_url, {
-      name: it.name,
-      category: it.category_name,
-      subtitle: it.description,
-      psid,
-      isSimulator
-    }, { isSimulator });
-
-    return {
-      title,
-      subtitle,
-      image_url: imageUrl,
-      buttons: [
-        {
-          type: 'postback',
-          title: '➕ Add to order',
-          payload: `ADD_ITEM_${it.id}`
-        }
-      ]
-    };
+  const hasCart = Boolean(session.cart && session.cart.length > 0);
+  const { messages, quickReplies } = buildTextMenuPayload(items, {
+    view: options.view || 'all',
+    hasCart
   });
 
-  const chunkSize = 10;
-  for (let i = 0; i < elements.length; i += chunkSize) {
-    const chunk = elements.slice(i, i + chunkSize);
-    await sendGenericTemplate(psid, chunk);
+  for (let idx = 0; idx < messages.length; idx++) {
+    if (idx === messages.length - 1) {
+      await sendQuickReplies(psid, messages[idx], quickReplies);
+    } else {
+      await sendTextMessage(psid, messages[idx]);
+    }
   }
-
-  if (items.length > MENU_MAX_ITEMS) {
-    await sendTextMessage(psid, "Showing the first 50. Type an item name to order any item.");
-  }
-
-  // 3. Outro message with quick replies
-  const hasCart = session.cart && session.cart.length > 0;
-  const outro = botMessages.menuOutro(hasCart);
-  await sendQuickReplies(psid, outro.text, outro.quickReplies);
 }
 
 /**
- * Backward compatibility category menu
+ * Category-filtered plain-text menu (backward compatibility for CATEGORY_* payloads)
  */
 async function sendCategoryMenu(psid, slug) {
   const [items] = await db.query(`
-    SELECT m.id, m.name, m.description, m.price, m.image_url, c.name as category_name
+    SELECT m.id, m.name, m.price, m.is_available,
+           COALESCE(i.stock_quantity, m.stock_quantity, 0) AS stock,
+           COALESCE(c.name, 'Category') AS category_name,
+           c.slug AS category_slug
     FROM menu_items m
-    JOIN categories c ON c.id = m.category_id
-    JOIN inventory i ON i.menu_item_id = m.id
-    WHERE c.slug = ? AND m.is_available = 1 AND i.stock_quantity > 0 AND COALESCE(m.is_deleted, 0) = 0
-    ORDER BY m.is_bestseller DESC, m.name ASC
+    LEFT JOIN categories c ON c.id = m.category_id
+    LEFT JOIN inventory i ON i.menu_item_id = m.id
+    WHERE c.slug = ? AND COALESCE(m.is_deleted, 0) = 0
+    ORDER BY m.name ASC
   `, [slug]);
 
   if (!items || items.length === 0) {
@@ -3162,24 +3145,14 @@ async function sendCategoryMenu(psid, slug) {
     return;
   }
 
-  const elements = items.slice(0, 10).map(it => {
-    const isSimulator = typeof psid === 'string' && psid.startsWith('sim_');
-    const imageUrl = resolveMessengerImageUrl(it.image_url, {
-      name: it.name,
-      category: it.category_name,
-      subtitle: it.description,
-      psid,
-      isSimulator
-    }, { isSimulator });
-    return {
-      title: `${it.name} · ${peso(it.price)}`.substring(0, 80),
-      subtitle: String(it.description || '').substring(0, 80),
-      image_url: imageUrl,
-      buttons: [{ type: 'postback', title: '➕ Add to order', payload: `ADD_ITEM_${it.id}` }]
-    };
-  });
-
-  await sendGenericTemplate(psid, elements);
+  const { messages, quickReplies } = buildTextMenuPayload(items, { view: 'all', hasCart: false });
+  for (let idx = 0; idx < messages.length; idx++) {
+    if (idx === messages.length - 1) {
+      await sendQuickReplies(psid, messages[idx], quickReplies);
+    } else {
+      await sendTextMessage(psid, messages[idx]);
+    }
+  }
 }
 
 /**
@@ -4597,5 +4570,6 @@ module.exports = {
   promptDrinkAddons,
   handleAddonSelection,
   isDrinkOrMilktea,
-  detectAddonInText
+  detectAddonInText,
+  applyStrikethrough
 };
