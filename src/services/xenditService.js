@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const config = require('../config/config');
 
 const XENDIT_INVOICES_URL = 'https://api.xendit.co/v2/invoices';
+const XENDIT_EWALLET_CHARGES_URL = 'https://api.xendit.co/ewallets/charges';
 
 function getSecretKey() {
   return (process.env.XENDIT_SECRET_KEY || config.xendit?.secretKey || '').trim();
@@ -116,8 +117,104 @@ async function createInvoice({
   return data;
 }
 
+/**
+ * Create a direct PH_GCASH eWallet Charge via Xendit eWallet Charges API.
+ * Falls back to a GCash-only Xendit Invoice if eWallet callback URL is not configured on the merchant account.
+ * @param {Object} params
+ * @param {string} params.orderNumber - Unique order number used as reference_id
+ * @param {number} params.amount - Total PHP amount to charge
+ * @param {string} [params.customerName] - Customer display name
+ * @param {string} [params.customerPhone] - Customer phone number
+ * @param {string} [params.description] - Optional description
+ * @returns {Promise<Object>} Normalized checkout payload containing id, checkout_url, invoice_url, actions
+ */
+async function createGcashCharge({
+  orderNumber,
+  amount,
+  customerName = 'Customer',
+  customerPhone = '',
+  description = ''
+}) {
+  if (!orderNumber) {
+    throw new Error('orderNumber is required to create a Xendit GCash charge.');
+  }
+
+  const numericAmount = Number(Number(amount).toFixed(2));
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    throw new Error('Order amount must be greater than zero to create a Xendit GCash charge.');
+  }
+
+  const baseUrl = getBaseUrl();
+  const payload = {
+    reference_id: String(orderNumber),
+    currency: 'PHP',
+    amount: numericAmount,
+    checkout_method: 'ONE_TIME_PAYMENT',
+    channel_code: 'PH_GCASH',
+    channel_properties: {
+      success_redirect_url: `${baseUrl}/payment/xendit/return?status=success&order=${encodeURIComponent(orderNumber)}`,
+      failure_redirect_url: `${baseUrl}/payment/xendit/return?status=failed&order=${encodeURIComponent(orderNumber)}`
+    },
+    metadata: {
+      order_number: String(orderNumber),
+      customer_name: String(customerName || 'Customer').slice(0, 100)
+    }
+  };
+
+  const response = await fetch(XENDIT_EWALLET_CHARGES_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: buildAuthHeader(),
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    // Fallback to GCash-only Invoice if eWallet callback URL isn't configured yet
+    if (data?.error_code === 'CALLBACK_URL_NOT_FOUND') {
+      console.warn('[Xendit] eWallet callback URL not configured; falling back to GCash-only Invoice.');
+      const inv = await createInvoice({
+        orderNumber,
+        amount: numericAmount,
+        customerName,
+        customerPhone,
+        description
+      });
+      return {
+        ...inv,
+        checkout_url: inv.invoice_url
+      };
+    }
+    const errMsg = data?.message || data?.error_code || `Xendit eWallet API error (${response.status})`;
+    throw new Error(errMsg);
+  }
+
+  const checkoutUrl =
+    data.actions?.mobile_web_checkout_url ||
+    data.actions?.desktop_web_checkout_url ||
+    data.actions?.mobile_deeplink_checkout_url ||
+    null;
+
+  if (!checkoutUrl) {
+    throw new Error('Xendit did not return a GCash checkout URL.');
+  }
+
+  return {
+    id: data.id,
+    external_id: data.reference_id,
+    status: data.status,
+    channel_code: data.channel_code,
+    actions: data.actions,
+    checkout_url: checkoutUrl,
+    invoice_url: checkoutUrl
+  };
+}
+
 module.exports = {
   createInvoice,
+  createGcashCharge,
   verifyCallbackToken
 };
 

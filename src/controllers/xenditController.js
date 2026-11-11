@@ -20,14 +20,23 @@ async function handleWebhook(req, res) {
     }
 
     const body = req.body || {};
-    const externalId = body.external_id;
-    const invoiceStatus = String(body.status || '').toUpperCase();
-    const invoiceId = body.id || '';
-    const paidAmount = Number(body.paid_amount ?? body.amount ?? 0);
-    const paymentChannel = body.payment_channel || body.bank_code || body.ewallet_type || body.payment_method || 'Xendit';
+    const payload = (body.data && typeof body.data === 'object') ? body.data : body;
+    const externalId = payload.external_id || payload.reference_id;
+    const invoiceStatus = String(payload.status || '').toUpperCase();
+    const invoiceId = payload.id || body.id || '';
+    const paidAmount = Number(
+      payload.paid_amount ?? payload.capture_amount ?? payload.charge_amount ?? payload.amount ?? 0
+    );
+    const paymentChannel =
+      payload.payment_channel ||
+      payload.channel_code ||
+      payload.bank_code ||
+      payload.ewallet_type ||
+      payload.payment_method ||
+      'PH_GCASH';
 
     if (!externalId) {
-      return res.status(200).json({ received: true, ignored: true, reason: 'Missing external_id' });
+      return res.status(200).json({ received: true, ignored: true, reason: 'Missing external_id/reference_id' });
     }
 
     // Look up matching order in database
@@ -41,7 +50,7 @@ async function handleWebhook(req, res) {
     );
 
     if (!orders || orders.length === 0) {
-      // Return 200 so Xendit dashboard test pings ("invoice_123124123") succeed cleanly
+      // Return 200 so Xendit dashboard test pings succeed cleanly
       console.log(`[Xendit Webhook] No matching order for external_id="${externalId}" (status=${invoiceStatus}). Acknowledging.`);
       return res.status(200).json({
         received: true,
@@ -52,7 +61,7 @@ async function handleWebhook(req, res) {
 
     const order = orders[0];
 
-    if (invoiceStatus === 'PAID' || invoiceStatus === 'SETTLED') {
+    if (invoiceStatus === 'PAID' || invoiceStatus === 'SETTLED' || invoiceStatus === 'SUCCEEDED') {
       if (String(order.payment_status || '').toLowerCase() === 'paid') {
         return res.status(200).json({ received: true, alreadyPaid: true, orderNumber: order.order_number });
       }
@@ -85,18 +94,18 @@ async function handleWebhook(req, res) {
       });
     }
 
-    if (invoiceStatus === 'EXPIRED' && String(order.payment_status || '').toLowerCase() !== 'paid') {
+    if ((invoiceStatus === 'EXPIRED' || invoiceStatus === 'FAILED') && String(order.payment_status || '').toLowerCase() !== 'paid') {
       await db.query(
         `UPDATE payments
-         SET mismatch_notes = 'Xendit payment link expired.', updated_at = CURRENT_TIMESTAMP
+         SET mismatch_notes = ?, updated_at = CURRENT_TIMESTAMP
          WHERE order_id = ?`,
-        [order.id]
+        [`Xendit GCash payment ${invoiceStatus.toLowerCase()}.`, order.id]
       );
 
       if (order.psid && !String(order.psid).startsWith('POS_MANUAL_')) {
         await sendTextMessage(
           order.psid,
-          `Paalala: Nag-expire na po ang Xendit payment link para sa Order #${order.order_number}. Mag-type ng "Menu" kung nais ninyong mag-order muli.`
+          `Paalala: Hindi nakumpleto (${invoiceStatus}) ang Xendit GCash payment link para sa Order #${order.order_number}. Mag-type ng "Menu" kung nais ninyong mag-order muli.`
         ).catch(() => {});
       }
     }

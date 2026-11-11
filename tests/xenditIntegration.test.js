@@ -176,4 +176,93 @@ test('Xendit Payment Gateway Integration Suite', async (t) => {
     const pCash = nlpEngine.parseCustomerInfo('Name: Pedro\nPhone number: 09171234567\nPayment mode: Cash', 'Pick-up');
     assert.strictEqual(pCash.paymentMode, 'Cash');
   });
+
+  await t.test('7. xenditService.createGcashCharge calls /ewallets/charges with PH_GCASH and returns checkout_url', async () => {
+    const origFetch = global.fetch;
+    let capturedUrl = null;
+    let capturedInit = null;
+
+    global.fetch = async (url, init) => {
+      capturedUrl = url;
+      capturedInit = init;
+      return {
+        ok: true,
+        status: 202,
+        json: async () => ({
+          id: 'ewc_test_gcash_001',
+          reference_id: 'DNR-20261112-GCASH1',
+          status: 'PENDING',
+          channel_code: 'PH_GCASH',
+          actions: {
+            desktop_web_checkout_url: 'https://ewallet-mock-connector.xendit.co/v1/ewallet_connector/checkouts?token=abc',
+            mobile_web_checkout_url: 'https://ewallet-mock-connector.xendit.co/v1/ewallet_connector/checkouts?token=abc',
+            mobile_deeplink_checkout_url: null
+          }
+        })
+      };
+    };
+
+    try {
+      const res = await xenditService.createGcashCharge({
+        orderNumber: 'DNR-20261112-GCASH1',
+        amount: 209,
+        customerName: 'Dave',
+        customerPhone: '09281762895'
+      });
+
+      assert.strictEqual(capturedUrl, 'https://api.xendit.co/ewallets/charges');
+      const body = JSON.parse(capturedInit.body);
+      assert.strictEqual(body.reference_id, 'DNR-20261112-GCASH1');
+      assert.strictEqual(body.channel_code, 'PH_GCASH');
+      assert.strictEqual(body.checkout_method, 'ONE_TIME_PAYMENT');
+      assert.strictEqual(res.checkout_url, 'https://ewallet-mock-connector.xendit.co/v1/ewallet_connector/checkouts?token=abc');
+    } finally {
+      global.fetch = origFetch;
+    }
+  });
+
+  await t.test('8. xenditController.handleWebhook handles ewallet.capture SUCCEEDED payload cleanly', async () => {
+    const [menuRows] = await query('SELECT id, name, price FROM menu_items WHERE is_available = 1 LIMIT 1');
+    const item = menuRows[0];
+
+    const created = await orderService.createOrder(`POS_MANUAL_EWALLET_${Date.now()}`, {
+      customerName: 'Dave GCash',
+      customerPhone: '09281762895',
+      deliveryAddress: 'Store Counter Pickup',
+      orderType: 'pickup',
+      dining_mode: 'Pick-up',
+      paymentMethod: 'xendit',
+      amountPaid: 0,
+      items: [{ menuItemId: item.id, name: item.name, quantity: 1, unitPrice: item.price }],
+      deliveryFee: 0,
+      totalAmount: item.price,
+      paymentStatus: 'Pending'
+    });
+
+    const req = {
+      headers: { 'x-callback-token': 'test_callback_token_abc' },
+      body: {
+        event: 'ewallet.capture',
+        data: {
+          id: 'ewc_live_555',
+          reference_id: created.orderNumber,
+          status: 'SUCCEEDED',
+          charge_amount: item.price,
+          capture_amount: item.price,
+          channel_code: 'PH_GCASH'
+        }
+      }
+    };
+
+    const res = createMockRes();
+    await xenditController.handleWebhook(req, res);
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(res.body.verified, true);
+
+    const [orderRows] = await query('SELECT status, payment_status, payment_ref_number FROM orders WHERE id = ?', [created.orderId]);
+    assert.strictEqual(orderRows[0].payment_status, 'Paid');
+    assert.strictEqual(orderRows[0].status, 'preparing');
+    assert.ok(orderRows[0].payment_ref_number.includes('PH_GCASH (ewc_live_555)'));
+  });
 });
+

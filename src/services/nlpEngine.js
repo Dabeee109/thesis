@@ -375,10 +375,10 @@ TOTAL AMOUNT DUE: ₱${formattedTotal}`;
 const formatPlaintextSummaryReceipt = formatPlaintextOrderSummary;
 
 /**
- * Create a Xendit Invoice and send the checkout button template + cancel/menu quick replies to Messenger.
+ * Create a direct PH_GCASH Xendit Charge (with GCash-only Invoice fallback) and send checkout button template + cancel/menu quick replies to Messenger.
  */
 async function dispatchXenditCheckout(psid, session, { orderId, orderNum, totalAmount, customerName, customerPhone }) {
-  const invoice = await xenditService.createInvoice({
+  const charge = await xenditService.createGcashCharge({
     orderNumber: orderNum,
     amount: totalAmount,
     customerName,
@@ -386,19 +386,21 @@ async function dispatchXenditCheckout(psid, session, { orderId, orderNum, totalA
     description: `Diner's Cafe Order #${orderNum}`
   });
 
+  const checkoutUrl = charge.checkout_url || charge.invoice_url;
+
   if (orderId) {
     await db.query(
       `UPDATE orders
        SET payment_ref_number = ?, receipt_url = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
-      [invoice.id || null, invoice.invoice_url || null, orderId]
+      [charge.id || null, checkoutUrl || null, orderId]
     ).catch(() => {});
 
     await db.query(
       `UPDATE payments
        SET reference_no = ?, receipt_url = ?, updated_at = CURRENT_TIMESTAMP
        WHERE order_id = ?`,
-      [invoice.id || null, invoice.invoice_url || null, orderId]
+      [charge.id || null, checkoutUrl || null, orderId]
     ).catch(() => {});
   }
 
@@ -412,13 +414,13 @@ async function dispatchXenditCheckout(psid, session, { orderId, orderNum, totalA
   session.current_step = 'IDLE';
   await saveSession(session);
 
-  const payText = `💳 XENDIT ONLINE PAYMENT\nOrder #${orderNum}\nTotal Amount: ₱${Number(totalAmount).toFixed(2)}\n\nPindutin ang button sa ibaba upang magbayad gamit ang GCash, Maya, GrabPay, Online Banking, o 7-Eleven. Awtomatikong makukumpirma ang inyong order pagkabayad!`;
+  const payText = `📱 GCASH DIRECT PAYMENT (via Xendit)\nOrder #${orderNum}\nTotal Amount: ₱${Number(totalAmount).toFixed(2)}\n\nPindutin ang button sa ibaba upang direktang magbayad gamit ang GCash. Awtomatikong makukumpirma ang inyong order pagkabayad!`;
 
   await sendButtonTemplate(psid, payText, [
     {
       type: 'web_url',
-      url: invoice.invoice_url,
-      title: '💳 Pay via Xendit',
+      url: checkoutUrl,
+      title: '📱 Pay with GCash',
       webview_height_ratio: 'full'
     }
   ]);
@@ -431,9 +433,9 @@ async function dispatchXenditCheckout(psid, session, { orderId, orderNum, totalA
   return {
     intent: 'ORDER_PLACED_XENDIT',
     confidence: 1.0,
-    replyLog: `${payText}\nCheckout Link: ${invoice.invoice_url}`,
+    replyLog: `${payText}\nCheckout Link: ${checkoutUrl}`,
     orderNumber: orderNum,
-    invoiceUrl: invoice.invoice_url
+    invoiceUrl: checkoutUrl
   };
 }
 
