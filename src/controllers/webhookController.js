@@ -363,12 +363,53 @@ async function gcashRedirect(req, res) {
       // Subukang buksan agad ang Android app via intent kung direktang binuksan
       const urlParams = new URLSearchParams(window.location.search);
       if (urlParams.get('auto') === '1') {
-        window.location.href = "intent://#Intent;scheme=gcash;package=com.globe.gcash.android;end";
-        setTimeout(function() {
-          window.location.href = "gcash://";
-        }, 1000);
+        openGcashApp();
       }
     };
+
+    function openGcashApp(event) {
+      if (event) event.preventDefault();
+      var ua = navigator.userAgent || '';
+      var isAndroid = /android/i.test(ua);
+      var isIOS = /iphone|ipad|ipod/i.test(ua);
+      var fallbackBox = document.getElementById('gcashFallbackHelp');
+      var launched = false;
+
+      var onVisChange = function() {
+        if (document.hidden) launched = true;
+      };
+      document.addEventListener('visibilitychange', onVisChange, { once: true });
+
+      // 1. Subukan ang direct universal scheme (gumagana sa Android Chrome/Brave at iOS Safari)
+      try {
+        window.location.href = 'gcash://';
+      } catch (e) {}
+
+      // 2. Sa Android, subukan din ang standard BROWSABLE Intent pagkatapos ng maikling delay
+      if (isAndroid) {
+        setTimeout(function() {
+          if (!launched && !document.hidden) {
+            try {
+              window.location.href = 'intent://open#Intent;scheme=gcash;action=android.intent.action.VIEW;category=android.intent.category.BROWSABLE;package=com.globe.gcash.android;S.browser_fallback_url=' + encodeURIComponent('https://play.google.com/store/apps/details?id=com.globe.gcash.android') + ';end';
+            } catch (e) {
+              window.location.href = 'intent://#Intent;scheme=gcash;package=com.globe.gcash.android;end';
+            }
+          }
+        }, 350);
+      } else if (!isIOS) {
+        // Desktop browser fallback
+        setTimeout(function() {
+          if (fallbackBox) fallbackBox.style.display = 'block';
+        }, 400);
+      }
+
+      // 3. Kung naka-block sa Messenger In-App Browser pagkalipas ng 1.6s, magpakita ng clear guide
+      setTimeout(function() {
+        if (!launched && !document.hidden && fallbackBox) {
+          fallbackBox.style.display = 'block';
+        }
+      }, 1600);
+    }
 
     ${isPersonalMode ? '' : `
     async function submitGcashPayment() {
@@ -463,6 +504,11 @@ async function gcashRedirect(req, res) {
         <div style="text-align:center; margin:14px 0 18px; padding:12px; background:#f7faff; border:1px solid #d6e9ff; border-radius:10px;">
           <div style="font-size:12px; font-weight:bold; color:#0056b3; margin-bottom:8px;">I-scan ang Official GCash QR ng Tindahan:</div>
           <img src="${gcashQrUrl}" alt="Diner's Cafe GCash QR" style="max-width:200px; width:100%; border-radius:8px; border:1px solid #ddd;" />
+          <div style="margin-top:10px;">
+            <a href="${gcashQrUrl}" download="diners-cafe-gcash-qr.jpg" style="display:inline-block; font-size:12px; font-weight:bold; color:#007dfe; text-decoration:none; padding:6px 14px; background:#ffffff; border:1px solid #007dfe; border-radius:6px;">
+              Save / Download QR Code
+            </a>
+          </div>
         </div>
         ` : ''}
 
@@ -486,9 +532,16 @@ async function gcashRedirect(req, res) {
           <a href="intent://#Intent;scheme=gcash;package=com.globe.gcash.android;end" 
              id="gcashAppBtn"
              class="btn-app"
+             onclick="openGcashApp(event)"
              style="display:inline-block; padding:12px 24px; background:#007dfe; color:#fff; text-decoration:none; border-radius:8px; font-weight:bold;">
              Buksan ang GCash
           </a>
+          <div id="gcashFallbackHelp" style="display:none; margin-top:12px; padding:12px; background:#eef6ff; border:1px solid #b6d8ff; border-radius:10px; font-size:12px; color:#1e3a5f; text-align:left; line-height:1.5;">
+            <strong>Hindi nagbukas ang GCash App?</strong><br>
+            Madalas bina-block ng Facebook Messenger In-App Browser ang auto-launch ng apps:<br>
+            1. Pindutin ang <strong>⋮ (3 dots)</strong> sa itaas at piliin ang <strong>Open in Browser / Chrome / Safari</strong>, O<br>
+            2. I-tap ang <strong>Copy</strong> sa GCash number (<strong>${gcashAccountNumber}</strong>) o i-save ang QR code sa itaas, at buksan nang mano-mano ang GCash app sa cellphone mo.
+          </div>
         </div>
       </div>
     </div>
