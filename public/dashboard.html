@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="required-orientation" content="landscape">
   <link rel="stylesheet" href="css/style.css">
-  <link rel="stylesheet" href="css/dashboard.css?v=20261112_01">
+  <link rel="stylesheet" href="css/dashboard.css?v=20261112_02">
   <!-- Immediate Strict Frontend Auth Guard (Requirement 4) -->
   <script>
     (function () {
@@ -434,9 +434,18 @@
                 <p style="margin: 4px 0 0; font-size: 0.84rem; color: var(--text-muted);">Tracked in grams (g), milliliters (ml), and pieces (pcs). Auto-deducted when orders start preparing.</p>
               </div>
               <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
-                <input type="search" id="bom-search-input" class="form-control" placeholder="Search ingredient..." oninput="renderBomIngredientsTable()" style="width: 190px; padding: 6px 10px;">
+                <input type="search" id="bom-search-input" class="form-control" placeholder="Search ingredient..." oninput="renderBomIngredientsTable()" style="width: 180px; padding: 6px 10px;">
+                <select id="bom-category-select" class="form-control" onchange="renderBomIngredientsTable()" style="width: auto; padding: 6px 10px;">
+                  <option value="all">All Categories</option>
+                  <option value="Beverage Base & Syrups">Beverage Base &amp; Syrups</option>
+                  <option value="Dairy & Toppings">Dairy &amp; Toppings</option>
+                  <option value="Meat & Poultry">Meat &amp; Poultry</option>
+                  <option value="Bread, Dough & Pasta">Bread, Dough &amp; Pasta</option>
+                  <option value="Produce & Pantry">Produce &amp; Pantry</option>
+                  <option value="Packaging">Packaging</option>
+                </select>
                 <select id="bom-filter-select" class="form-control" onchange="renderBomIngredientsTable()" style="width: auto; padding: 6px 10px;">
-                  <option value="all">All Ingredients</option>
+                  <option value="all">All Stock Levels</option>
                   <option value="low">Low Stock Only</option>
                 </select>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="loadBomInventory()">🔄 Refresh</button>
@@ -449,9 +458,9 @@
                 <thead>
                   <tr>
                     <th scope="col">Ingredient</th>
-                    <th scope="col">Stock</th>
+                    <th scope="col">Category</th>
+                    <th scope="col">Stock &amp; Unit</th>
                     <th scope="col">Reorder Level</th>
-                    <th scope="col">Cost / Unit</th>
                     <th scope="col">Status</th>
                     <th scope="col">Actions</th>
                   </tr>
@@ -1706,28 +1715,37 @@
         </div>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;" class="form-group">
           <div>
+            <label class="form-label" for="ing-category-input">Category <span style="color: var(--status-danger);">*</span></label>
+            <select id="ing-category-input" class="form-control" required>
+              <option value="Beverage Base & Syrups">Beverage Base &amp; Syrups</option>
+              <option value="Dairy & Toppings">Dairy &amp; Toppings</option>
+              <option value="Meat & Poultry">Meat &amp; Poultry</option>
+              <option value="Bread, Dough & Pasta">Bread, Dough &amp; Pasta</option>
+              <option value="Produce & Pantry">Produce &amp; Pantry</option>
+              <option value="Packaging">Packaging</option>
+            </select>
+          </div>
+          <div>
             <label class="form-label" for="ing-unit-input">Unit of Measurement <span style="color: var(--status-danger);">*</span></label>
             <select id="ing-unit-input" class="form-control" required>
               <option value="g">Grams (g)</option>
               <option value="ml">Milliliters (ml)</option>
               <option value="pcs">Pieces (pcs)</option>
-              <option value="kg">Kilograms (kg)</option>
-              <option value="L">Liters (L)</option>
             </select>
           </div>
-          <div>
-            <label class="form-label" for="ing-cost-input">Cost per Unit (PHP)</label>
-            <input type="number" id="ing-cost-input" class="form-control" step="0.01" min="0" value="0.00">
-          </div>
         </div>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;" class="form-group">
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;" class="form-group">
           <div>
-            <label class="form-label" for="ing-stock-input">Initial Stock Quantity</label>
+            <label class="form-label" for="ing-stock-input">Initial Stock</label>
             <input type="number" id="ing-stock-input" class="form-control" step="0.01" min="0" value="0.00">
           </div>
           <div>
-            <label class="form-label" for="ing-reorder-input">Low-Stock Reorder Level</label>
+            <label class="form-label" for="ing-reorder-input">Reorder Level</label>
             <input type="number" id="ing-reorder-input" class="form-control" step="0.01" min="0" value="100.00">
+          </div>
+          <div>
+            <label class="form-label" for="ing-cost-input">Cost / Unit (PHP)</label>
+            <input type="number" id="ing-cost-input" class="form-control" step="0.01" min="0" value="0.00">
           </div>
         </div>
         <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px;">
@@ -1758,6 +1776,10 @@
             <input type="number" id="restock-cost-input" class="form-control" step="0.01" min="0">
           </div>
         </div>
+        <div class="form-group">
+          <label class="form-label" for="restock-notes-input">Notes / Supplier Reference</label>
+          <input type="text" id="restock-notes-input" class="form-control" placeholder="e.g. Morning delivery batch">
+        </div>
         <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px;">
           <button type="button" class="btn btn-secondary" onclick="document.getElementById('dialog-restock-ingredient').close()">Cancel</button>
           <button type="submit" class="btn btn-primary" id="btn-confirm-restock">Confirm Restock</button>
@@ -1786,8 +1808,8 @@
   </dialog>
 
   <!-- Scripts -->
-  <script src="js/api.js?v=20261112_01"></script>
-  <script src="js/dashboard.js?v=20261112_01"></script>
+  <script src="js/api.js?v=20261112_02"></script>
+  <script src="js/dashboard.js?v=20261112_02"></script>
   <script src="js/orientation-lock.js?v=20261109_04"></script>
 </body>
 </html>

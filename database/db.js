@@ -258,7 +258,8 @@ function initSqliteFallback() {
       CREATE TABLE IF NOT EXISTS ingredients (
         ingredient_id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE NOT NULL,
-        unit TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'Produce & Pantry',
+        unit TEXT CHECK(unit IN ('g', 'ml', 'pcs')) NOT NULL,
         stock_quantity REAL NOT NULL DEFAULT 0.00,
         reorder_level REAL NOT NULL DEFAULT 0.00,
         cost_per_unit REAL NOT NULL DEFAULT 0.00,
@@ -279,6 +280,7 @@ function initSqliteFallback() {
         change_amount REAL NOT NULL,
         change_type TEXT CHECK(change_type IN ('order_deduction', 'restock', 'spoilage_waste', 'adjustment')) NOT NULL,
         reference_order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+        notes TEXT DEFAULT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -425,6 +427,8 @@ function initSqliteFallback() {
     try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN fare_per_05km REAL DEFAULT 12.00;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN fare_fuel_cost REAL DEFAULT 2.83;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN fare_maintenance REAL DEFAULT 7.50;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE ingredients ADD COLUMN category TEXT NOT NULL DEFAULT 'Produce & Pantry';`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE ingredient_logs ADD COLUMN notes TEXT DEFAULT NULL;`); } catch (e) { }
 
     try {
       sqliteDb.exec(`
@@ -685,83 +689,60 @@ function seedSqliteData() {
 let bomSeedPromise = null;
 
 /**
- * Seed initial raw ingredients and sample recipes for 3 menu items idempotently
- * (Caramel Macchiato, Brown Sugar Milktea, Meaty Dog) after menu_items population.
+ * Seed full BOM raw ingredients (114 items across 6 categories) and all 91 menu item recipes idempotently.
  */
 async function seedBomDefaults() {
   if (bomSeedPromise) return bomSeedPromise;
   bomSeedPromise = (async () => {
     try {
-      const [ingCountRows] = await query(`SELECT COUNT(*) AS cnt FROM ingredients`);
-      const ingCount = Number(ingCountRows?.[0]?.cnt || ingCountRows?.[0]?.['COUNT(*)'] || 0);
-      if (ingCount === 0) {
-        const defaultIngredients = [
-          ['Espresso Beans', 'g', 5000.00, 500.00, 1.80],
-          ['Full Cream Milk', 'ml', 10000.00, 1500.00, 0.12],
-          ['Caramel Syrup', 'ml', 3000.00, 300.00, 0.45],
-          ['16oz Cup', 'pcs', 500.00, 50.00, 3.50],
-          ['Black Tea Concentrate', 'ml', 6000.00, 1000.00, 0.08],
-          ['Brown Sugar Syrup', 'ml', 3000.00, 300.00, 0.38],
-          ['Tapioca Pearls', 'g', 4000.00, 500.00, 0.18],
-          ['Hotdog Bun', 'pcs', 200.00, 30.00, 10.00],
-          ['Jumbo Sausage', 'pcs', 200.00, 30.00, 28.00],
-          ['Beef Chili Sauce', 'g', 5000.00, 600.00, 0.35],
-          ['Grated Cheese', 'g', 3000.00, 400.00, 0.55]
-        ];
-        for (const row of defaultIngredients) {
+      const { INGREDIENTS_CATALOG, MENU_RECIPES } = require('./bomRecipesSeedData');
+      const [existingIngRows] = await query(`SELECT ingredient_id, name, category FROM ingredients`);
+      const existingIngMap = new Map((existingIngRows || []).map(r => [String(r.name).toLowerCase(), r]));
+
+      for (const ing of INGREDIENTS_CATALOG) {
+        const existing = existingIngMap.get(ing.name.toLowerCase());
+        if (!existing) {
           await query(
-            `INSERT INTO ingredients (name, unit, stock_quantity, reorder_level, cost_per_unit) VALUES (?, ?, ?, ?, ?)`,
-            row
+            `INSERT INTO ingredients (name, category, unit, stock_quantity, reorder_level, cost_per_unit)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [ing.name, ing.category, ing.unit, ing.stock_quantity, ing.reorder_level, 0.00]
           ).catch(() => {});
+        } else if (!existing.category || existing.category === 'Produce & Pantry') {
+          if (ing.category !== existing.category) {
+            await query(
+              `UPDATE ingredients SET category = ?, unit = ? WHERE ingredient_id = ?`,
+              [ing.category, ing.unit, existing.ingredient_id]
+            ).catch(() => {});
+          }
         }
       }
 
       const [recipeCountRows] = await query(`SELECT COUNT(*) AS cnt FROM recipe_items`);
       const recipeCount = Number(recipeCountRows?.[0]?.cnt || recipeCountRows?.[0]?.['COUNT(*)'] || 0);
-      if (recipeCount === 0) {
-        const sampleRecipes = [
-          {
-            menuName: 'caramel macchiato',
-            ingredients: [
-              ['Espresso Beans', 18.00],
-              ['Full Cream Milk', 200.00],
-              ['Caramel Syrup', 30.00],
-              ['16oz Cup', 1.00]
-            ]
-          },
-          {
-            menuName: 'brown sugar milktea',
-            ingredients: [
-              ['Black Tea Concentrate', 150.00],
-              ['Full Cream Milk', 120.00],
-              ['Brown Sugar Syrup', 35.00],
-              ['Tapioca Pearls', 50.00],
-              ['16oz Cup', 1.00]
-            ]
-          },
-          {
-            menuName: 'meaty dog',
-            ingredients: [
-              ['Hotdog Bun', 1.00],
-              ['Jumbo Sausage', 1.00],
-              ['Beef Chili Sauce', 60.00],
-              ['Grated Cheese', 25.00]
-            ]
-          }
-        ];
+      if (recipeCount < 100) {
+        const [allMenus] = await query(`SELECT id, name FROM menu_items WHERE COALESCE(is_deleted, 0) = 0`);
+        const [allIngs] = await query(`SELECT ingredient_id, name FROM ingredients`);
+        const [existingPairs] = await query(`SELECT menu_id, ingredient_id FROM recipe_items`);
 
-        for (const recipe of sampleRecipes) {
-          const [mRows] = await query(`SELECT id FROM menu_items WHERE LOWER(name) = ? LIMIT 1`, [recipe.menuName]);
-          if (!mRows || mRows.length === 0) continue;
-          const menuId = mRows[0].id;
+        const menuMap = new Map((allMenus || []).map(m => [String(m.name).trim().toLowerCase(), m.id]));
+        const ingMap = new Map((allIngs || []).map(i => [String(i.name).trim().toLowerCase(), i.ingredient_id]));
+        const pairSet = new Set((existingPairs || []).map(p => `${p.menu_id}:${p.ingredient_id}`));
 
-          for (const [ingName, qtyReq] of recipe.ingredients) {
-            const [iRows] = await query(`SELECT ingredient_id FROM ingredients WHERE name = ? LIMIT 1`, [ingName]);
-            if (!iRows || iRows.length === 0) continue;
+        for (const [menuName, reqList] of Object.entries(MENU_RECIPES)) {
+          const menuId = menuMap.get(menuName.trim().toLowerCase());
+          if (!menuId) continue;
+
+          for (const [ingName, qtyReq] of reqList) {
+            const ingId = ingMap.get(ingName.trim().toLowerCase());
+            if (!ingId) continue;
+            const key = `${menuId}:${ingId}`;
+            if (pairSet.has(key)) continue;
+
             await query(
               `INSERT INTO recipe_items (menu_id, ingredient_id, quantity_required) VALUES (?, ?, ?)`,
-              [menuId, iRows[0].ingredient_id, qtyReq]
+              [menuId, ingId, qtyReq]
             ).catch(() => {});
+            pairSet.add(key);
           }
         }
       }
@@ -967,15 +948,22 @@ async function initDatabase() {
       await conn.query(`
         CREATE TABLE IF NOT EXISTS ingredients (
           ingredient_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-          name VARCHAR(100) NOT NULL UNIQUE,
-          unit VARCHAR(20) NOT NULL,
+          name VARCHAR(120) NOT NULL UNIQUE,
+          category ENUM('Beverage Base & Syrups', 'Dairy & Toppings', 'Meat & Poultry', 'Bread, Dough & Pasta', 'Produce & Pantry', 'Packaging') NOT NULL DEFAULT 'Produce & Pantry',
+          unit ENUM('g', 'ml', 'pcs') NOT NULL,
           stock_quantity DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
           reorder_level DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
           cost_per_unit DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          INDEX idx_ingredient_name (name)
+          INDEX idx_ingredient_name (name),
+          INDEX idx_ingredient_category (category)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
       `);
+
+      await conn.query(`
+        ALTER TABLE ingredients
+        ADD COLUMN IF NOT EXISTS category ENUM('Beverage Base & Syrups', 'Dairy & Toppings', 'Meat & Poultry', 'Bread, Dough & Pasta', 'Produce & Pantry', 'Packaging') NOT NULL DEFAULT 'Produce & Pantry' AFTER name;
+      `).catch(() => {});
 
       await conn.query(`
         CREATE TABLE IF NOT EXISTS recipe_items (
@@ -998,6 +986,7 @@ async function initDatabase() {
           change_amount DECIMAL(10, 2) NOT NULL,
           change_type ENUM('order_deduction', 'restock', 'spoilage_waste', 'adjustment') NOT NULL,
           reference_order_id INT UNSIGNED DEFAULT NULL,
+          notes VARCHAR(255) DEFAULT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (ingredient_id) REFERENCES ingredients(ingredient_id) ON DELETE CASCADE,
           FOREIGN KEY (reference_order_id) REFERENCES orders(id) ON DELETE SET NULL,
@@ -1006,6 +995,11 @@ async function initDatabase() {
           INDEX idx_ingredient_log_type (change_type)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
       `);
+
+      await conn.query(`
+        ALTER TABLE ingredient_logs
+        ADD COLUMN IF NOT EXISTS notes VARCHAR(255) NULL AFTER reference_order_id;
+      `).catch(() => {});
 
       // 3. Seed default admin & staff accounts if table is empty
       try {

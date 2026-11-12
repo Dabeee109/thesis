@@ -168,9 +168,10 @@ async function priceCart(cart) {
   const placeholders = itemIds.map(() => '?').join(',');
 
   const [dbItems] = await db.query(
-    `SELECT m.id, m.name, m.price, m.is_available, i.stock_quantity
+    `SELECT m.id, m.name, m.price, m.is_available,
+            COALESCE(i.stock_quantity, m.stock_quantity, 50) AS stock_quantity
      FROM menu_items m
-     JOIN inventory i ON i.menu_item_id = m.id
+     LEFT JOIN inventory i ON i.menu_item_id = m.id
      WHERE m.id IN (${placeholders})`,
     itemIds
   );

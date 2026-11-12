@@ -15,6 +15,9 @@ DROP TABLE IF EXISTS `delivery_personnel`;
 DROP TABLE IF EXISTS `payments`;
 DROP TABLE IF EXISTS `admin_gcash_transactions`;
 DROP TABLE IF EXISTS `order_items`;
+DROP TABLE IF EXISTS `ingredient_logs`;
+DROP TABLE IF EXISTS `recipe_items`;
+DROP TABLE IF EXISTS `ingredients`;
 DROP TABLE IF EXISTS `orders`;
 DROP TABLE IF EXISTS `inventory_logs`;
 DROP TABLE IF EXISTS `inventory`;
@@ -163,6 +166,49 @@ CREATE TABLE `order_items` (
   FOREIGN KEY (`order_id`) REFERENCES `orders`(`id`) ON DELETE CASCADE,
   FOREIGN KEY (`menu_item_id`) REFERENCES `menu_items`(`id`) ON DELETE RESTRICT,
   INDEX `idx_order_id` (`order_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 8B. Raw Ingredients Table (BOM / Recipe Inventory)
+CREATE TABLE `ingredients` (
+  `ingredient_id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `name` VARCHAR(120) NOT NULL UNIQUE,
+  `category` ENUM('Beverage Base & Syrups', 'Dairy & Toppings', 'Meat & Poultry', 'Bread, Dough & Pasta', 'Produce & Pantry', 'Packaging') NOT NULL DEFAULT 'Produce & Pantry',
+  `unit` ENUM('g', 'ml', 'pcs') NOT NULL,
+  `stock_quantity` DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+  `reorder_level` DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+  `cost_per_unit` DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_ingredient_name` (`name`),
+  INDEX `idx_ingredient_category` (`category`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 8C. Menu Item Recipe / Bill of Materials Mapping Table
+CREATE TABLE `recipe_items` (
+  `recipe_id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `menu_id` INT UNSIGNED NOT NULL,
+  `ingredient_id` INT UNSIGNED NOT NULL,
+  `quantity_required` DECIMAL(10, 2) NOT NULL,
+  UNIQUE KEY `uq_menu_ingredient` (`menu_id`, `ingredient_id`),
+  FOREIGN KEY (`menu_id`) REFERENCES `menu_items`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`ingredient_id`) REFERENCES `ingredients`(`ingredient_id`) ON DELETE CASCADE,
+  INDEX `idx_recipe_menu_id` (`menu_id`),
+  INDEX `idx_recipe_ingredient_id` (`ingredient_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 8D. Ingredient Stock Audit Logs Table
+CREATE TABLE `ingredient_logs` (
+  `log_id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `ingredient_id` INT UNSIGNED NOT NULL,
+  `change_amount` DECIMAL(10, 2) NOT NULL,
+  `change_type` ENUM('order_deduction', 'restock', 'spoilage_waste', 'adjustment') NOT NULL,
+  `reference_order_id` INT UNSIGNED NULL,
+  `notes` VARCHAR(255) NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`ingredient_id`) REFERENCES `ingredients`(`ingredient_id`) ON DELETE CASCADE,
+  FOREIGN KEY (`reference_order_id`) REFERENCES `orders`(`id`) ON DELETE SET NULL,
+  INDEX `idx_ingredient_log_ing` (`ingredient_id`),
+  INDEX `idx_ingredient_log_order` (`reference_order_id`),
+  INDEX `idx_ingredient_log_type` (`change_type`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 9. Admin GCash Transactions Table (Official Admin Transaction Records for Anti-Scam)

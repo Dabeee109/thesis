@@ -213,6 +213,11 @@ const API = {
       if (onEventCallback) onEventCallback('INGREDIENTS_UPDATED', data);
     });
 
+    eventSource.addEventListener('INVENTORY_UPDATED', (e) => {
+      const data = JSON.parse(e.data);
+      if (onEventCallback) onEventCallback('INVENTORY_UPDATED', data);
+    });
+
     eventSource.addEventListener('NEW_FEEDBACK', (e) => {
       const data = JSON.parse(e.data);
       API.toast(`🌟 New ${data.rating}-star review received!`, 'success');

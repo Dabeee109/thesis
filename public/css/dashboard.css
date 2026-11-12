@@ -920,11 +920,36 @@ input:checked + .slider:before {
   border-collapse: separate;
   border-spacing: 0;
   --label-1: "Ingredient";
-  --label-2: "Stock";
-  --label-3: "Reorder Level";
-  --label-4: "Cost / Unit";
+  --label-2: "Category";
+  --label-3: "Stock";
+  --label-4: "Reorder Level";
   --label-5: "Status";
   --label-6: "Actions";
+}
+
+.bom-unit-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: rgba(212, 163, 115, 0.16);
+  color: var(--brand-primary, #d4a373);
+  border: 1px solid rgba(212, 163, 115, 0.35);
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.bom-cat-badge {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 6px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary, #e6ccb2);
+  border: 1px solid var(--border-subtle);
 }
 
 .bom-table thead {

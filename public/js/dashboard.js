@@ -267,6 +267,7 @@ async function refreshAllData() {
     loadKPIs(),
     loadOrders(),
     loadMenu(),
+    loadBomInventory(),
     loadPromotions(),
     loadDeliveries(),
     loadFeedback(),
@@ -292,8 +293,9 @@ function handleRealtimeEvent(eventType, data) {
     loadOrders();
     loadDeliveries();
   }
-  if (eventType === 'INGREDIENTS_UPDATED' || eventType === 'INGREDIENT_STOCK_ALERT') {
+  if (eventType === 'INVENTORY_UPDATED' || eventType === 'INGREDIENTS_UPDATED' || eventType === 'INGREDIENT_STOCK_ALERT') {
     if (typeof loadBomInventory === 'function') loadBomInventory();
+    if (eventType === 'INVENTORY_UPDATED' && typeof loadMenu === 'function') loadMenu();
   }
   if (eventType === 'VOID_REQUEST_CREATED') {
     const user = API.getUser();
@@ -3707,7 +3709,7 @@ let currentSelectedRecipe = null;
 async function loadBomInventory() {
   try {
     const [ingRes, menuRes] = await Promise.all([
-      API.get('/inventory/ingredients'),
+      API.get('/inventory'),
       API.get('/menu')
     ]);
 
@@ -3742,9 +3744,11 @@ function renderBomIngredientsTable() {
   if (!tbody) return;
 
   const query = String(document.getElementById('bom-search-input')?.value || '').trim().toLowerCase();
+  const categoryFilter = document.getElementById('bom-category-select')?.value || 'all';
   const filter = document.getElementById('bom-filter-select')?.value || 'all';
 
   const filtered = bomIngredientsCache.filter(item => {
+    if (categoryFilter !== 'all' && item.category !== categoryFilter) return false;
     if (filter === 'low' && !item.is_low_stock) return false;
     if (query && !String(item.name || '').toLowerCase().includes(query)) return false;
     return true;
@@ -3756,16 +3760,18 @@ function renderBomIngredientsTable() {
   }
 
   tbody.innerHTML = filtered.map(ing => {
-    const statusBadge = ing.is_low_stock
-      ? '<span class="badge badge-danger">⚠️ Low Stock</span>'
-      : '<span class="badge badge-success">In Stock</span>';
+    const statusBadge = ing.stock_quantity <= 0
+      ? '<span class="badge badge-danger">⛔ Depleted</span>'
+      : (ing.is_low_stock
+        ? '<span class="badge badge-danger">⚠️ Low Stock</span>'
+        : '<span class="badge badge-success">In Stock</span>');
 
     return `
       <tr>
         <th scope="row">${escapeHtml(ing.name)}</th>
-        <td><strong>${Number(ing.stock_quantity || 0).toFixed(2)}</strong> ${escapeHtml(ing.unit)}</td>
-        <td>${Number(ing.reorder_level || 0).toFixed(2)} ${escapeHtml(ing.unit)}</td>
-        <td>₱${Number(ing.cost_per_unit || 0).toFixed(2)} / ${escapeHtml(ing.unit)}</td>
+        <td><span class="bom-cat-badge">${escapeHtml(ing.category || 'Produce & Pantry')}</span></td>
+        <td><strong>${Number(ing.stock_quantity || 0).toFixed(2)}</strong><span class="bom-unit-badge">${escapeHtml(ing.unit)}</span></td>
+        <td>${Number(ing.reorder_level || 0).toFixed(2)} <span class="bom-unit-badge">${escapeHtml(ing.unit)}</span></td>
         <td>${statusBadge}</td>
         <td>
           <button type="button" class="btn btn-primary btn-sm" onclick="openRestockIngredientDialog(${Number(ing.ingredient_id)})">+ Restock</button>
@@ -3800,6 +3806,7 @@ async function handleAddIngredientSubmit(event) {
   event.preventDefault();
   const payload = {
     name: document.getElementById('ing-name-input')?.value.trim(),
+    category: document.getElementById('ing-category-input')?.value || 'Produce & Pantry',
     unit: document.getElementById('ing-unit-input')?.value.trim(),
     stock_quantity: parseFloat(document.getElementById('ing-stock-input')?.value || '0'),
     reorder_level: parseFloat(document.getElementById('ing-reorder-input')?.value || '0'),
@@ -3824,9 +3831,11 @@ function openRestockIngredientDialog(ingredientId) {
 
   document.getElementById('restock-ing-id').value = String(ing.ingredient_id);
   document.getElementById('restock-ing-summary').textContent =
-    `${ing.name} — Current stock: ${Number(ing.stock_quantity).toFixed(2)} ${ing.unit}`;
+    `${ing.name} (${ing.category || 'Pantry'}) — Current stock: ${Number(ing.stock_quantity).toFixed(2)} ${ing.unit}`;
   document.getElementById('restock-amount-input').value = '';
   document.getElementById('restock-cost-input').value = Number(ing.cost_per_unit || 0).toFixed(2);
+  const notesEl = document.getElementById('restock-notes-input');
+  if (notesEl) notesEl.value = '';
 
   const dialog = document.getElementById('dialog-restock-ingredient');
   if (dialog && typeof dialog.showModal === 'function') dialog.showModal();
@@ -3834,20 +3843,21 @@ function openRestockIngredientDialog(ingredientId) {
 
 async function handleRestockIngredientSubmit(event) {
   event.preventDefault();
-  const id = document.getElementById('restock-ing-id')?.value;
+  const id = Number(document.getElementById('restock-ing-id')?.value || 0);
   const amount = parseFloat(document.getElementById('restock-amount-input')?.value || '0');
   const costVal = document.getElementById('restock-cost-input')?.value;
-  const body = { amount };
+  const notes = document.getElementById('restock-notes-input')?.value?.trim() || 'Manual Restock via Dashboard';
+  const body = { ingredient_id: id, amount, notes };
   if (costVal !== '' && costVal !== null) {
     body.cost_per_unit = parseFloat(costVal);
   }
 
   try {
-    const res = await API.patch(`/inventory/ingredients/${encodeURIComponent(id)}/restock`, body);
+    const res = await API.post('/inventory/restock', body);
     if (res && res.success) {
       API.toast(res.message || 'Ingredient restocked!', 'success');
       document.getElementById('dialog-restock-ingredient')?.close();
-      await loadBomInventory();
+      await Promise.all([loadBomInventory(), loadMenu()]);
       if (document.getElementById('bom-recipe-menu-select')?.value) {
         await loadSelectedMenuRecipe();
       }

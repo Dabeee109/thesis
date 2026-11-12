@@ -128,9 +128,9 @@ async function getSummaryKPIs(req, res) {
       SELECT COUNT(*) AS count FROM payments WHERE is_mismatch = 1 AND status = 'mismatch_flagged'
     `);
 
-    // Low Stock Items Count
+    // Low Stock Ingredients Count (BOM)
     const [lowStock] = await db.query(`
-      SELECT COUNT(*) AS count FROM inventory WHERE stock_quantity <= low_stock_threshold
+      SELECT COUNT(*) AS count FROM ingredients WHERE stock_quantity <= reorder_level
     `);
 
     // Customer Satisfaction Rating

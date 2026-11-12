@@ -7,6 +7,7 @@ const {
   getInventoryList,
   restockItem,
   listIngredients,
+  getIngredientsGrouped,
   createIngredient,
   restockIngredient,
   getRecipeByMenuId,
@@ -15,12 +16,22 @@ const {
 const db = require('../../database/db');
 
 /**
- * Get inventory stock list
+ * GET /api/inventory
+ * Returns all raw ingredients grouped by category, units ('g', 'ml', 'pcs'),
+ * current stock, reorder levels, and low-stock flags.
  */
 async function getInventory(req, res) {
   try {
-    const inventory = await getInventoryList();
-    return res.json({ success: true, count: inventory.length, inventory });
+    const data = await getIngredientsGrouped();
+    return res.json({
+      success: true,
+      count: data.ingredients.length,
+      lowStockCount: data.lowStockCount,
+      ingredients: data.ingredients,
+      groupedByCategory: data.groupedByCategory,
+      categories: data.groupedByCategory,
+      inventory: data.ingredients
+    });
   } catch (err) {
     console.error('[Inventory Controller Error]', err);
     return res.status(500).json({ success: false, message: 'Failed to retrieve inventory.' });
@@ -28,62 +39,102 @@ async function getInventory(req, res) {
 }
 
 /**
- * Restock Item
+ * POST /api/inventory/restock
+ * Add stock (+amount) to a raw ingredient and record a 'restock' entry in ingredient_logs.
  */
 async function restock(req, res) {
   try {
-    const { inventoryId, quantityToAdd, notes } = req.body;
+    const {
+      ingredient_id,
+      ingredientId,
+      amount,
+      quantityToAdd,
+      cost_per_unit,
+      costPerUnit,
+      notes,
+      inventoryId
+    } = req.body || {};
 
-    if (!inventoryId || !quantityToAdd || quantityToAdd <= 0) {
-      return res.status(400).json({ success: false, message: 'Valid inventoryId and positive quantityToAdd are required.' });
+    const targetIngId = parseInt(ingredient_id ?? ingredientId, 10);
+    const addAmount = Number(amount ?? quantityToAdd);
+
+    if (targetIngId) {
+      if (!Number.isFinite(addAmount) || addAmount <= 0) {
+        return res.status(400).json({ success: false, message: 'Valid positive amount is required.' });
+      }
+      const result = await restockIngredient(
+        targetIngId,
+        addAmount,
+        cost_per_unit ?? costPerUnit ?? null,
+        notes || 'Manual Restock via Dashboard'
+      );
+      return res.json({
+        success: true,
+        message: `Restocked +${addAmount} ${result.unit} of ${result.name}.`,
+        ...result
+      });
+    }
+
+    if (!inventoryId || !Number.isFinite(addAmount) || addAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid ingredient_id and positive amount are required.'
+      });
     }
 
     const loggedBy = req.user ? req.user.name : 'Admin';
-    const result = await restockItem(inventoryId, quantityToAdd, loggedBy, notes);
+    const result = await restockItem(inventoryId, addAmount, loggedBy, notes);
 
-    return res.json({ success: true, message: `Successfully restocked ${quantityToAdd} units.`, ...result });
+    return res.json({ success: true, message: `Successfully restocked ${addAmount} units.`, ...result });
   } catch (err) {
-    return res.status(500).json({ success: false, message: err.message || 'Failed to restock item.' });
+    const status = /not found/i.test(err.message || '') ? 404 : 500;
+    return res.status(status).json({ success: false, message: err.message || 'Failed to restock item.' });
   }
 }
 
 /**
- * Get Inventory Audit Logs
+ * GET /api/inventory/logs
+ * Get BOM Ingredient Stock Audit Logs
  */
 async function getInventoryLogs(req, res) {
   try {
     const [logs] = await db.query(`
       SELECT 
-        l.*,
-        m.name AS item_name,
-        c.name AS category_name
-      FROM inventory_logs l
-      JOIN inventory i ON l.inventory_id = i.id
-      JOIN menu_items m ON i.menu_item_id = m.id
-      JOIN categories c ON m.category_id = c.id
+        l.log_id,
+        l.ingredient_id,
+        i.name AS ingredient_name,
+        i.category,
+        i.unit,
+        l.change_amount,
+        l.change_type,
+        l.reference_order_id,
+        l.notes,
+        l.created_at
+      FROM ingredient_logs l
+      JOIN ingredients i ON l.ingredient_id = i.ingredient_id
       ORDER BY l.created_at DESC
       LIMIT 100
     `);
 
     return res.json({ success: true, logs });
   } catch (err) {
-    return res.status(500).json({ success: false, message: 'Failed to retrieve inventory logs.' });
+    return res.status(500).json({ success: false, message: 'Failed to retrieve ingredient logs.' });
   }
 }
 
 /**
  * GET /api/inventory/ingredients
- * List all raw ingredients, units, stock levels, and low-stock flags (stock_quantity <= reorder_level).
+ * List all raw ingredients, categories, units, stock levels, and low-stock flags.
  */
 async function getIngredients(req, res) {
   try {
-    const ingredients = await listIngredients();
-    const lowStockCount = ingredients.filter(i => i.is_low_stock).length;
+    const data = await getIngredientsGrouped();
     return res.json({
       success: true,
-      count: ingredients.length,
-      lowStockCount,
-      ingredients
+      count: data.ingredients.length,
+      lowStockCount: data.lowStockCount,
+      groupedByCategory: data.groupedByCategory,
+      ingredients: data.ingredients
     });
   } catch (err) {
     console.error('[Inventory Ingredients List Error]', err);
@@ -97,11 +148,11 @@ async function getIngredients(req, res) {
  */
 async function addIngredient(req, res) {
   try {
-    const { name, unit, stock_quantity, reorder_level, cost_per_unit } = req.body || {};
+    const { name, category, unit, stock_quantity, reorder_level, cost_per_unit } = req.body || {};
     if (!name || !unit) {
       return res.status(400).json({ success: false, message: 'name and unit are required.' });
     }
-    const ingredient = await createIngredient({ name, unit, stock_quantity, reorder_level, cost_per_unit });
+    const ingredient = await createIngredient({ name, category, unit, stock_quantity, reorder_level, cost_per_unit });
     return res.status(201).json({ success: true, ingredient });
   } catch (err) {
     const status = /UNIQUE|Duplicate/i.test(err.message || '') ? 409 : 400;
@@ -118,12 +169,13 @@ async function restockRawIngredient(req, res) {
     const ingredientId = parseInt(req.params.id, 10);
     const amount = Number(req.body?.amount ?? req.body?.quantityToAdd);
     const costPerUnit = req.body?.cost_per_unit ?? req.body?.costPerUnit ?? null;
+    const notes = req.body?.notes || 'Manual Restock via Dashboard';
 
     if (!ingredientId || !Number.isFinite(amount) || amount <= 0) {
       return res.status(400).json({ success: false, message: 'Valid ingredient id and positive amount are required.' });
     }
 
-    const result = await restockIngredient(ingredientId, amount, costPerUnit);
+    const result = await restockIngredient(ingredientId, amount, costPerUnit, notes);
     return res.json({ success: true, message: `Restocked ${amount} ${result.unit} of ${result.name}.`, ...result });
   } catch (err) {
     const status = /not found/i.test(err.message || '') ? 404 : 400;

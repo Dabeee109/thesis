@@ -5,6 +5,7 @@
 
 const db = require('../../database/db');
 const { broadcastSSE } = require('./notificationService');
+const { INGREDIENT_CATEGORIES, INGREDIENT_UNITS } = require('../../database/bomRecipesSeedData');
 
 /**
  * Get all inventory records with menu item details
@@ -46,10 +47,10 @@ async function verifyStockAvailability(items) {
 
   for (const item of items) {
     const [rows] = await db.query(
-      `SELECT i.stock_quantity, m.name, m.is_available 
-       FROM inventory i 
-       JOIN menu_items m ON i.menu_item_id = m.id 
-       WHERE i.menu_item_id = ?`,
+      `SELECT COALESCE(i.stock_quantity, m.stock_quantity, 50) AS stock_quantity, m.name, m.is_available
+       FROM menu_items m
+       LEFT JOIN inventory i ON i.menu_item_id = m.id
+       WHERE m.id = ? AND COALESCE(m.is_deleted, 0) = 0`,
       [item.menuItemId]
     );
 
@@ -234,12 +235,112 @@ async function runInBomTransaction(dbConnection, callback) {
 }
 
 /**
+ * Synchronize `menu_items.is_available` & `stock_quantity` against live raw ingredient stock levels.
+ * Marks any menu item unavailable if ANY required ingredient in `recipe_items` has
+ * `ingredients.stock_quantity < recipe_items.quantity_required`, and re-enables it when restocked.
+ *
+ * @param {Object|null} [externalConn=null] - Optional active transaction/connection handle
+ * @returns {Promise<{ updatedCount: number, disabledMenus: Array, enabledMenus: Array }>}
+ */
+async function syncMenuAvailability(externalConn = null) {
+  const exec = (externalConn && typeof externalConn.query === 'function') ? externalConn : db;
+
+  const [rows] = await exec.query(
+    `SELECT r.menu_id, r.ingredient_id, r.quantity_required,
+            i.name AS ingredient_name, i.stock_quantity AS ingredient_stock,
+            m.name AS menu_name, m.is_available, m.stock_quantity AS menu_stock
+     FROM recipe_items r
+     JOIN ingredients i ON i.ingredient_id = r.ingredient_id
+     JOIN menu_items m ON m.id = r.menu_id
+     WHERE COALESCE(m.is_deleted, 0) = 0`
+  );
+
+  const byMenu = new Map();
+  for (const row of (rows || [])) {
+    if (!byMenu.has(row.menu_id)) {
+      byMenu.set(row.menu_id, {
+        menuId: row.menu_id,
+        menuName: row.menu_name,
+        isAvailable: row.is_available === 1 || row.is_available === true,
+        menuStock: Number(row.menu_stock || 0),
+        reqs: []
+      });
+    }
+    byMenu.get(row.menu_id).reqs.push({
+      ingredientId: row.ingredient_id,
+      ingredientName: row.ingredient_name,
+      required: Number(row.quantity_required || 0),
+      stock: Number(row.ingredient_stock || 0)
+    });
+  }
+
+  const disabledMenus = [];
+  const enabledMenus = [];
+
+  for (const entry of byMenu.values()) {
+    const hasAllIngredients = entry.reqs.every(r => r.stock >= r.required);
+    let possibleServings = 0;
+    if (hasAllIngredients && entry.reqs.length > 0) {
+      possibleServings = Math.floor(
+        Math.min(...entry.reqs.map(r => (r.required > 0 ? Math.floor(r.stock / r.required) : 999)))
+      );
+    }
+
+    if (!hasAllIngredients || possibleServings <= 0) {
+      if (entry.isAvailable || entry.menuStock > 0) {
+        await exec.query(
+          `UPDATE menu_items SET is_available = 0, stock_quantity = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+          [entry.menuId]
+        );
+        await exec.query(
+          `UPDATE menu_items SET status = 'OUT_OF_STOCK' WHERE id = ?`,
+          [entry.menuId]
+        ).catch(() => {});
+        await exec.query(
+          `UPDATE inventory SET stock_quantity = 0, updated_at = CURRENT_TIMESTAMP WHERE menu_item_id = ?`,
+          [entry.menuId]
+        ).catch(() => {});
+        disabledMenus.push({ menuId: entry.menuId, name: entry.menuName });
+      }
+    } else if (!entry.isAvailable || entry.menuStock <= 0) {
+      const restoredStock = Math.max(1, possibleServings);
+      await exec.query(
+        `UPDATE menu_items SET is_available = 1, stock_quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        [restoredStock, entry.menuId]
+      );
+      await exec.query(
+        `UPDATE menu_items SET status = 'AVAILABLE' WHERE id = ?`,
+        [entry.menuId]
+      ).catch(() => {});
+      await exec.query(
+        `UPDATE inventory SET stock_quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE menu_item_id = ?`,
+        [restoredStock, entry.menuId]
+      ).catch(() => {});
+      enabledMenus.push({ menuId: entry.menuId, name: entry.menuName, possibleServings: restoredStock });
+    }
+  }
+
+  const updatedCount = disabledMenus.length + enabledMenus.length;
+  if (!externalConn && updatedCount > 0) {
+    broadcastSSE('INVENTORY_UPDATED', {
+      synced: true,
+      disabledMenus,
+      enabledMenus
+    });
+  }
+
+  return { updatedCount, disabledMenus, enabledMenus };
+}
+
+/**
  * Atomically deduct raw ingredients required by an order's line items based on recipe_items (BOM).
+ * Uses `GREATEST(0, stock_quantity - ?)` (MySQL) / `MAX(0, stock_quantity - ?)` (SQLite),
+ * inserts negative audit entries into `ingredient_logs`, and syncs menu availability.
  * Idempotent per order_id: prevents double-deduction across confirmed/preparing transitions.
  *
  * @param {number} orderId - Order ID in `orders`
  * @param {Object|null} [dbConnection=null] - Optional mysql2/promise connection or transaction handle
- * @returns {Promise<{ alreadyDeducted?: boolean, orderId: number, deductions: Array }>}
+ * @returns {Promise<{ alreadyDeducted?: boolean, orderId: number, deductions: Array, syncResult?: Object }>}
  */
 async function deductIngredientsForOrder(orderId, dbConnection = null) {
   if (!orderId) {
@@ -247,7 +348,7 @@ async function deductIngredientsForOrder(orderId, dbConnection = null) {
   }
 
   const lowStockAlerts = [];
-  const deductions = await runInBomTransaction(dbConnection, async (tx) => {
+  const result = await runInBomTransaction(dbConnection, async (tx) => {
     // 1. Idempotency check: skip if order_deduction already recorded for this order
     const [existingLogs] = await tx.query(
       `SELECT log_id FROM ingredient_logs
@@ -259,98 +360,74 @@ async function deductIngredientsForOrder(orderId, dbConnection = null) {
       return { alreadyDeducted: true, orderId, deductions: [] };
     }
 
-    // 2. Read ordered items and quantities
-    const [orderItems] = await tx.query(
-      `SELECT menu_item_id, quantity FROM order_items WHERE order_id = ?`,
+    // 2. Read ordered items and compute total raw ingredient deduction via recipe_items join
+    const [reqRows] = await tx.query(
+      `SELECT r.ingredient_id,
+              i.name,
+              i.unit,
+              i.stock_quantity,
+              i.reorder_level,
+              ROUND(SUM(r.quantity_required * COALESCE(oi.quantity, 1)), 2) AS total_deduction
+       FROM order_items oi
+       JOIN recipe_items r ON r.menu_id = oi.menu_item_id
+       JOIN ingredients i ON i.ingredient_id = r.ingredient_id
+       WHERE oi.order_id = ?
+       GROUP BY r.ingredient_id, i.name, i.unit, i.stock_quantity, i.reorder_level`,
       [orderId]
     );
-    if (!orderItems || orderItems.length === 0) {
+
+    if (!reqRows || reqRows.length === 0) {
       return { alreadyDeducted: false, orderId, deductions: [] };
     }
 
-    // 3. Aggregate raw ingredient requirements across all order line items
-    const requiredMap = new Map();
-    for (const line of orderItems) {
-      const orderedQty = Number(line.quantity) || 1;
-      const [recipeRows] = await tx.query(
-        `SELECT r.ingredient_id, r.quantity_required, i.name, i.unit, i.stock_quantity, i.reorder_level
-         FROM recipe_items r
-         JOIN ingredients i ON i.ingredient_id = r.ingredient_id
-         WHERE r.menu_id = ?
-         FOR UPDATE`,
-        [line.menu_item_id]
-      );
-
-      for (const r of (recipeRows || [])) {
-        const consumeAmount = Math.round((Number(r.quantity_required) * orderedQty) * 100) / 100;
-        const prev = requiredMap.get(r.ingredient_id);
-        if (prev) {
-          prev.totalRequired = Math.round((prev.totalRequired + consumeAmount) * 100) / 100;
-        } else {
-          requiredMap.set(r.ingredient_id, {
-            ingredient_id: r.ingredient_id,
-            name: r.name,
-            unit: r.unit,
-            currentStock: Number(r.stock_quantity),
-            reorderLevel: Number(r.reorder_level || 0),
-            totalRequired: consumeAmount
-          });
-        }
-      }
-    }
-
-    if (requiredMap.size === 0) {
-      return { alreadyDeducted: false, orderId, deductions: [] };
-    }
-
-    // 4. Verify sufficient raw stock before applying any deductions (atomic fail-fast triggers ROLLBACK)
-    const shortages = [];
-    for (const entry of requiredMap.values()) {
-      if (entry.currentStock < entry.totalRequired) {
-        shortages.push(`${entry.name} (need ${entry.totalRequired}${entry.unit}, have ${entry.currentStock}${entry.unit})`);
-      }
-    }
-    if (shortages.length > 0) {
-      throw new Error(`Insufficient raw ingredients for Order #${orderId}: ${shortages.join('; ')}`);
-    }
-
-    // 5. Deduct from ingredients and insert negative audit logs
+    const isSqlite = Boolean(tx.isSqlite || (typeof db.isUsingFallback === 'function' && db.isUsingFallback()));
     const applied = [];
-    for (const entry of requiredMap.values()) {
-      const newStock = Math.round((entry.currentStock - entry.totalRequired) * 100) / 100;
-      await tx.query(
-        `UPDATE ingredients
-         SET stock_quantity = ?, updated_at = CURRENT_TIMESTAMP
-         WHERE ingredient_id = ?`,
-        [newStock, entry.ingredient_id]
+
+    // 3. Deduct using GREATEST(0, ...) / MAX(0, ...) and insert negative audit logs
+    for (const entry of reqRows) {
+      const deductAmt = Math.round(Number(entry.total_deduction || 0) * 100) / 100;
+      if (deductAmt <= 0) continue;
+
+      const updateSql = isSqlite
+        ? `UPDATE ingredients SET stock_quantity = MAX(0, ROUND(stock_quantity - ?, 2)), updated_at = CURRENT_TIMESTAMP WHERE ingredient_id = ?`
+        : `UPDATE ingredients SET stock_quantity = GREATEST(0, ROUND(stock_quantity - ?, 2)), updated_at = CURRENT_TIMESTAMP WHERE ingredient_id = ?`;
+
+      await tx.query(updateSql, [deductAmt, entry.ingredient_id]);
+
+      const [updatedRows] = await tx.query(
+        `SELECT stock_quantity, reorder_level FROM ingredients WHERE ingredient_id = ? LIMIT 1`,
+        [entry.ingredient_id]
       );
+      const remainingStock = Number(updatedRows?.[0]?.stock_quantity ?? 0);
+      const reorderLevel = Number(updatedRows?.[0]?.reorder_level ?? entry.reorder_level ?? 0);
 
       await tx.query(
-        `INSERT INTO ingredient_logs (ingredient_id, change_amount, change_type, reference_order_id)
-         VALUES (?, ?, 'order_deduction', ?)`,
-        [entry.ingredient_id, -entry.totalRequired, orderId]
+        `INSERT INTO ingredient_logs (ingredient_id, change_amount, change_type, reference_order_id, notes)
+         VALUES (?, ?, 'order_deduction', ?, ?)`,
+        [entry.ingredient_id, -deductAmt, orderId, `Order #${orderId} ingredient deduction (${entry.name})`]
       );
 
       applied.push({
         ingredient_id: entry.ingredient_id,
         name: entry.name,
         unit: entry.unit,
-        deducted: entry.totalRequired,
-        remainingStock: newStock
+        deducted: deductAmt,
+        remainingStock
       });
 
-      if (newStock <= entry.reorderLevel) {
+      if (remainingStock <= reorderLevel) {
         lowStockAlerts.push({
           ingredient_id: entry.ingredient_id,
           name: entry.name,
           unit: entry.unit,
-          stock_quantity: newStock,
-          reorder_level: entry.reorderLevel
+          stock_quantity: remainingStock,
+          reorder_level: reorderLevel
         });
       }
     }
 
-    return { alreadyDeducted: false, orderId, deductions: applied };
+    const syncResult = await syncMenuAvailability(tx);
+    return { alreadyDeducted: false, orderId, deductions: applied, syncResult };
   });
 
   for (const alert of lowStockAlerts) {
@@ -359,11 +436,16 @@ async function deductIngredientsForOrder(orderId, dbConnection = null) {
       alertType: alert.stock_quantity <= 0 ? 'OUT_OF_STOCK' : 'LOW_STOCK'
     });
   }
-  if (deductions.deductions && deductions.deductions.length > 0) {
-    broadcastSSE('INGREDIENTS_UPDATED', { orderId, deductions: deductions.deductions });
+  if (result.deductions && result.deductions.length > 0) {
+    broadcastSSE('INVENTORY_UPDATED', {
+      orderId,
+      deductions: result.deductions,
+      disabledMenus: result.syncResult?.disabledMenus || []
+    });
+    broadcastSSE('INGREDIENTS_UPDATED', { orderId, deductions: result.deductions });
   }
 
-  return deductions;
+  return result;
 }
 
 /**
@@ -430,12 +512,14 @@ async function checkMenuAvailability(menuId, requestedQty = 1) {
 
 /**
  * Atomically restock a raw ingredient and record a positive 'restock' log entry.
+ * Automatically re-enables affected menu items via syncMenuAvailability().
  *
  * @param {number} ingredientId
  * @param {number} amount - Positive quantity added in the ingredient's unit
  * @param {number|null} [costPerUnit=null] - Optional updated unit cost
+ * @param {string} [notes='Manual Restock'] - Optional audit log notes
  */
-async function restockIngredient(ingredientId, amount, costPerUnit = null) {
+async function restockIngredient(ingredientId, amount, costPerUnit = null, notes = 'Manual Restock') {
   const addQty = Number(amount);
   if (!ingredientId || !Number.isFinite(addQty) || addQty <= 0) {
     throw new Error('Valid ingredientId and positive restock amount are required.');
@@ -448,9 +532,11 @@ async function restockIngredient(ingredientId, amount, costPerUnit = null) {
     throw new Error('costPerUnit must be a non-negative number.');
   }
 
+  const cleanNotes = String(notes || 'Manual Restock').trim().slice(0, 255);
+
   const result = await db.withTransaction(async (tx) => {
     const [rows] = await tx.query(
-      `SELECT ingredient_id, name, unit, stock_quantity, cost_per_unit
+      `SELECT ingredient_id, name, category, unit, stock_quantity, cost_per_unit
        FROM ingredients
        WHERE ingredient_id = ?
        FOR UPDATE`,
@@ -473,22 +559,31 @@ async function restockIngredient(ingredientId, amount, costPerUnit = null) {
     );
 
     await tx.query(
-      `INSERT INTO ingredient_logs (ingredient_id, change_amount, change_type, reference_order_id)
-       VALUES (?, ?, 'restock', NULL)`,
-      [ingredientId, addQty]
+      `INSERT INTO ingredient_logs (ingredient_id, change_amount, change_type, reference_order_id, notes)
+       VALUES (?, ?, 'restock', NULL, ?)`,
+      [ingredientId, addQty, cleanNotes]
     );
+
+    const syncResult = await syncMenuAvailability(tx);
 
     return {
       ingredient_id: ing.ingredient_id,
       name: ing.name,
+      category: ing.category || 'Produce & Pantry',
       unit: ing.unit,
       previousStock,
       newStock,
       added: addQty,
-      cost_per_unit: effectiveCost
+      cost_per_unit: effectiveCost,
+      syncResult
     };
   });
 
+  broadcastSSE('INVENTORY_UPDATED', {
+    ingredientId: result.ingredient_id,
+    newStock: result.newStock,
+    enabledMenus: result.syncResult?.enabledMenus || []
+  });
   broadcastSSE('INGREDIENTS_UPDATED', {
     ingredientId: result.ingredient_id,
     newStock: result.newStock
@@ -498,31 +593,65 @@ async function restockIngredient(ingredientId, amount, costPerUnit = null) {
 }
 
 /**
- * List all raw ingredients with low-stock warning flags (stock_quantity <= reorder_level).
+ * List all raw ingredients with category, units, and low-stock warning flags.
  */
 async function listIngredients() {
   const [rows] = await db.query(
-    `SELECT ingredient_id, name, unit, stock_quantity, reorder_level, cost_per_unit, updated_at
+    `SELECT ingredient_id, name, category, unit, stock_quantity, reorder_level, cost_per_unit, updated_at
      FROM ingredients
-     ORDER BY (stock_quantity <= reorder_level) DESC, name ASC`
+     ORDER BY (stock_quantity <= reorder_level) DESC, category ASC, name ASC`
   );
-  return (rows || []).map(r => ({
-    ...r,
-    stock_quantity: Number(r.stock_quantity || 0),
-    reorder_level: Number(r.reorder_level || 0),
-    cost_per_unit: Number(r.cost_per_unit || 0),
-    is_low_stock: Number(r.stock_quantity || 0) <= Number(r.reorder_level || 0)
-  }));
+  return (rows || []).map(r => {
+    const stock = Number(r.stock_quantity || 0);
+    const reorder = Number(r.reorder_level || 0);
+    return {
+      ...r,
+      category: r.category || 'Produce & Pantry',
+      stock_quantity: stock,
+      reorder_level: reorder,
+      cost_per_unit: Number(r.cost_per_unit || 0),
+      is_low_stock: stock <= reorder,
+      stock_status: stock <= 0 ? 'out_of_stock' : (stock <= reorder ? 'low_stock' : 'in_stock')
+    };
+  });
+}
+
+/**
+ * Return raw ingredients grouped by category for REST API & Dashboard consumption.
+ */
+async function getIngredientsGrouped() {
+  const ingredients = await listIngredients();
+  const groupedByCategory = {};
+  for (const cat of INGREDIENT_CATEGORIES) {
+    groupedByCategory[cat] = [];
+  }
+  for (const ing of ingredients) {
+    const cat = ing.category || 'Produce & Pantry';
+    if (!groupedByCategory[cat]) groupedByCategory[cat] = [];
+    groupedByCategory[cat].push(ing);
+  }
+  return {
+    ingredients,
+    groupedByCategory,
+    lowStockCount: ingredients.filter(i => i.is_low_stock).length
+  };
 }
 
 /**
  * Create a new raw ingredient record (and log initial stock if > 0).
  */
-async function createIngredient({ name, unit, stock_quantity = 0, reorder_level = 0, cost_per_unit = 0 }) {
+async function createIngredient({ name, category = 'Produce & Pantry', unit, stock_quantity = 0, reorder_level = 0, cost_per_unit = 0 }) {
   const cleanName = String(name || '').trim();
   const cleanUnit = String(unit || '').trim();
+  const cleanCategory = String(category || 'Produce & Pantry').trim();
   if (!cleanName || !cleanUnit) {
     throw new Error('Ingredient name and unit are required.');
+  }
+  if (!INGREDIENT_UNITS.includes(cleanUnit)) {
+    throw new Error(`Invalid unit "${cleanUnit}". Allowed units: ${INGREDIENT_UNITS.join(', ')}.`);
+  }
+  if (!INGREDIENT_CATEGORIES.includes(cleanCategory)) {
+    throw new Error(`Invalid category "${cleanCategory}". Allowed categories: ${INGREDIENT_CATEGORIES.join(', ')}.`);
   }
 
   const initStock = Number(stock_quantity) || 0;
@@ -534,31 +663,34 @@ async function createIngredient({ name, unit, stock_quantity = 0, reorder_level 
 
   const created = await db.withTransaction(async (tx) => {
     const [res] = await tx.query(
-      `INSERT INTO ingredients (name, unit, stock_quantity, reorder_level, cost_per_unit)
-       VALUES (?, ?, ?, ?, ?)`,
-      [cleanName, cleanUnit, initStock, reorder, cost]
+      `INSERT INTO ingredients (name, category, unit, stock_quantity, reorder_level, cost_per_unit)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [cleanName, cleanCategory, cleanUnit, initStock, reorder, cost]
     );
     const ingredientId = res.insertId;
 
     if (initStock > 0) {
       await tx.query(
-        `INSERT INTO ingredient_logs (ingredient_id, change_amount, change_type, reference_order_id)
-         VALUES (?, ?, 'restock', NULL)`,
-        [ingredientId, initStock]
+        `INSERT INTO ingredient_logs (ingredient_id, change_amount, change_type, reference_order_id, notes)
+         VALUES (?, ?, 'restock', NULL, ?)`,
+        [ingredientId, initStock, 'Initial ingredient stock']
       );
     }
 
     return {
       ingredient_id: ingredientId,
       name: cleanName,
+      category: cleanCategory,
       unit: cleanUnit,
       stock_quantity: initStock,
       reorder_level: reorder,
       cost_per_unit: cost,
-      is_low_stock: initStock <= reorder
+      is_low_stock: initStock <= reorder,
+      stock_status: initStock <= 0 ? 'out_of_stock' : (initStock <= reorder ? 'low_stock' : 'in_stock')
     };
   });
 
+  broadcastSSE('INVENTORY_UPDATED', { ingredientId: created.ingredient_id, added: created });
   return created;
 }
 
@@ -576,7 +708,7 @@ async function getRecipeByMenuId(menuId) {
 
   const [recipeRows] = await db.query(
     `SELECT r.recipe_id, r.menu_id, r.ingredient_id, r.quantity_required,
-            i.name AS ingredient_name, i.unit, i.stock_quantity, i.reorder_level, i.cost_per_unit
+            i.name AS ingredient_name, i.category, i.unit, i.stock_quantity, i.reorder_level, i.cost_per_unit
      FROM recipe_items r
      JOIN ingredients i ON i.ingredient_id = r.ingredient_id
      WHERE r.menu_id = ?
@@ -631,8 +763,11 @@ async function upsertRecipeForMenuItem(menuId, items = []) {
         [numericMenuId, row.ingredient_id, row.quantity_required]
       );
     }
+
+    await syncMenuAvailability(tx);
   });
 
+  broadcastSSE('INVENTORY_UPDATED', { menuId: numericMenuId, recipeUpdated: true });
   return await getRecipeByMenuId(numericMenuId);
 }
 
@@ -642,9 +777,11 @@ module.exports = {
   deductStockForOrder,
   restockItem,
   deductIngredientsForOrder,
+  syncMenuAvailability,
   checkMenuAvailability,
   restockIngredient,
   listIngredients,
+  getIngredientsGrouped,
   createIngredient,
   getRecipeByMenuId,
   upsertRecipeForMenuItem
