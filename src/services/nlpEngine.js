@@ -1875,6 +1875,7 @@ async function handleMessageEvent(psid, incomingText = '', payload = null, locat
           if (aiTurn) return aiTurn;
         }
 
+        console.log(`🛡️ [SYSTEM GUARD TRIGGERED] STORE_CLOSED_NOTICE: Kitchen is currently closed (${storeSchedule.openTimeFormatted} - ${storeSchedule.closeTimeFormatted})`);
         const closedNotice = `Magandang araw po! Sarado na po ang aming kitchen ngayong oras na ito. Ang operating hours po ng Diner's Cafe ay ${storeSchedule.openTimeFormatted} - ${storeSchedule.closeTimeFormatted} (Manila Time). Nais niyo po ba mag pre-order para sa aming susunod na opening, o mag-iwan ng mensahe para sa aming staff?`;
         await sendTextMessage(psid, closedNotice);
         return { intent: 'STORE_CLOSED_NOTICE', confidence: 1.0, replyLog: closedNotice };
@@ -5536,6 +5537,7 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
     const { reply_message, detected_action } = aiRes;
     const action_payload = aiRes.extracted_data || aiRes.action_payload || {};
     const extracted_data = action_payload;
+    console.log(`🤖 [GEMINI AI REPLIED] Model: ${aiRes.model || 'Gemini'} | Action: ${detected_action} | Reply: "${reply_message.slice(0, 80)}..."`);
 
     // Persist dining_mode & payment_mode if Gemini extracted them in one-shot
     if (action_payload.dining_mode === 'Delivery' || action_payload.dining_mode === 'Pick-up' || action_payload.dining_mode === 'Dine-in') {
