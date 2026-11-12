@@ -166,6 +166,34 @@ async function sendQuickReplies(psid, text, quickReplies = [], options = {}) {
   }, options);
 }
 
+/**
+ * Fetch customer's real first_name and last_name from Facebook Messenger User Profile API.
+ * Used as fallback when customer name is missing or rejected during checkout.
+ */
+async function fetchMessengerUserProfile(psid) {
+  const psidStr = String(psid || '').trim();
+  const pageToken = config.facebook?.pageAccessToken;
+  if (!psidStr || !/^\d+$/.test(psidStr) || !pageToken || !pageToken.startsWith('EAA')) {
+    return null;
+  }
+  try {
+    const url = `https://graph.facebook.com/v19.0/${encodeURIComponent(psidStr)}?fields=first_name,last_name&access_token=${encodeURIComponent(pageToken)}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const first = String(data?.first_name || '').trim();
+    const last = String(data?.last_name || '').trim();
+    const fullName = `${first} ${last}`.trim();
+    if (!fullName) return null;
+    return { first_name: first, last_name: last, fullName };
+  } catch (_) {
+    return null;
+  }
+}
+
 // ----------------------------------------------------------------------------
 // Reliable Food & Beverage Fallback Images for Messenger Platform
 // ----------------------------------------------------------------------------
@@ -588,6 +616,7 @@ module.exports = {
   sendImageAttachment,
   uploadAttachment,
   sendQuickReplies,
+  fetchMessengerUserProfile,
   sendGenericTemplate,
   sendButtonTemplate,
   sendFeedbackPrompt,

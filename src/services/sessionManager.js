@@ -322,10 +322,18 @@ async function saveSession(session) {
 }
 
 /**
- * Clear cart and reset pending states
+ * Clear cart and reset pending states (persists DB deletion in cart_items & customers.cart_json)
  */
-async function clearSessionCart(session) {
+async function clearSessionCart(sessionOrPsid) {
+  const isStringPsid = typeof sessionOrPsid === 'string' || typeof sessionOrPsid === 'number';
+  const session = isStringPsid ? await getSession(String(sessionOrPsid)) : sessionOrPsid;
+  if (!session) return null;
+
+  const psidStr = String(session.psid || (isStringPsid ? sessionOrPsid : ''));
   session.cart = [];
+  session.ordered_items = [];
+  session.order_subtotal = 0;
+  session.order_total = 0;
   session.pendingItem = null;
   session.pending_suggestion = null;
   session.pendingQuantity = null;
@@ -333,6 +341,15 @@ async function clearSessionCart(session) {
   session.pendingIntent = null;
   session.pendingDisambiguation = null;
   session.state = 'IDLE';
+
+  if (psidStr) {
+    await db.query(`DELETE FROM cart_items WHERE sender_psid = ?`, [psidStr]).catch(() => {});
+    await db.query(
+      `UPDATE customers SET cart_json = '[]', updated_at = CURRENT_TIMESTAMP WHERE psid = ?`,
+      [psidStr]
+    ).catch(() => {});
+  }
+
   await saveSession(session);
   return session;
 }

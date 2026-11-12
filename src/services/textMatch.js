@@ -301,6 +301,8 @@ function matchItems(query, candidates, cfg = {}) {
 }
 
 // 5. Validators
+const NON_NAME_PHRASE_REGEX = /\b(?:binigay|ibinigay|nasabi|sinabi|kanina|kasi|naman|bakit|paano|pano|ano|anong|kelan|saan|san|hindi|ayoko|ayaw|wala|meron|mayroon|paulit|ulit|sayo|iyo|ninyo|nyo|ko\s+na|mo\s+na|na\s+po|ba\s+yan|haha+|lol|order|menu|cart|gcash|cash|delivery|pickup|take\s*out|cancel|teka|sandali|wait|none|skip)\b/i;
+
 function validateName(s) {
   if (!s || typeof s !== 'string') return { ok: false };
   const cleaned = s
@@ -311,6 +313,9 @@ function validateName(s) {
   if (cleaned.length < 2 || cleaned.length > 80) return { ok: false };
   // Reject links or markup
   if (/<[^>]*>|http:\/\/|https:\/\//i.test(cleaned)) return { ok: false };
+  // Reject conversational complaints, questions, or non-name phrases
+  if (NON_NAME_PHRASE_REGEX.test(cleaned)) return { ok: false };
+  if (cleaned.split(/\s+/).length > 4) return { ok: false };
   // Must have at least two letters
   const letters = cleaned.match(/\p{L}/gu);
   if (!letters || letters.length < 2) return { ok: false };

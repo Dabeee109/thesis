@@ -28,6 +28,7 @@ const {
   sendTextMessage,
   sendImageAttachment,
   sendQuickReplies,
+  fetchMessengerUserProfile,
   sendGenericTemplate,
   sendButtonTemplate,
   resolveMessengerImageUrl
@@ -1397,8 +1398,8 @@ async function handleCancellationRequest(psid, session, rawText = '') {
       return { intent: 'ORDER_CANCEL_BLOCKED', confidence: 1.0, replyLog: reply };
     }
 
-    // Rule 2: If status is strictly PENDING / PENDING_APPROVAL / awaiting_confirmation:
-    const isPending = (s === 'pending' || s === 'pending_approval' || s === 'awaiting_confirmation');
+    // Rule 2: If status is strictly PENDING / PENDING_APPROVAL / awaiting_confirmation / PENDING_ADMIN_QUOTE:
+    const isPending = (s === 'pending' || s === 'pending_approval' || s === 'awaiting_confirmation' || s === 'pending_admin_quote');
     if (isPending) {
       await updateOrderStatus(activeOrder.id, 'cancelled', {
         cancellationReason: 'Cancelled by customer via Messenger'
@@ -1434,6 +1435,85 @@ async function handleCancellationRequest(psid, session, rawText = '') {
   const reply = "Wala po kayong kasalukuyang aktibong order na maaaring i-cancel. May maitutulong pa ba ako sa inyo?";
   await sendTextMessage(psid, reply);
   return { intent: 'CANCEL_EMPTY', confidence: 1.0, replyLog: reply };
+}
+
+/**
+ * Detect explicit Clear Cart / Empty Cart commands in Taglish & English.
+ */
+function isClearCartTrigger(rawText = '', norm = '') {
+  const s = String(rawText || '').trim();
+  const n = String(norm || s.toLowerCase()).trim();
+  if (/^(?:clear\s*cart|empty\s*cart|burahin\s*(?:ang\s*|yung\s*)?cart)$/i.test(n)) return true;
+  if (/(?:clear|empty|burahin|bura|tanggalin\s+lahat|alisin\s+lahat|delete\s+all).*\b(?:cart|order)\b/i.test(s)) return true;
+  if (/\bcart\b.*(?:clear|empty|burahin|bura)/i.test(s)) return true;
+  if (/\b(?:remove|delete)\s+(?:my|all)\s+order\b/i.test(s)) return true;
+  return false;
+}
+
+/**
+ * Execute actual database cart deletion (`DELETE FROM cart_items` + `customers.cart_json = '[]'`)
+ * and verify subtotal resets to ₱0.00.
+ */
+async function handleClearCartAction(psid, session) {
+  await clearSessionCart(session);
+  session.cart = [];
+  session.order_subtotal = 0;
+  session.order_total = 0;
+  session.state = 'IDLE';
+  session.current_step = 'IDLE';
+  const verifiedSubtotal = calculateCartSubtotal(session.cart);
+  const reply = `Na-clear na po ang inyong cart (Subtotal: ${peso(verifiedSubtotal)}). Maaari po kayong pumili muli sa ating menu anumang oras!`;
+  await sendTextMessage(psid, reply);
+  return {
+    intent: 'CLEAR_CART',
+    confidence: 1.0,
+    subtotal: verifiedSubtotal,
+    replyLog: reply
+  };
+}
+
+/**
+ * Validate customer name strictly against conversational complaints/sarcasm,
+ * falling back to DB customer profile or Facebook Graph API if needed.
+ */
+async function resolveCustomerNameWithFallback(psid, session, candidateName = '') {
+  const rawCandidate = String(candidateName || '').trim();
+  if (rawCandidate) {
+    const check = validateName(rawCandidate);
+    if (check.ok) {
+      return { ok: true, value: check.value, source: 'input' };
+    }
+  }
+
+  // Fallback 1: check saved DB customer profile
+  try {
+    const [custRows] = await db.query(
+      `SELECT first_name, last_name FROM customers WHERE psid = ? LIMIT 1`,
+      [String(psid)]
+    );
+    if (custRows && custRows.length > 0) {
+      const f = String(custRows[0].first_name || '').trim();
+      const l = String(custRows[0].last_name || '').trim();
+      const dbFull = `${f} ${l}`.trim();
+      if (f && !/^(?:messenger|customer)$/i.test(f) && validateName(dbFull).ok) {
+        return { ok: true, value: dbFull, source: 'db_profile' };
+      }
+    }
+  } catch (_) {}
+
+  // Fallback 2: Facebook Messenger User Profile Graph API
+  try {
+    const fbProfile = await fetchMessengerUserProfile(psid);
+    if (fbProfile && fbProfile.fullName && validateName(fbProfile.fullName).ok) {
+      await db.query(
+        `UPDATE customers SET first_name = ?, last_name = ?, updated_at = CURRENT_TIMESTAMP WHERE psid = ?`,
+        [fbProfile.first_name || fbProfile.fullName, fbProfile.last_name || '', String(psid)]
+      ).catch(() => {});
+      return { ok: true, value: fbProfile.fullName, source: 'graph_api' };
+    }
+  } catch (_) {}
+
+  return { ok: false, rejectedComplaint: Boolean(rawCandidate) };
 }
 
 /**
@@ -2729,52 +2809,62 @@ async function handleTextInput(psid, session, rawText) {
     (session.state === 'idle' && !session.dining_mode);
 
   if (isPostResetState && !session.dining_mode) {
+    const hasOrderWithDiningMode = /\b(?:pa-?order|pabili|add\s+\d+|isa|dalawa|tatlo|burger|fries|pizza|milktea|coffee|latte|tea|wings|pasta|steak|meal|dog|nachos|nuggets|lasagna|spaghetti|carbonara|quesadilla)\b/i.test(norm);
+    const detectedOneShotPay = /\bgcash|g-?cash\b/i.test(rawText) ? 'GCash' : (/\b(?:cash|cod)\b/i.test(rawText) ? 'Cash' : null);
+
     if (/\b(?:dine\s*in|sa\s*loob|table)\b/i.test(norm)) {
       session.dining_mode = 'Dine In';
       session.orderType = 'dine_in';
       session.state = 'ORDERING';
       session.current_step = 'ORDERING';
+      if (detectedOneShotPay) session.payment_mode = detectedOneShotPay;
       await saveSession(session);
-      const msg = `Copy po sa Dine In! Free seating po tayo sa open seating area kaya feel free to find any available seat pagdating niyo.\n\nEto po ang aming menu para makapili kayo ng inyong drinks and meals:`;
-      await sendTextMessage(psid, msg);
-      await sendFullMenu(psid, session);
-      return { intent: 'DINING_MODE_DINE_IN', confidence: 1.0, replyLog: msg };
-    }
-    if (/\b(?:take[\s-]*out|takeout|pick[\s-]*up|pickup|daanan)\b/i.test(norm)) {
+      if (!hasOrderWithDiningMode) {
+        const msg = `Copy po sa Dine In! Free seating po tayo sa open seating area kaya feel free to find any available seat pagdating niyo.\n\nEto po ang aming menu para makapili kayo ng inyong drinks and meals:`;
+        await sendTextMessage(psid, msg);
+        await sendFullMenu(psid, session);
+        return { intent: 'DINING_MODE_DINE_IN', confidence: 1.0, replyLog: msg };
+      }
+    } else if (/\b(?:take[\s-]*out|takeout|pick[\s-]*up|pickup|daanan)\b/i.test(norm)) {
       session.dining_mode = 'Pick-up';
       session.orderType = 'pickup';
       session.state = 'ORDERING';
       session.current_step = 'ORDERING';
+      if (detectedOneShotPay) session.payment_mode = detectedOneShotPay;
       await saveSession(session);
-      const msg = `Copy po sa Take Out! Ihahanda po natin ito agad para sa counter pickup pagdaan ninyo sa cafe.\n\nEto po ang aming menu para makapili kayo:`;
-      await sendTextMessage(psid, msg);
-      await sendFullMenu(psid, session);
-      return { intent: 'DINING_MODE_TAKE_OUT', confidence: 1.0, replyLog: msg };
-    }
-    if (/\b(?:delivery|deliver|padeliver|pa-deliver)\b/i.test(norm)) {
+      if (!hasOrderWithDiningMode) {
+        const msg = `Copy po sa Take Out! Ihahanda po natin ito agad para sa counter pickup pagdaan ninyo sa cafe.\n\nEto po ang aming menu para makapili kayo:`;
+        await sendTextMessage(psid, msg);
+        await sendFullMenu(psid, session);
+        return { intent: 'DINING_MODE_TAKE_OUT', confidence: 1.0, replyLog: msg };
+      }
+    } else if (/\b(?:delivery|deliver|padeliver|pa-deliver)\b/i.test(norm)) {
       session.dining_mode = 'Delivery';
       session.orderType = 'delivery';
       session.state = 'ORDERING';
       session.current_step = 'ORDERING';
+      if (detectedOneShotPay) session.payment_mode = detectedOneShotPay;
       await saveSession(session);
-      const msg = `Noted po sa Delivery! Ihahatid po namin ito sa inyong address (hihingin po namin ang complete delivery address mamaya sa checkout).\n\nEto po ang aming menu para makapili kayo:`;
-      await sendTextMessage(psid, msg);
-      await sendFullMenu(psid, session);
-      return { intent: 'DINING_MODE_DELIVERY', confidence: 1.0, replyLog: msg };
+      if (!hasOrderWithDiningMode) {
+        const msg = `Noted po sa Delivery! Ihahatid po namin ito sa inyong address (hihingin po namin ang complete delivery address mamaya sa checkout).\n\nEto po ang aming menu para makapili kayo:`;
+        await sendTextMessage(psid, msg);
+        await sendFullMenu(psid, session);
+        return { intent: 'DINING_MODE_DELIVERY', confidence: 1.0, replyLog: msg };
+      }
+    } else {
+      // Customer has NOT chosen dining mode yet: lock progression and reply ONLY with the exact Welcome Greeting
+      session.state = 'AWAITING_DINING_MODE';
+      session.current_step = 'AWAITING_DINING_MODE';
+      await saveSession(session);
+
+      const greetingMsg = "Hello po! Welcome to Diner's Cafe! Ask ko lang po muna bago tayo magsimula, will this be for Dine In, Delivery, or Take Out?";
+      await sendQuickReplies(psid, greetingMsg, [
+        { title: 'Dine In', payload: 'DINING_MODE_DINE_IN' },
+        { title: 'Delivery', payload: 'DINING_MODE_DELIVERY' },
+        { title: 'Take Out', payload: 'DINING_MODE_TAKE_OUT' }
+      ]);
+      return { intent: 'AWAITING_DINING_MODE_GATEWAY', confidence: 1.0, replyLog: greetingMsg };
     }
-
-    // Customer has NOT chosen dining mode yet: lock progression and reply ONLY with the exact Welcome Greeting
-    session.state = 'AWAITING_DINING_MODE';
-    session.current_step = 'AWAITING_DINING_MODE';
-    await saveSession(session);
-
-    const greetingMsg = "Hello po! Welcome to Diner's Cafe! Ask ko lang po muna bago tayo magsimula, will this be for Dine In, Delivery, or Take Out?";
-    await sendQuickReplies(psid, greetingMsg, [
-      { title: 'Dine In', payload: 'DINING_MODE_DINE_IN' },
-      { title: 'Delivery', payload: 'DINING_MODE_DELIVERY' },
-      { title: 'Take Out', payload: 'DINING_MODE_TAKE_OUT' }
-    ]);
-    return { intent: 'AWAITING_DINING_MODE_GATEWAY', confidence: 1.0, replyLog: greetingMsg };
   }
 
   // Requirement 2: Silent & Atomic Batch Cart Mutation (Add & Remove Multiple Items)
@@ -2875,12 +2965,16 @@ async function handleTextInput(psid, session, rawText) {
 
       const parsed = parseCustomerInfo(rawText, currentDiningMode);
 
-      const customerName = parsed.name || session.customer_name || session.details?.name || '';
+      const candidateName = parsed.name || session.customer_name || session.details?.name || '';
+      const nameCheck = await resolveCustomerNameWithFallback(psid, session, candidateName);
+      const customerName = nameCheck.ok ? nameCheck.value : '';
       const contactNumber = parsed.contact || session.contact_number || session.details?.phone || '';
 
-      // If customer name or contact number is missing, prompt politely
+      // If customer name or contact number is missing/invalid, prompt politely (never save complaints as names)
       if (!customerName || !contactNumber || contactNumber.length < 7) {
-        const askInfoMsg = 'Pakibigay po ang inyong buong Pangalan at Active Contact Number para sa inyong order:';
+        const askInfoMsg = nameCheck.rejectedComplaint && !customerName
+          ? 'Paumanhin po, mukhang hindi po iyan pangalan. Pakibigay na lamang po ang inyong buong Pangalan at Active Contact Number para sa inyong order:'
+          : 'Pakibigay po ang inyong buong Pangalan at Active Contact Number para sa inyong order:';
         await sendTextMessage(psid, askInfoMsg);
         return { intent: 'AWAITING_CUSTOMER_INFO_RETRY', confidence: 1.0, replyLog: askInfoMsg };
       }
@@ -3267,7 +3361,20 @@ async function handleTextInput(psid, session, rawText) {
 
   if (openQuestionStates.includes(session.state)) {
     const classification = classifyShort(rawText);
-    if (classification === 'YES') {
+    if (classification === 'YES' || /\b(?:oo\s*ngani)\b/i.test(norm)) {
+      if (session.state === 'AWAITING_CHECKOUT_CONFIRM') {
+        const recentHistory = aiService.getConversationHistory(psid, session);
+        const lastModelTurn = [...recentHistory].reverse().find(h => h.role === 'model');
+        if (lastModelTurn && /(?:idagdag|add\s*more|magdagdag)/i.test(lastModelTurn.text)) {
+          if ((process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured()) {
+            const aiAddFollowup = await executeAiAssistantTurn(psid, session, rawText);
+            if (aiAddFollowup) return aiAddFollowup;
+          }
+          const askMoreMsg = 'Sige po! Ano po ang nais ninyong idagdag sa inyong order?';
+          await sendTextMessage(psid, askMoreMsg);
+          return { intent: 'ADD_MORE_FOLLOWUP', confidence: 1.0, replyLog: askMoreMsg };
+        }
+      }
       return handleYesAnswer(psid, session);
     }
     if (classification === 'NO') {
@@ -3278,22 +3385,31 @@ async function handleTextInput(psid, session, rawText) {
     session.state = (session.cart && session.cart.length > 0) ? 'BROWSING' : 'IDLE';
   }
 
-  // 3. Standalone Yes/No when no question is open
+  // 3. Standalone Yes/No: route through Gemini AI with conversation history (eliminates "Yes to what? Ready to check out?")
   const standaloneCheck = classifyShort(rawText);
-  if (standaloneCheck === 'YES') {
-    const yesMsg = botMessages.yesToWhat();
-    const hasCart = session.cart && session.cart.length > 0;
-    const qrs = [
-      { title: 'Yes, checkout', payload: 'CONFIRM_CHECKOUT' },
-      hasCart ? { title: 'Add more', payload: 'KEEP_SHOPPING' } : { title: '☕ Menu', payload: 'MENU_HOME' }
-    ];
-    await sendQuickReplies(psid, yesMsg.text, qrs);
-    return { intent: 'STANDALONE_YES', confidence: 1.0 };
-  }
-  if (standaloneCheck === 'NO') {
+  if (standaloneCheck === 'YES' || standaloneCheck === 'NO' || /\b(?:oo\s*ngani)\b/i.test(norm)) {
+    if ((process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured()) {
+      const aiAffirmativeTurn = await executeAiAssistantTurn(psid, session, rawText);
+      if (aiAffirmativeTurn) return aiAffirmativeTurn;
+    }
+    if (standaloneCheck === 'YES' || /\b(?:oo\s*ngani)\b/i.test(norm)) {
+      const politeFollowup = (session.cart && session.cart.length > 0)
+        ? 'Opo! Ano po ang nais ninyong idagdag sa cart, o mag-proceed na po ba tayo sa checkout?'
+        : 'Magandang araw po! Ano po ang nais ninyong i-order mula sa ating menu ngayon?';
+      await sendTextMessage(psid, politeFollowup);
+      return { intent: 'CONTEXTUAL_YES_FOLLOWUP', confidence: 0.9, replyLog: politeFollowup };
+    }
     const kept = botMessages.keptCart();
-    await sendQuickReplies(psid, kept.text, kept.quickReplies);
-    return { intent: 'STANDALONE_NO', confidence: 1.0 };
+    await sendTextMessage(psid, kept.text);
+    return { intent: 'STANDALONE_NO', confidence: 1.0, replyLog: kept.text };
+  }
+
+  // 3b. CLEAR_CART (executes actual DB deletion & resets subtotal to ₱0.00)
+  if (isClearCartTrigger(rawText, norm)) {
+    if (/\b(?:remove|delete)\s+(?:my|all)\s+order\b/i.test(rawText) && session.activeOrderNumber) {
+      return await handleCancellationRequest(psid, session, rawText);
+    }
+    return await handleClearCartAction(psid, session);
   }
 
   // 4. VIEW_CART (check BEFORE menu & SEND_PICTURE so "patingin ng cart" / "ano laman ng cart ko" never collides!)
@@ -3518,8 +3634,8 @@ async function handleTextInput(psid, session, rawText) {
     return { intent: 'BROWSE_MENU', confidence: conf };
   }
 
-  // REMOVE_ITEM intent
-  if (intent === 'REMOVE_ITEM' || /^(?:remove|delete|alisin|tanggalin)\b/i.test(norm)) {
+  // REMOVE_ITEM intent (never intercept explicit ordering phrases like "pa order ... take out")
+  if ((intent === 'REMOVE_ITEM' || /^(?:remove|delete|alisin|tanggalin)\b/i.test(norm)) && !/\b(?:pa-?order|pabili|order\b|add\b)\b/i.test(norm)) {
     return handleRemoveItemText(psid, session, rawText, nlu);
   }
 
@@ -4161,9 +4277,11 @@ async function handleOrderItemText(psid, session, rawText, nlu) {
 
   let cleanQuery = (nlu?.menuItem || rawText || '')
     .replace(/\b(?:i\s*want|can\s*i\s*get|order|add|one\s*more|another|isa\s*pang|dalawa\s*pang|gusto\s*ko\s*ng|pa[- ]?order(?:\s*po)?(?:\s*ng)?|pabili(?:\s*po)?(?:\s*ng)?)\b/gi, '')
-    .replace(/\b(?:the|a|an|po|please|pls|ang|yung|ng|sa)\b/gi, '')
+    .replace(/\b(?:take[\s-]*out|takeout|pick[\s-]*up|pickup|dine[\s-]*in|delivery|deliver|gcash|g-?cash|cash|cod|payment|mode|via)\b/gi, '')
+    .replace(/\b(?:the|a|an|po|please|pls|ang|yung|ng|sa|pa)\b/gi, '')
     .replace(/\b\d+\s*(?:pcs|pieces|orders?|cups?|servings?|x)?\b/gi, '')
     .replace(/\b(?:one|two|three|four|five|six|seven|eight|nine|ten|isa|isang|dalawa|dalawang|tatlo|tatlong|apat|apat na|lima|limang|anim|anim na|pito|pitong|walo|walong|siyam|siyam na|sampu|sampung)\b/gi, '')
+    .replace(/\s+/g, ' ')
     .trim();
   if (!cleanQuery) cleanQuery = rawText;
 
@@ -4222,12 +4340,28 @@ async function handleOrderItemText(psid, session, rawText, nlu) {
 
       if (!session.cart) session.cart = [];
       addToCart(session.cart, matchedItem, qty);
+      const subtotal = calculateCartSubtotal(session.cart);
+      const hasOneShotPayment = /\b(?:gcash|g-?cash|cash|cod)\b/i.test(rawText);
+      if (hasOneShotPayment) {
+        session.payment_mode = /\bgcash|g-?cash\b/i.test(rawText) ? 'GCash' : 'Cash';
+      }
+
+      if (session.dining_mode && hasOneShotPayment) {
+        session.state = 'COLLECTING_CUSTOMER_INFO';
+        session.current_step = 'COLLECTING_CUSTOMER_INFO';
+        await saveSession(session);
+        const missingPrompt = isDeliveryDiningMode(session.dining_mode)
+          ? `Noted po! Naidagdag na ang ${qty}x ${matchedItem.name} (${session.dining_mode} | Payment: ${session.payment_mode} | Subtotal: ${peso(subtotal)}).\n\nPakibigay po ang natitirang detalye:\nFull Name:\nPhone number:\nAddress:\nLandmark:`
+          : `Noted po! Naidagdag na ang ${qty}x ${matchedItem.name} (${session.dining_mode} | Payment: ${session.payment_mode} | Subtotal: ${peso(subtotal)}).\n\nPakibigay po ang natitirang detalye:\nFull Name:\nPhone number:\nArriving time:`;
+        await sendTextMessage(psid, missingPrompt);
+        return { intent: 'ONE_SHOT_ORDER', confidence: 1.0, replyLog: missingPrompt };
+      }
+
       await saveSession(session);
       session.state = 'AWAITING_CHECKOUT_CONFIRM';
-      const subtotal = calculateCartSubtotal(session.cart);
       const addedMsg = botMessages.added(qty, matchedItem.name, peso(subtotal));
       await sendQuickReplies(psid, addedMsg.text, addedMsg.quickReplies);
-      return { intent: 'ORDER_ITEM', confidence: 1.0 };
+      return { intent: 'ORDER_ITEM', confidence: 1.0, replyLog: addedMsg.text };
     } else {
       session.state = 'ADDING_ITEM';
       session.pendingItem = { id: matchedItem.id, name: matchedItem.name, price: matchedItem.price };
@@ -4513,13 +4647,12 @@ async function handleSavedDetailsConfirmation(psid, session) {
 }
 
 async function handleNameInput(psid, session, text) {
-  const valid = validateName(text);
+  const valid = await resolveCustomerNameWithFallback(psid, session, text);
   if (!valid.ok) {
     session.failedAttempts = (session.failedAttempts || 0) + 1;
-    const bad = botMessages.badName();
-    const qrs = session.failedAttempts >= 3 ? [{ title: 'Back to cart', payload: 'BACK_TO_CART' }] : [];
-    await sendQuickReplies(psid, bad.text, qrs);
-    return { intent: 'BAD_NAME', confidence: 1.0 };
+    const msg = 'Paumanhin po, mukhang hindi po iyan pangalan. Pakibigay na lamang po ang inyong buong pangalan (hal. Juan Dela Cruz):';
+    await sendTextMessage(psid, msg);
+    return { intent: 'BAD_NAME', confidence: 1.0, replyLog: msg };
   }
 
   session.failedAttempts = 0;
@@ -5216,13 +5349,23 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
 
     const { reply_message, detected_action, action_payload = {} } = aiRes;
 
-    // Persist dining_mode if Gemini extracted Delivery or Pick-up
+    // Persist dining_mode & payment_mode if Gemini extracted them in one-shot
     if (action_payload.dining_mode === 'Delivery' || action_payload.dining_mode === 'Pick-up') {
       session.dining_mode = action_payload.dining_mode;
       session.orderType = action_payload.dining_mode === 'Delivery' ? 'delivery' : 'pickup';
     }
+    if (action_payload.payment_mode === 'GCash' || action_payload.payment_mode === 'Cash') {
+      session.payment_mode = action_payload.payment_mode;
+    }
 
     switch (detected_action) {
+      case 'CLEAR_CART': {
+        const clearRes = await handleClearCartAction(psid, session);
+        return {
+          ...clearRes,
+          aiAction: 'CLEAR_CART'
+        };
+      }
       case 'VIEW_MENU': {
         await sendTextMessage(psid, reply_message);
         await sendFullMenu(psid, session);
@@ -5404,12 +5547,30 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
           }
 
           if (addedSummary.length > 0) {
-            session.state = 'AWAITING_CHECKOUT_CONFIRM';
-            await saveSession(session);
             const subtotal = calculateCartSubtotal(session.cart);
             const oosSuffix = outOfStockNotices.length > 0
               ? `\n(Paalala: sold out na po ang ${outOfStockNotices.join(', ')}.)`
               : '';
+
+            // One-shot multi-intent: both dining_mode and payment_mode provided -> ask only remaining checkout fields
+            if (action_payload.dining_mode && action_payload.payment_mode) {
+              session.state = 'COLLECTING_CUSTOMER_INFO';
+              session.current_step = 'COLLECTING_CUSTOMER_INFO';
+              await saveSession(session);
+              const missingFieldsMsg = isDeliveryDiningMode(session.dining_mode)
+                ? `${reply_message}\n\nNaidagdag: ${addedSummary.join(', ')}${oosSuffix}\nMode: ${session.dining_mode} | Payment: ${session.payment_mode} | Subtotal: ${peso(subtotal)}\n\nPakibigay po ang natitirang detalye:\nFull Name:\nPhone number:\nAddress:\nLandmark:`
+                : `${reply_message}\n\nNaidagdag: ${addedSummary.join(', ')}${oosSuffix}\nMode: ${session.dining_mode} | Payment: ${session.payment_mode} | Subtotal: ${peso(subtotal)}\n\nPakibigay po ang natitirang detalye:\nFull Name:\nPhone number:\nArriving time:`;
+              await sendTextMessage(psid, missingFieldsMsg);
+              return {
+                intent: 'AI_ONE_SHOT_ORDER',
+                confidence: 0.98,
+                replyLog: missingFieldsMsg,
+                aiAction: 'ADD_ITEM'
+              };
+            }
+
+            session.state = 'AWAITING_CHECKOUT_CONFIRM';
+            await saveSession(session);
             const cartText = `${reply_message}\n\nNaidagdag: ${addedSummary.join(', ')}${oosSuffix}\nCart subtotal: ${peso(subtotal)}. Nais na po ba ninyong mag-checkout o magdagdag pa?`;
             await sendTextMessage(psid, cartText);
             return {

@@ -20,6 +20,7 @@ const nlpEngine = require('../src/services/nlpEngine');
 const messengerService = require('../src/services/messengerService');
 const inventoryController = require('../src/controllers/inventoryController');
 const inventoryRoutes = require('../src/routes/inventoryRoutes');
+const systemSettingsService = require('../src/services/systemSettingsService');
 const { INGREDIENT_CATEGORIES } = require('../database/bomRecipesSeedData');
 
 const sentMessages = [];
@@ -39,6 +40,11 @@ function createMockRes() {
 
 test('BOM Inventory & 91-Recipe Management Subsystem Suite', async (t) => {
   await db.initDatabase();
+  await systemSettingsService.updateSystemSettings({
+    is_manual_override: 1,
+    store_status: 'OPEN',
+    chatbot_enabled: 1
+  });
 
   const [macchiatoRows] = await db.query(`SELECT id, name, price FROM menu_items WHERE LOWER(name) = 'caramel macchiato' LIMIT 1`);
   const [milkteaRows] = await db.query(`SELECT id, name, price FROM menu_items WHERE LOWER(name) = 'brown sugar milktea' LIMIT 1`);

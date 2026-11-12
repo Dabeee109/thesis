@@ -294,8 +294,130 @@ test('QA UAT Critical Bug Fixes Regression Suite (8 Fixes)', async (t) => {
     assert.strictEqual(sentMessages[0].messagePayload.quick_replies, undefined);
   });
 
+  await t.test('9. CLEAR_CART deletes cart from DB (customers.cart_json = []) and resets subtotal to ₱0.00', async () => {
+    const psid = `PSID_UAT_CLEARCART_${Date.now()}`;
+    const [burgerRows] = await db.query(`SELECT id, name, price FROM menu_items WHERE name = 'Bacon Burger' LIMIT 1`);
+    const session = await nlpEngine.getSession(psid);
+    session.dining_mode = 'Pick-up';
+    session.cart = [{ menuItemId: burgerRows[0].id, id: burgerRows[0].id, name: 'Bacon Burger', price: Number(burgerRows[0].price), quantity: 2 }];
+    await nlpEngine.saveSession(session);
+
+    sentMessages.length = 0;
+    const clearRes = await nlpEngine.handleMessageEvent(psid, 'burahin mo yung nasa cart ko');
+    assert.strictEqual(clearRes.intent, 'CLEAR_CART');
+    assert.strictEqual(clearRes.subtotal, 0);
+    assert.strictEqual(session.cart.length, 0);
+
+    const [custRows] = await db.query(`SELECT cart_json FROM customers WHERE psid = ?`, [psid]);
+    assert.strictEqual(custRows[0].cart_json, '[]', 'DB cart_json must be cleared to empty array');
+    const msg = sentMessages[sentMessages.length - 1].messagePayload.text;
+    assert.ok(msg.includes('₱0.00'));
+  });
+
+  await t.test('10. Multi-Intent One-Shot Order ("pa order bacon burger isa take out gcash payment") extracts all entities & asks missing fields', async () => {
+    const psid = `PSID_UAT_ONESHOT_${Date.now()}`;
+    const session = await nlpEngine.getSession(psid);
+    session.state = 'AWAITING_DINING_MODE';
+    session.dining_mode = null;
+    session.cart = [];
+    await nlpEngine.saveSession(session);
+
+    sentMessages.length = 0;
+    const res = await nlpEngine.handleMessageEvent(psid, 'pa order bacon burger isa take out gcash payment');
+    assert.strictEqual(res.intent, 'ONE_SHOT_ORDER');
+    assert.strictEqual(session.dining_mode, 'Pick-up');
+    assert.strictEqual(session.payment_mode, 'GCash');
+    assert.strictEqual(session.cart.length, 1);
+    assert.ok(session.cart[0].name.includes('Bacon Burger'));
+    assert.strictEqual(session.cart[0].quantity, 1);
+    assert.strictEqual(session.state, 'COLLECTING_CUSTOMER_INFO');
+
+    const msg = sentMessages[sentMessages.length - 1].messagePayload.text;
+    assert.ok(msg.includes('Full Name') && msg.includes('Arriving time'), 'Must immediately ask for missing Pick-up checkout fields');
+    assert.ok(!msg.includes("DINER'S CAFE MENU"), 'Must NOT dump full menu on one-shot order');
+  });
+
+  await t.test('11. Legacy "Yes to what? Ready to check out?" & "Sorry, I didn\'t get that." are completely eliminated; contextual "oo" works', async () => {
+    const botMessages = require('../src/services/botMessages').botMessages;
+    assert.ok(!botMessages.yesToWhat().text.includes('Yes to what?'));
+    assert.ok(!botMessages.fallback().text.includes("Sorry, I didn't get that."));
+
+    const psid = `PSID_UAT_YESCTX_${Date.now()}`;
+    const session = await nlpEngine.getSession(psid);
+    session.dining_mode = 'Pick-up';
+    session.state = 'AWAITING_CHECKOUT_CONFIRM';
+    session.cart = [{ menuItemId: 1, name: 'Bacon Burger', price: 159, quantity: 1 }];
+    aiService.clearConversationHistory(psid);
+    aiService.appendConversationTurn(psid, 'pa order bacon burger', 'Naidagdag na ang Bacon Burger! May gusto pa ba kayong idagdag?', session);
+
+    sentMessages.length = 0;
+    const yesRes = await nlpEngine.handleTextInput(psid, session, 'oo ngani');
+    const msg = sentMessages[sentMessages.length - 1].messagePayload.text;
+    assert.ok(!msg.includes('Yes to what?'));
+    assert.ok(msg.toLowerCase().includes('idagdag'), `Contextual "oo ngani" should ask what to add, got: ${msg}`);
+    assert.ok(yesRes.intent);
+  });
+
+  await t.test('12. CANCEL_ORDER handles "cancel my order", "pa-cancel", "ayoko na" on PENDING order, restores stock & resets session', async () => {
+    const psid = `PSID_UAT_CANCEL_${Date.now()}`;
+    const [burgerRows] = await db.query(`SELECT id, name, price FROM menu_items WHERE name = 'Bacon Burger' LIMIT 1`);
+    const created = await orderService.createOrder(psid, {
+      customerName: 'Cancel Tester',
+      customerPhone: '09171234567',
+      deliveryAddress: 'Store Pickup',
+      orderType: 'pickup',
+      paymentMethod: 'cash',
+      items: [{ menuItemId: burgerRows[0].id, quantity: 1 }],
+      deliveryFee: 0,
+      totalAmount: Number(burgerRows[0].price)
+    });
+
+    const session = await nlpEngine.getSession(psid);
+    session.activeOrderNumber = created.orderNumber;
+    await nlpEngine.saveSession(session);
+
+    sentMessages.length = 0;
+    const cancelRes = await nlpEngine.handleMessageEvent(psid, 'ayoko na');
+    assert.strictEqual(cancelRes.intent, 'ORDER_CANCELLED_PENDING');
+    const [ordRows] = await db.query(`SELECT status FROM orders WHERE order_number = ?`, [created.orderNumber]);
+    assert.strictEqual(ordRows[0].status, 'cancelled');
+    const afterSession = await nlpEngine.getSession(psid);
+    assert.strictEqual(afterSession.state, 'IDLE');
+    assert.strictEqual(afterSession.activeOrderNumber, null);
+  });
+
+  await t.test('13. Customer Name Validation rejects conversational complaints ("binigay ko na sayo kanina ha") & supports Graph API fallback', async () => {
+    const { validateName } = require('../src/services/textMatch');
+    assert.strictEqual(validateName('binigay ko na sayo kanina ha').ok, false, 'Complaint sentence must fail validateName');
+    assert.strictEqual(validateName('Juan Dela Cruz').ok, true, 'Real name must pass validateName');
+
+    const psid = `PSID_UAT_NAME_${Date.now()}`;
+    const session = await nlpEngine.getSession(psid);
+    session.dining_mode = 'Pick-up';
+    session.orderType = 'pickup';
+    session.state = 'AWAITING_NAME';
+    session.details = {};
+
+    sentMessages.length = 0;
+    const badRes = await nlpEngine.handleMessageEvent(psid, 'binigay ko na sayo kanina ha');
+    assert.strictEqual(badRes.intent, 'BAD_NAME');
+    assert.strictEqual(session.details.name, undefined, 'Complaint text must NEVER be saved as customer name');
+    assert.ok(sentMessages[sentMessages.length - 1].messagePayload.text.includes('hindi po iyan pangalan'));
+  });
+
+  await t.test('14. Strict Professional Tone sanitizes street slang ("Awtos po!", "lods", "matsala")', () => {
+    const parsed = aiService.parseAssistantJson(JSON.stringify({
+      reply_message: 'Awtos po! Salamat lods, matsala!',
+      detected_action: 'NONE',
+      action_payload: { items: null, item_name: null, quantity: null, addon: null, dining_mode: null, payment_mode: null }
+    }));
+    assert.ok(!/awto|lods|matsala/i.test(parsed.reply_message), `Slang must be scrubbed, got: ${parsed.reply_message}`);
+    assert.ok(parsed.reply_message.includes('Paumanhin po'));
+  });
+
   t.after(async () => {
     await systemSettingsService.updateSystemSettings({ is_manual_override: 0 }).catch(() => {});
     try { if (fs.existsSync(testDbPath)) fs.unlinkSync(testDbPath); } catch (_) {}
   });
 });
+

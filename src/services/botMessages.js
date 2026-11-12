@@ -151,7 +151,7 @@ const botMessages = {
   }),
 
   yesToWhat: () => ({
-    text: 'Yes to what? Ready to check out?',
+    text: 'Paumanhin po, alin po ang ibig ninyong sabihin? Maaari po ninyong sabihin kung nais ninyong magdagdag ng order o mag-proceed sa checkout.',
     quickReplies: [
       { title: 'Yes, checkout', payload: 'CONFIRM_CHECKOUT' },
       { title: 'Add more', payload: 'KEEP_SHOPPING' }
@@ -326,7 +326,7 @@ const botMessages = {
   }),
 
   fallback: () => ({
-    text: "Sorry, I didn't get that.",
+    text: 'Magandang araw po! Paumanhin po, hindi ko po lubos na naintindihan iyon. Maaari po ba ninyong ulitin o i-type ang "Menu" para makita ang ating menu?',
     quickReplies: [
       { title: '☕ Menu', payload: 'MENU_HOME' },
       { title: '🛒 Cart', payload: 'VIEW_CART' },
