@@ -227,6 +227,7 @@ function switchTab(tabId) {
     overview: 'Operational Overview',
     orders: 'Order Operations',
     menu: 'Menu Management',
+    'bom-inventory': 'Inventory & Recipes (BOM)',
     promotions: 'Promotions, Events & Seasonal Deals',
     inventory: 'Promotions, Events & Seasonal Deals',
     delivery: 'Smart Delivery Management (FR6)',
@@ -241,6 +242,7 @@ function switchTab(tabId) {
   if (tabId === 'overview') loadStoreStatus();
   if (tabId === 'orders') loadOrders();
   if (tabId === 'menu') loadMenu();
+  if (tabId === 'bom-inventory') loadBomInventory();
   if (tabId === 'promotions') loadPromotions();
   if (tabId === 'inventory') switchTab('promotions');
   if (tabId === 'delivery') {
@@ -289,6 +291,9 @@ function handleRealtimeEvent(eventType, data) {
   } else if (eventType === 'ORDER_STATUS_CHANGED' || eventType === 'PAYMENT_UPDATE') {
     loadOrders();
     loadDeliveries();
+  }
+  if (eventType === 'INGREDIENTS_UPDATED' || eventType === 'INGREDIENT_STOCK_ALERT') {
+    if (typeof loadBomInventory === 'function') loadBomInventory();
   }
   if (eventType === 'VOID_REQUEST_CREATED') {
     const user = API.getUser();
@@ -3040,6 +3045,9 @@ async function saveFbPageAccessToken() {
   }
 }
 
+
+
+
 async function testFbPageAccessToken() {
   const input = document.getElementById('fb-page-access-token-input');
   const btn = document.getElementById('btn-test-fb-token');
@@ -3104,6 +3112,9 @@ async function testFbPageAccessToken() {
     }
   }
 }
+
+
+
 
 // ----------------------------------------------------------------------------
 // 10. Store Branch & Delivery Location Settings
@@ -3206,6 +3217,9 @@ async function saveStoreLocationSettings() {
     }
   }
 }
+
+
+
 
 function fetchCurrentGeoLocation() {
   const statusEl = document.getElementById('geo-fetch-status');
@@ -3395,6 +3409,9 @@ async function saveGcashSettings() {
     }
   }
 }
+
+
+
 
 function testGcashBotOutput() {
   const nameInput = document.getElementById('gcash-account-name-input');
@@ -3655,4 +3672,331 @@ async function saveOperatingHoursSettings() {
     }
   }
 }
+
+// ============================================================================
+// 10. Raw Ingredients & BOM Recipe Management UI
+// ============================================================================
+let bomIngredientsCache = [];
+let bomMenuItemsCache = [];
+let currentSelectedRecipe = null;
+
+// Light-dismiss fallback for browsers without native <dialog closedby="any">
+(function initBomDialogDismissFallback() {
+  if (typeof HTMLDialogElement !== 'undefined' && !('closedBy' in HTMLDialogElement.prototype)) {
+    const isOutside = (e, dialog) => {
+      const r = dialog.getBoundingClientRect();
+      return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+    };
+    document.addEventListener('DOMContentLoaded', () => {
+      for (const dialog of document.querySelectorAll('dialog.bom-dialog[closedby="any"]')) {
+        let pressedOutside = false;
+        dialog.addEventListener('pointerdown', (e) => { pressedOutside = isOutside(e, dialog); });
+        dialog.addEventListener('pointerup', (e) => {
+          if (pressedOutside && isOutside(e, dialog)) dialog.close();
+        });
+      }
+    });
+  }
+  document.addEventListener('DOMContentLoaded', () => {
+    for (const dialog of document.querySelectorAll('dialog.bom-dialog')) {
+      dialog.addEventListener('close', () => { dialog.returnValue = ''; });
+    }
+  });
+})();
+
+async function loadBomInventory() {
+  try {
+    const [ingRes, menuRes] = await Promise.all([
+      API.get('/inventory/ingredients'),
+      API.get('/menu')
+    ]);
+
+    bomIngredientsCache = (ingRes && Array.isArray(ingRes.ingredients)) ? ingRes.ingredients : [];
+    const lowCount = Number(ingRes?.lowStockCount ?? bomIngredientsCache.filter(i => i.is_low_stock).length);
+
+    const kpiTotal = document.getElementById('bom-kpi-total');
+    const kpiLow = document.getElementById('bom-kpi-low');
+    const navBadge = document.getElementById('nav-low-stock-count');
+    if (kpiTotal) kpiTotal.textContent = String(bomIngredientsCache.length);
+    if (kpiLow) kpiLow.textContent = String(lowCount);
+    if (navBadge) {
+      navBadge.textContent = String(lowCount);
+      navBadge.style.display = lowCount > 0 ? 'inline-flex' : 'none';
+    }
+
+    renderBomIngredientsTable();
+
+    if (menuRes && Array.isArray(menuRes.categories)) {
+      bomMenuItemsCache = menuRes.categories.flatMap(cat =>
+        (cat.items || []).map(it => ({ ...it, categoryName: cat.name || '' }))
+      );
+      populateBomMenuSelector();
+    }
+  } catch (err) {
+    console.error('[BOM UI] Failed to load inventory & recipes:', err);
+  }
+}
+
+function renderBomIngredientsTable() {
+  const tbody = document.getElementById('bom-ingredients-tbody');
+  if (!tbody) return;
+
+  const query = String(document.getElementById('bom-search-input')?.value || '').trim().toLowerCase();
+  const filter = document.getElementById('bom-filter-select')?.value || 'all';
+
+  const filtered = bomIngredientsCache.filter(item => {
+    if (filter === 'low' && !item.is_low_stock) return false;
+    if (query && !String(item.name || '').toLowerCase().includes(query)) return false;
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">No matching raw ingredients found.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = filtered.map(ing => {
+    const statusBadge = ing.is_low_stock
+      ? '<span class="badge badge-danger">⚠️ Low Stock</span>'
+      : '<span class="badge badge-success">In Stock</span>';
+
+    return `
+      <tr>
+        <th scope="row">${escapeHtml(ing.name)}</th>
+        <td><strong>${Number(ing.stock_quantity || 0).toFixed(2)}</strong> ${escapeHtml(ing.unit)}</td>
+        <td>${Number(ing.reorder_level || 0).toFixed(2)} ${escapeHtml(ing.unit)}</td>
+        <td>₱${Number(ing.cost_per_unit || 0).toFixed(2)} / ${escapeHtml(ing.unit)}</td>
+        <td>${statusBadge}</td>
+        <td>
+          <button type="button" class="btn btn-primary btn-sm" onclick="openRestockIngredientDialog(${Number(ing.ingredient_id)})">+ Restock</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function populateBomMenuSelector() {
+  const select = document.getElementById('bom-recipe-menu-select');
+  if (!select) return;
+
+  const prevVal = select.value;
+  select.innerHTML = '<option value="">-- Choose a Menu Item --</option>' +
+    bomMenuItemsCache.map(m => `<option value="${Number(m.id)}">${escapeHtml(m.name)} (${escapeHtml(m.categoryName || 'Cafe')})</option>`).join('');
+
+  if (prevVal && bomMenuItemsCache.some(m => String(m.id) === String(prevVal))) {
+    select.value = prevVal;
+    loadSelectedMenuRecipe();
+  }
+}
+
+function openAddIngredientDialog() {
+  const form = document.getElementById('bom-add-ingredient-form');
+  if (form) form.reset();
+  const dialog = document.getElementById('dialog-add-ingredient');
+  if (dialog && typeof dialog.showModal === 'function') dialog.showModal();
+}
+
+async function handleAddIngredientSubmit(event) {
+  event.preventDefault();
+  const payload = {
+    name: document.getElementById('ing-name-input')?.value.trim(),
+    unit: document.getElementById('ing-unit-input')?.value.trim(),
+    stock_quantity: parseFloat(document.getElementById('ing-stock-input')?.value || '0'),
+    reorder_level: parseFloat(document.getElementById('ing-reorder-input')?.value || '0'),
+    cost_per_unit: parseFloat(document.getElementById('ing-cost-input')?.value || '0')
+  };
+
+  try {
+    const res = await API.post('/inventory/ingredients', payload);
+    if (res && res.success) {
+      API.toast(`Added ingredient "${payload.name}"!`, 'success');
+      document.getElementById('dialog-add-ingredient')?.close();
+      await loadBomInventory();
+    }
+  } catch (err) {
+    console.error('[BOM UI] Add ingredient failed:', err);
+  }
+}
+
+function openRestockIngredientDialog(ingredientId) {
+  const ing = bomIngredientsCache.find(i => Number(i.ingredient_id) === Number(ingredientId));
+  if (!ing) return;
+
+  document.getElementById('restock-ing-id').value = String(ing.ingredient_id);
+  document.getElementById('restock-ing-summary').textContent =
+    `${ing.name} — Current stock: ${Number(ing.stock_quantity).toFixed(2)} ${ing.unit}`;
+  document.getElementById('restock-amount-input').value = '';
+  document.getElementById('restock-cost-input').value = Number(ing.cost_per_unit || 0).toFixed(2);
+
+  const dialog = document.getElementById('dialog-restock-ingredient');
+  if (dialog && typeof dialog.showModal === 'function') dialog.showModal();
+}
+
+async function handleRestockIngredientSubmit(event) {
+  event.preventDefault();
+  const id = document.getElementById('restock-ing-id')?.value;
+  const amount = parseFloat(document.getElementById('restock-amount-input')?.value || '0');
+  const costVal = document.getElementById('restock-cost-input')?.value;
+  const body = { amount };
+  if (costVal !== '' && costVal !== null) {
+    body.cost_per_unit = parseFloat(costVal);
+  }
+
+  try {
+    const res = await API.patch(`/inventory/ingredients/${encodeURIComponent(id)}/restock`, body);
+    if (res && res.success) {
+      API.toast(res.message || 'Ingredient restocked!', 'success');
+      document.getElementById('dialog-restock-ingredient')?.close();
+      await loadBomInventory();
+      if (document.getElementById('bom-recipe-menu-select')?.value) {
+        await loadSelectedMenuRecipe();
+      }
+    }
+  } catch (err) {
+    console.error('[BOM UI] Restock failed:', err);
+  }
+}
+
+async function loadSelectedMenuRecipe() {
+  const select = document.getElementById('bom-recipe-menu-select');
+  const body = document.getElementById('bom-recipe-view-body');
+  const editBtn = document.getElementById('btn-open-edit-recipe');
+  const kpiRecipe = document.getElementById('bom-kpi-recipe-count');
+  const menuId = select?.value;
+
+  if (!menuId) {
+    currentSelectedRecipe = null;
+    if (editBtn) editBtn.disabled = true;
+    if (kpiRecipe) kpiRecipe.textContent = 'Select an item below';
+    if (body) body.innerHTML = '<div style="color: var(--text-muted);">Select a menu item above to inspect or edit its recipe ingredients.</div>';
+    return;
+  }
+
+  try {
+    const res = await API.get(`/inventory/recipes/${encodeURIComponent(menuId)}`);
+    currentSelectedRecipe = res;
+    if (editBtn) editBtn.disabled = false;
+    const items = Array.isArray(res?.recipeItems) ? res.recipeItems : [];
+    if (kpiRecipe) kpiRecipe.textContent = `${items.length} ingredient(s)`;
+
+    if (items.length === 0) {
+      body.innerHTML = `<div style="padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; color: var(--text-muted);">No BOM recipe mapped yet for <strong>${escapeHtml(res.menuItem?.name || '')}</strong>. Click <strong>Edit Recipe</strong> to assign raw ingredients.</div>`;
+      return;
+    }
+
+    body.innerHTML = `
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px;">
+        ${items.map(r => `
+          <div style="padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-surface-elevated, #241a12);">
+            <div style="font-weight: 700;">${escapeHtml(r.ingredient_name)}</div>
+            <div style="font-size: 0.9rem; color: var(--brand-primary); margin-top: 4px;">
+              Requires: <strong>${Number(r.quantity_required).toFixed(2)} ${escapeHtml(r.unit)}</strong> / serving
+            </div>
+            <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">
+              Available stock: ${Number(r.stock_quantity).toFixed(2)} ${escapeHtml(r.unit)}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  } catch (err) {
+    console.error('[BOM UI] Load recipe failed:', err);
+  }
+}
+
+function openEditRecipeDialog() {
+  if (!currentSelectedRecipe || !currentSelectedRecipe.menuItem) return;
+  document.getElementById('recipe-edit-menu-id').value = String(currentSelectedRecipe.menuItem.id);
+  document.getElementById('edit-recipe-title').textContent = `Edit Recipe: ${currentSelectedRecipe.menuItem.name}`;
+
+  const container = document.getElementById('bom-recipe-rows-container');
+  container.innerHTML = '';
+
+  const rows = Array.isArray(currentSelectedRecipe.recipeItems) ? currentSelectedRecipe.recipeItems : [];
+  if (rows.length === 0) {
+    appendRecipeEditorRow();
+  } else {
+    rows.forEach(r => appendRecipeEditorRow(r.ingredient_id, r.quantity_required));
+  }
+
+  const dialog = document.getElementById('dialog-edit-recipe');
+  if (dialog && typeof dialog.showModal === 'function') dialog.showModal();
+}
+
+function appendRecipeEditorRow(selectedIngredientId = '', qtyValue = '') {
+  const container = document.getElementById('bom-recipe-rows-container');
+  if (!container) return;
+
+  const rowEl = document.createElement('div');
+  rowEl.className = 'bom-recipe-row';
+
+  const selectHtml = `<select class="form-control bom-recipe-ing-select" required>
+    <option value="">-- Select Ingredient --</option>
+    ${bomIngredientsCache.map(i => `<option value="${Number(i.ingredient_id)}" ${Number(i.ingredient_id) === Number(selectedIngredientId) ? 'selected' : ''}>${escapeHtml(i.name)} (${escapeHtml(i.unit)})</option>`).join('')}
+  </select>`;
+
+  const selectedIng = bomIngredientsCache.find(i => Number(i.ingredient_id) === Number(selectedIngredientId));
+  const unitLabel = selectedIng ? selectedIng.unit : '';
+
+  rowEl.innerHTML = `
+    ${selectHtml}
+    <input type="number" class="form-control bom-recipe-qty-input" step="0.01" min="0.01" placeholder="Qty" value="${qtyValue !== '' ? Number(qtyValue) : ''}" required>
+    <span class="bom-recipe-unit-label" style="font-size: 0.85rem; color: var(--text-muted);">${escapeHtml(unitLabel)}</span>
+    <button type="button" class="btn btn-danger btn-sm" aria-label="Remove ingredient row" onclick="this.parentElement.remove()">✕</button>
+  `;
+
+  const sel = rowEl.querySelector('.bom-recipe-ing-select');
+  const unitSpan = rowEl.querySelector('.bom-recipe-unit-label');
+  sel.addEventListener('change', () => {
+    const found = bomIngredientsCache.find(i => Number(i.ingredient_id) === Number(sel.value));
+    unitSpan.textContent = found ? found.unit : '';
+  });
+
+  container.appendChild(rowEl);
+}
+
+async function handleSaveRecipeSubmit(event) {
+  event.preventDefault();
+  const menuId = parseInt(document.getElementById('recipe-edit-menu-id')?.value, 10);
+  const rows = Array.from(document.querySelectorAll('#bom-recipe-rows-container .bom-recipe-row'));
+  const items = [];
+  const seen = new Set();
+
+  for (const r of rows) {
+    const ingId = parseInt(r.querySelector('.bom-recipe-ing-select')?.value, 10);
+    const qty = parseFloat(r.querySelector('.bom-recipe-qty-input')?.value || '0');
+    if (!ingId || !Number.isFinite(qty) || qty <= 0) continue;
+    if (seen.has(ingId)) {
+      API.toast('Duplicate ingredient detected in recipe. Combine quantities on one row.', 'warning');
+      return;
+    }
+    seen.add(ingId);
+    items.push({ ingredient_id: ingId, quantity_required: qty });
+  }
+
+  try {
+    const res = await API.post('/inventory/recipes', { menu_id: menuId, items });
+    if (res && res.success) {
+      API.toast('Recipe saved successfully!', 'success');
+      document.getElementById('dialog-edit-recipe')?.close();
+      await loadSelectedMenuRecipe();
+    }
+  } catch (err) {
+    console.error('[BOM UI] Save recipe failed:', err);
+  }
+}
+
+window.loadBomInventory = loadBomInventory;
+window.renderBomIngredientsTable = renderBomIngredientsTable;
+window.openAddIngredientDialog = openAddIngredientDialog;
+window.handleAddIngredientSubmit = handleAddIngredientSubmit;
+window.openRestockIngredientDialog = openRestockIngredientDialog;
+window.handleRestockIngredientSubmit = handleRestockIngredientSubmit;
+window.loadSelectedMenuRecipe = loadSelectedMenuRecipe;
+window.openEditRecipeDialog = openEditRecipeDialog;
+window.appendRecipeEditorRow = appendRecipeEditorRow;
+window.handleSaveRecipeSubmit = handleSaveRecipeSubmit;
+
+
+
 

@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="required-orientation" content="landscape">
   <link rel="stylesheet" href="css/style.css">
-  <link rel="stylesheet" href="css/dashboard.css?v=20261109_03">
+  <link rel="stylesheet" href="css/dashboard.css?v=20261112_01">
   <!-- Immediate Strict Frontend Auth Guard (Requirement 4) -->
   <script>
     (function () {
@@ -85,6 +85,12 @@
         </li>
         <li class="nav-item" data-tab="menu">
           <button><span style="font-size: 1.2rem;">☕</span> <span>Menu Catalog</span></button>
+        </li>
+        <li class="nav-item" data-tab="bom-inventory">
+          <button>
+            <span style="font-size: 1.2rem;">📦</span> <span>Inventory &amp; Recipes</span>
+            <span class="nav-badge" id="nav-low-stock-count" style="display: none;">0</span>
+          </button>
         </li>
         <li class="nav-item" data-tab="delivery">
           <button><span style="font-size: 1.2rem;">🛵</span> <span>Smart Delivery</span></button>
@@ -399,6 +405,81 @@
 
           <div class="menu-grid" id="menu-grid-container">
             <!-- Rendered via JS -->
+          </div>
+        </section>
+
+        <!-- ================================================================= -->
+        <!-- TAB 3B: RAW INGREDIENTS & BOM RECIPE MANAGEMENT -->
+        <!-- ================================================================= -->
+        <section id="tab-bom-inventory" class="tab-pane">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-bottom: 18px;">
+            <div class="card" style="padding: 16px;">
+              <div style="font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase;">Raw Ingredients</div>
+              <div style="font-size: 1.7rem; font-weight: 800; color: var(--brand-primary);" id="bom-kpi-total">0</div>
+            </div>
+            <div class="card" style="padding: 16px;">
+              <div style="font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase;">Low Stock Alerts</div>
+              <div style="font-size: 1.7rem; font-weight: 800; color: var(--status-danger);" id="bom-kpi-low">0</div>
+            </div>
+            <div class="card" style="padding: 16px;">
+              <div style="font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase;">Selected Menu Recipe</div>
+              <div style="font-size: 1.15rem; font-weight: 700; color: var(--text-primary); margin-top: 6px;" id="bom-kpi-recipe-count">Select an item below</div>
+            </div>
+          </div>
+
+          <div class="card" style="padding: 18px; margin-bottom: 20px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 14px;">
+              <div>
+                <h2 id="bom-ingredients-heading" style="margin: 0; font-size: 1.2rem;">Raw Ingredients Inventory</h2>
+                <p style="margin: 4px 0 0; font-size: 0.84rem; color: var(--text-muted);">Tracked in grams (g), milliliters (ml), and pieces (pcs). Auto-deducted when orders start preparing.</p>
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+                <input type="search" id="bom-search-input" class="form-control" placeholder="Search ingredient..." oninput="renderBomIngredientsTable()" style="width: 190px; padding: 6px 10px;">
+                <select id="bom-filter-select" class="form-control" onchange="renderBomIngredientsTable()" style="width: auto; padding: 6px 10px;">
+                  <option value="all">All Ingredients</option>
+                  <option value="low">Low Stock Only</option>
+                </select>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="loadBomInventory()">🔄 Refresh</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="openAddIngredientDialog()">➕ Add Ingredient</button>
+              </div>
+            </div>
+
+            <div tabindex="0" role="region" aria-labelledby="bom-ingredients-heading" class="bom-table-wrapper">
+              <table class="data-table bom-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Ingredient</th>
+                    <th scope="col">Stock</th>
+                    <th scope="col">Reorder Level</th>
+                    <th scope="col">Cost / Unit</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="bom-ingredients-tbody">
+                  <tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">Loading ingredients...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card" style="padding: 18px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 14px;">
+              <div>
+                <h2 style="margin: 0; font-size: 1.2rem;">Menu Item Recipes (Bill of Materials)</h2>
+                <p style="margin: 4px 0 0; font-size: 0.84rem; color: var(--text-muted);">Configure exact raw ingredient quantities consumed per 1 serving of each menu item.</p>
+              </div>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                <select id="bom-recipe-menu-select" class="form-control" onchange="loadSelectedMenuRecipe()" style="min-width: 240px;">
+                  <option value="">-- Choose a Menu Item --</option>
+                </select>
+                <button type="button" class="btn btn-primary btn-sm" id="btn-open-edit-recipe" onclick="openEditRecipeDialog()" disabled>✏️ Edit Recipe</button>
+              </div>
+            </div>
+
+            <div id="bom-recipe-view-body" style="color: var(--text-muted); font-size: 0.9rem;">
+              Select a menu item above to inspect or edit its recipe ingredients.
+            </div>
           </div>
         </section>
 
@@ -1611,9 +1692,102 @@
     </div>
   </div>
 
+  <!-- BOM Native Dialog 1: Add Raw Ingredient -->
+  <dialog id="dialog-add-ingredient" class="bom-dialog" closedby="any" aria-labelledby="add-ingredient-title">
+    <div class="bom-dialog-inner">
+      <div class="bom-dialog-header">
+        <h3 id="add-ingredient-title" style="margin: 0;">Add Raw Ingredient</h3>
+        <button type="button" class="modal-close" aria-label="Close dialog" onclick="document.getElementById('dialog-add-ingredient').close()">&times;</button>
+      </div>
+      <form id="bom-add-ingredient-form" onsubmit="handleAddIngredientSubmit(event)">
+        <div class="form-group">
+          <label class="form-label" for="ing-name-input">Ingredient Name <span style="color: var(--status-danger);">*</span></label>
+          <input type="text" id="ing-name-input" class="form-control" placeholder="e.g. Matcha Ceremonial Powder" required autofocus>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;" class="form-group">
+          <div>
+            <label class="form-label" for="ing-unit-input">Unit of Measurement <span style="color: var(--status-danger);">*</span></label>
+            <select id="ing-unit-input" class="form-control" required>
+              <option value="g">Grams (g)</option>
+              <option value="ml">Milliliters (ml)</option>
+              <option value="pcs">Pieces (pcs)</option>
+              <option value="kg">Kilograms (kg)</option>
+              <option value="L">Liters (L)</option>
+            </select>
+          </div>
+          <div>
+            <label class="form-label" for="ing-cost-input">Cost per Unit (PHP)</label>
+            <input type="number" id="ing-cost-input" class="form-control" step="0.01" min="0" value="0.00">
+          </div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;" class="form-group">
+          <div>
+            <label class="form-label" for="ing-stock-input">Initial Stock Quantity</label>
+            <input type="number" id="ing-stock-input" class="form-control" step="0.01" min="0" value="0.00">
+          </div>
+          <div>
+            <label class="form-label" for="ing-reorder-input">Low-Stock Reorder Level</label>
+            <input type="number" id="ing-reorder-input" class="form-control" step="0.01" min="0" value="100.00">
+          </div>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px;">
+          <button type="button" class="btn btn-secondary" onclick="document.getElementById('dialog-add-ingredient').close()">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btn-save-new-ingredient">Save Ingredient</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- BOM Native Dialog 2: Restock Ingredient -->
+  <dialog id="dialog-restock-ingredient" class="bom-dialog" closedby="any" aria-labelledby="restock-ingredient-title">
+    <div class="bom-dialog-inner">
+      <div class="bom-dialog-header">
+        <h3 id="restock-ingredient-title" style="margin: 0;">Restock Ingredient</h3>
+        <button type="button" class="modal-close" aria-label="Close dialog" onclick="document.getElementById('dialog-restock-ingredient').close()">&times;</button>
+      </div>
+      <form id="bom-restock-form" onsubmit="handleRestockIngredientSubmit(event)">
+        <input type="hidden" id="restock-ing-id">
+        <p id="restock-ing-summary" style="margin: 0 0 14px; font-size: 0.92rem; color: var(--text-secondary);"></p>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;" class="form-group">
+          <div>
+            <label class="form-label" for="restock-amount-input">Quantity to Add <span style="color: var(--status-danger);">*</span></label>
+            <input type="number" id="restock-amount-input" class="form-control" step="0.01" min="0.01" required autofocus>
+          </div>
+          <div>
+            <label class="form-label" for="restock-cost-input">Updated Cost / Unit (PHP)</label>
+            <input type="number" id="restock-cost-input" class="form-control" step="0.01" min="0">
+          </div>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px;">
+          <button type="button" class="btn btn-secondary" onclick="document.getElementById('dialog-restock-ingredient').close()">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btn-confirm-restock">Confirm Restock</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- BOM Native Dialog 3: Edit Menu Recipe -->
+  <dialog id="dialog-edit-recipe" class="bom-dialog" closedby="any" aria-labelledby="edit-recipe-title">
+    <div class="bom-dialog-inner">
+      <div class="bom-dialog-header">
+        <h3 id="edit-recipe-title" style="margin: 0;">Edit Recipe</h3>
+        <button type="button" class="modal-close" aria-label="Close dialog" onclick="document.getElementById('dialog-edit-recipe').close()">&times;</button>
+      </div>
+      <form id="bom-edit-recipe-form" onsubmit="handleSaveRecipeSubmit(event)">
+        <input type="hidden" id="recipe-edit-menu-id">
+        <div id="bom-recipe-rows-container" style="margin-bottom: 12px;"></div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="appendRecipeEditorRow()" autofocus>➕ Add Ingredient Row</button>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; border-top: 1px solid var(--border-subtle); padding-top: 14px;">
+          <button type="button" class="btn btn-secondary" onclick="document.getElementById('dialog-edit-recipe').close()">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btn-save-recipe">💾 Save Recipe</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
   <!-- Scripts -->
-  <script src="js/api.js?v=20261109_04"></script>
-  <script src="js/dashboard.js?v=20261109_04"></script>
+  <script src="js/api.js?v=20261112_01"></script>
+  <script src="js/dashboard.js?v=20261112_01"></script>
   <script src="js/orientation-lock.js?v=20261109_04"></script>
 </body>
 </html>

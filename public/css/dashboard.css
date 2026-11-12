@@ -902,3 +902,132 @@ input:checked + .slider:before {
   transition: width 0.15s ease;
 }
 
+/* ==========================================================================
+   BOM Raw Ingredients & Recipes Tab (Responsive Table & Native <dialog>)
+   ========================================================================== */
+.bom-table-wrapper {
+  overflow: auto;
+  max-inline-size: 100%;
+  max-block-size: min(520px, 75vh);
+  container-type: inline-size;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--bg-surface, #1c140e);
+}
+
+.bom-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  --label-1: "Ingredient";
+  --label-2: "Stock";
+  --label-3: "Reorder Level";
+  --label-4: "Cost / Unit";
+  --label-5: "Status";
+  --label-6: "Actions";
+}
+
+.bom-table thead {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 2;
+  background: var(--bg-surface-elevated, #241a12);
+}
+
+.bom-table tbody th {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+  background: var(--bg-surface, #1c140e);
+  text-align: left;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+@container (width < 640px) {
+  .bom-table,
+  .bom-table thead,
+  .bom-table tbody,
+  .bom-table tr,
+  .bom-table th,
+  .bom-table td {
+    display: block;
+  }
+
+  .bom-table thead {
+    display: none;
+  }
+
+  .bom-table tr {
+    margin-block-end: 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .bom-table tbody th {
+    position: sticky;
+    inset-block-start: 0;
+    z-index: 2;
+    background: var(--bg-surface-elevated, #241a12);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .bom-table td:nth-child(2)::before { content: var(--label-2) ": "; font-weight: 600; color: var(--text-muted); }
+  .bom-table td:nth-child(3)::before { content: var(--label-3) ": "; font-weight: 600; color: var(--text-muted); }
+  .bom-table td:nth-child(4)::before { content: var(--label-4) ": "; font-weight: 600; color: var(--text-muted); }
+  .bom-table td:nth-child(5)::before { content: var(--label-5) ": "; font-weight: 600; color: var(--text-muted); }
+  .bom-table td:nth-child(6)::before { content: var(--label-6) ": "; font-weight: 600; color: var(--text-muted); }
+}
+
+/* Native <dialog> Modal Styles */
+dialog.bom-dialog {
+  margin: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  padding: 0;
+  width: min(560px, 92vw);
+  max-height: 90vh;
+  background: var(--bg-surface, #1c140e);
+  color: var(--text-primary, #f5ebe0);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
+}
+
+dialog.bom-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+dialog.bom-dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog.bom-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(3px);
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+.bom-dialog-inner {
+  padding: 22px;
+  overflow-y: auto;
+}
+
+.bom-dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.bom-recipe-row {
+  display: grid;
+  grid-template-columns: 1fr 120px 70px auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+

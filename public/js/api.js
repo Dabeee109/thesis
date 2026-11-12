@@ -202,6 +202,17 @@ const API = {
       if (onEventCallback) onEventCallback('STOCK_ALERT', data);
     });
 
+    eventSource.addEventListener('INGREDIENT_STOCK_ALERT', (e) => {
+      const data = JSON.parse(e.data);
+      API.toast(`⚠️ Low Ingredient: ${data.name} (${data.stock_quantity} ${data.unit})`, 'warning');
+      if (onEventCallback) onEventCallback('INGREDIENT_STOCK_ALERT', data);
+    });
+
+    eventSource.addEventListener('INGREDIENTS_UPDATED', (e) => {
+      const data = JSON.parse(e.data);
+      if (onEventCallback) onEventCallback('INGREDIENTS_UPDATED', data);
+    });
+
     eventSource.addEventListener('NEW_FEEDBACK', (e) => {
       const data = JSON.parse(e.data);
       API.toast(`🌟 New ${data.rating}-star review received!`, 'success');
