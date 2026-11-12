@@ -1860,7 +1860,7 @@ async function handleMessageEvent(psid, incomingText = '', payload = null, locat
         return handleCancellationRequest(psid, session, text);
       }
 
-      // If customer is NOT already in active pre-order shopping flow or completing a GCash proof, show the closed notice
+      // If customer is NOT already in active pre-order shopping flow or completing a GCash proof, check AI or show closed notice
       const isCompletingGcashProof = Boolean(
         session.pendingGCashOrder ||
         session.checkout_step === 'AWAITING_PAYMENT_PROOF' ||
@@ -1869,11 +1869,14 @@ async function handleMessageEvent(psid, incomingText = '', payload = null, locat
         eventPayload === 'CANCEL_PENDING_GCASH'
       );
       if (!session.is_preorder && !isCompletingGcashProof) {
+        // Let Conversational AI answer questions, FAQs, and menu inquiries intelligently even during off-hours
+        if (text && (process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured()) {
+          const aiTurn = await executeAiAssistantTurn(psid, session, text);
+          if (aiTurn) return aiTurn;
+        }
+
         const closedNotice = `Magandang araw po! Sarado na po ang aming kitchen ngayong oras na ito. Ang operating hours po ng Diner's Cafe ay ${storeSchedule.openTimeFormatted} - ${storeSchedule.closeTimeFormatted} (Manila Time). Nais niyo po ba mag pre-order para sa aming susunod na opening, o mag-iwan ng mensahe para sa aming staff?`;
-        await sendQuickReplies(psid, closedNotice, [
-          { title: 'Mag Pre-Order', payload: 'ACTION_PREORDER' },
-          { title: 'Mag-iwan ng Mensahe', payload: 'ACTION_LEAVE_MESSAGE' }
-        ]);
+        await sendTextMessage(psid, closedNotice);
         return { intent: 'STORE_CLOSED_NOTICE', confidence: 1.0, replyLog: closedNotice };
       }
     }
