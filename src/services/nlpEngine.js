@@ -43,6 +43,7 @@ const {
 const {
   isBatchAddIntent,
   isBatchRemoveIntent,
+  isMultiItemOrderText,
   executeBatchAdd,
   executeBatchRemove,
   formatUpdatedCartResponse
@@ -2691,6 +2692,31 @@ async function handleTextInput(psid, session, rawText) {
         }
       }
 
+      // Check if there are more ambiguous items queued
+      if (pending?.remainingAmbiguous && pending.remainingAmbiguous.length > 0) {
+        const nextAmb = pending.remainingAmbiguous[0];
+        session.pending_suggestion = {
+          name: nextAmb.candidate.name,
+          quantity: nextAmb.quantity,
+          price: nextAmb.candidate.price,
+          id: nextAmb.candidate.id,
+          menuItemId: nextAmb.candidate.id,
+          addon: nextAmb.addon || null,
+          originalName: nextAmb.originalName,
+          remainingAmbiguous: pending.remainingAmbiguous.slice(1)
+        };
+        session.pendingItem = {
+          id: nextAmb.candidate.id,
+          name: nextAmb.candidate.name,
+          price: nextAmb.candidate.price,
+          quantity: nextAmb.quantity
+        };
+        await saveSession(session);
+        const nextMsg = `Naidagdag na po ang ${addedQty}x ${addedName}.\n\nPara naman po sa "${nextAmb.originalName}", ang ibig niyo po bang sabihin ay ${nextAmb.candidate.name}?`;
+        await sendTextMessage(psid, nextMsg);
+        return { intent: 'SUGGESTION_CONFIRMED_NEXT_AMBIGUOUS', confidence: 1.0, replyLog: nextMsg };
+      }
+
       session.pending_suggestion = null;
       session.pendingItem = null;
       session.current_step = 'ordering';
@@ -2709,7 +2735,10 @@ async function handleTextInput(psid, session, rawText) {
       session.state = 'ordering';
       await saveSession(session);
 
-      const reply = 'Pakiulit ng order.';
+      const hasCart = Array.isArray(session.cart) && session.cart.length > 0;
+      const reply = hasCart
+        ? 'Sige po, hindi naisama ang item na iyon. Ang mga nauna ninyong napiling items ay nananatili sa inyong cart. Nais niyo po bang mag-checkout na o magdagdag pa?'
+        : 'Pakiulit ng order.';
       await sendTextMessage(psid, reply);
       return { intent: 'SUGGESTION_DECLINED', confidence: 1.0, replyLog: reply };
     }
@@ -2954,6 +2983,11 @@ async function handleTextInput(psid, session, rawText) {
   }
 
   if (isBatchAddIntent(rawText)) {
+    if ((process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured()) {
+      const aiTurn = await executeAiAssistantTurn(psid, session, rawText);
+      if (aiTurn) return aiTurn;
+    }
+
     const [candidates] = await db.query(`
       SELECT m.id, m.name, m.price, m.synonyms, m.is_available,
              COALESCE(m.stock_quantity, i.stock_quantity, 0) AS stock_quantity,
@@ -3609,7 +3643,8 @@ async function handleTextInput(psid, session, rawText) {
   }
 
   // 5a. Bilingual / Taglish Conversational Assistant (Google Gemini AI + Structured JSON Action Routing)
-  if ((process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured() && isConversationalInquiry(rawText, session)) {
+  const isMultiItem = isMultiItemOrderText(rawText);
+  if ((process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured() && (isConversationalInquiry(rawText, session) || isMultiItem)) {
     const aiTurn = await executeAiAssistantTurn(psid, session, rawText);
     if (aiTurn) {
       return aiTurn;
@@ -4303,6 +4338,11 @@ function isConversationalInquiry(rawText, session = null) {
   const trimmed = String(rawText || '').trim();
   if (!trimmed) return false;
 
+  // Multi-item orders should always route through Gemini conversational AI
+  if (isMultiItemOrderText(trimmed)) {
+    return true;
+  }
+
   // Let deterministic cart/order handlers process explicit item additions & active-cart removals
   const hasExplicitOrderVerb = /\b(?:can\s+i\s+(?:get|order|have)|may\s+i\s+(?:get|order|have)|i\s*(?:want|would\s+like|'d\s+like)\s+(?:to\s+order|a\b|an\b|\d+)|pa-?order|pabili|gusto\s+ko\s+(?:ng|umorder)|add\s+\d+|order\s+\d+)\b/i.test(trimmed);
   if (hasExplicitOrderVerb) return false;
@@ -4320,6 +4360,37 @@ function isConversationalInquiry(rawText, session = null) {
 }
 
 async function handleOrderItemText(psid, session, rawText, nlu) {
+  // Multi-item ordering must NEVER be treated as a single concatenated menu item
+  if (isMultiItemOrderText(rawText)) {
+    if ((process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured()) {
+      const aiTurn = await executeAiAssistantTurn(psid, session, rawText);
+      if (aiTurn) return aiTurn;
+    }
+    // Fallback: batch process items rather than running single-item matchItems on the full concatenated string
+    const [allMenu] = await db.query(`
+      SELECT m.id, m.name, m.price, m.synonyms, m.is_available,
+             COALESCE(m.stock_quantity, i.stock_quantity, 0) AS stock_quantity,
+             COALESCE(c.name, m.category, 'Cafe') AS category_name, m.category
+      FROM menu_items m
+      LEFT JOIN categories c ON c.id = m.category_id
+      LEFT JOIN inventory i ON i.menu_item_id = m.id
+      WHERE COALESCE(m.is_deleted, 0) = 0
+    `);
+    if (!session.cart) session.cart = [];
+    const addedItems = executeBatchAdd(session.cart, rawText, allMenu);
+    if (addedItems && addedItems.length > 0) {
+      const cartTotal = session.cart.reduce((sum, item) => sum + ((item.price || 0) * (item.quantity || 1)), 0);
+      session.order_subtotal = cartTotal;
+      session.order_total = cartTotal;
+      session.state = 'AWAITING_CHECKOUT_CONFIRM';
+      session.current_step = 'AWAITING_CHECKOUT_CONFIRM';
+      await saveSession(session);
+      const resp = formatUpdatedCartResponse(session.cart);
+      await sendQuickReplies(psid, resp.text, resp.quickReplies);
+      return { intent: 'BATCH_CART_ADD', confidence: 1.0, addedItems, cartTotal };
+    }
+  }
+
   // Referential / "ikaw na bahala" combo ordering goes straight to Gemini AI context resolver
   if (isReferentialOrComboOrder(rawText) && (process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured()) {
     const aiCombo = await executeAiAssistantTurn(psid, session, rawText);
@@ -5405,6 +5476,13 @@ async function handleTrackOrder(psid, session) {
   );
 }
 
+function formatItemListText(items) {
+  if (!Array.isArray(items) || items.length === 0) return '';
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} at ${items[1]}`;
+  return `${items.slice(0, -1).join(', ')}, at ${items[items.length - 1]}`;
+}
+
 /**
  * Execute a grounded Gemini Conversational AI turn using aiService.generateAssistantResponse()
  * and route the strict JSON output (NONE | ADD_ITEM | VIEW_MENU | SEND_PICTURE | CANCEL_ORDER | CHECK_STATUS | PROCEED_CHECKOUT).
@@ -5551,6 +5629,7 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
 
           const addedSummary = [];
           const outOfStockNotices = [];
+          const ambiguousItems = [];
           let promptedSingleUpsell = false;
 
           for (const reqEntry of requestedList) {
@@ -5559,12 +5638,65 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
             const qty = Math.max(1, parseInt(reqEntry.quantity, 10) || 1);
             const lowerReq = reqName.toLowerCase();
 
-            const dbItem =
-              rows.find(r => String(r.name || '').toLowerCase() === lowerReq) ||
-              rows.find(r => String(r.name || '').toLowerCase().includes(lowerReq) || lowerReq.includes(String(r.name || '').toLowerCase())) ||
-              findBestFuzzyMenuMatch(reqName, rows);
+            // 1. Exact match (case-insensitive)
+            const exactMatch = rows.find(r => String(r.name || '').toLowerCase() === lowerReq);
+
+            // 2. Fuzzy match with candidate scoring
+            const matchRes = matchItems(reqName, rows);
+            const topMatch = (matchRes && matchRes.matches && matchRes.matches.length > 0)
+              ? (matchRes.matches[0].item || matchRes.matches[0])
+              : null;
+            const topScore = (matchRes && matchRes.matches && matchRes.matches.length > 0)
+              ? matchRes.matches[0].score
+              : 0;
+
+            // 3. Substring match
+            const subMatch = rows.find(r => {
+              const rName = String(r.name || '').toLowerCase();
+              return rName === lowerReq || rName.includes(lowerReq) || lowerReq.includes(rName);
+            });
+
+            let dbItem = null;
+            let isAmbiguous = false;
+
+            if (exactMatch) {
+              dbItem = exactMatch;
+            } else if (matchRes && (matchRes.status === 'ambiguous' || matchRes.status === 'confirm')) {
+              isAmbiguous = true;
+              const rawLower = String(rawText || '').toLowerCase();
+              const reqLower = reqName.toLowerCase();
+              const sizeMatch = (rawLower.includes('large') || reqLower.includes('large'))
+                ? matchRes.matches.find(m => String(m.name || '').toLowerCase().includes('large'))
+                : (rawLower.includes('regular') || reqLower.includes('regular'))
+                  ? matchRes.matches.find(m => String(m.name || '').toLowerCase().includes('regular'))
+                  : null;
+              dbItem = (sizeMatch?.item || sizeMatch) || topMatch;
+            } else if (matchRes && matchRes.status === 'accept' && topScore >= 0.78) {
+              dbItem = topMatch;
+            } else if (subMatch && (subMatch.name.toLowerCase().startsWith(lowerReq) || lowerReq.length >= 4)) {
+              dbItem = subMatch;
+            } else if (topMatch && topScore >= 0.50) {
+              isAmbiguous = true;
+              dbItem = topMatch;
+            } else {
+              const fuzzy = findBestFuzzyMenuMatch(reqName, rows);
+              if (fuzzy) {
+                isAmbiguous = true;
+                dbItem = fuzzy;
+              }
+            }
 
             if (!dbItem) continue;
+
+            if (isAmbiguous) {
+              ambiguousItems.push({
+                originalName: reqName,
+                candidate: dbItem,
+                quantity: qty,
+                addon: reqEntry.addon || null
+              });
+              continue;
+            }
 
             const stock = Number(dbItem.stock_quantity ?? 0);
             const isAvail = dbItem.is_available === 1 || dbItem.is_available === true;
@@ -5586,7 +5718,7 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
             const resolvedAddon = rawAddon ? (detectAddonInText(rawAddon) || rawAddon) : null;
 
             // Single-item Drinks & Milktea with no add-on triggers AWAITING_DRINK_ADDON upsell
-            if (requestedList.length === 1 && isDrink && !resolvedAddon) {
+            if (requestedList.length === 1 && ambiguousItems.length === 0 && isDrink && !resolvedAddon) {
               await sendTextMessage(psid, reply_message);
               await promptDrinkAddons(psid, session, dbItem, qty);
               promptedSingleUpsell = true;
@@ -5611,6 +5743,62 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
               intent: 'AI_ADD_ITEM_UPSELL',
               confidence: 0.98,
               replyLog: reply_message,
+              aiAction: 'ADD_ITEM'
+            };
+          }
+
+          // Immediately persist high-confidence items to TiDB Cloud
+          if (addedSummary.length > 0) {
+            await saveSession(session);
+            if (psid) {
+              await db.query(`DELETE FROM cart_items WHERE sender_psid = ?`, [String(psid)]).catch(() => {});
+              for (const cItem of session.cart) {
+                await db.query(
+                  `INSERT INTO cart_items (sender_psid, menu_id, quantity, notes, created_at) VALUES (?, ?, ?, ?, NOW())`,
+                  [String(psid), cItem.id || cItem.menuItemId, cItem.quantity, cItem.addons?.[0] || null]
+                ).catch(() => {});
+              }
+            }
+          }
+
+          // Queue ambiguous items separately without discarding added items
+          if (ambiguousItems.length > 0) {
+            const amb = ambiguousItems[0];
+            session.pending_suggestion = {
+              name: amb.candidate.name,
+              quantity: amb.quantity,
+              price: amb.candidate.price,
+              id: amb.candidate.id,
+              menuItemId: amb.candidate.id,
+              addon: amb.addon || null,
+              originalName: amb.originalName,
+              remainingAmbiguous: ambiguousItems.slice(1)
+            };
+            session.pendingItem = {
+              id: amb.candidate.id,
+              name: amb.candidate.name,
+              price: amb.candidate.price,
+              quantity: amb.quantity
+            };
+            session.state = 'AWAITING_SUGGESTION_CONFIRMATION';
+            session.current_step = 'AWAITING_SUGGESTION_CONFIRMATION';
+            await saveSession(session);
+
+            let confirmMsg;
+            if (addedSummary.length > 0) {
+              const formattedAdded = formatItemListText(addedSummary);
+              confirmMsg = `Naidagdag na po sa cart ang ${formattedAdded}. Para sa huling item, ang ibig niyo po bang sabihin ay ${amb.candidate.name}?`;
+            } else {
+              confirmMsg = `Para sa "${amb.originalName}", ang ibig niyo po bang sabihin ay ${amb.candidate.name}?`;
+            }
+
+            await sendTextMessage(psid, confirmMsg);
+            return {
+              intent: 'AI_MULTI_ITEM_CONFIRM_PARTIAL',
+              confidence: 0.95,
+              replyLog: confirmMsg,
+              addedSummary,
+              pendingSuggestion: amb.candidate.name,
               aiAction: 'ADD_ITEM'
             };
           }
@@ -5875,5 +6063,8 @@ module.exports = {
   handleItemPhotoRequest,
   dispatchPersonalGcashCheckout,
   finalizeOrderFromProofSubmission,
+  handleOrderItemText,
+  isMultiItemOrderText,
+  formatItemListText,
   executeAiAssistantTurn
 };

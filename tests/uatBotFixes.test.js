@@ -415,6 +415,102 @@ test('QA UAT Critical Bug Fixes Regression Suite (8 Fixes)', async (t) => {
     assert.ok(parsed.reply_message.includes('Paumanhin po'));
   });
 
+  await t.test('15. Multi-Item Order: Batch processes exact/high-confidence items into cart first and queues ambiguous item separately without dropping cart', async () => {
+    const psid = `PSID_UAT_MULTI_AMBIG_${Date.now()}`;
+    sentMessages.length = 0;
+
+    const session = await nlpEngine.getSession(psid);
+    session.dining_mode = 'Pick-up';
+    session.orderType = 'pickup';
+    session.state = 'ORDERING';
+    session.cart = [];
+
+    const rawMessage = '1 hungarian pizza, 1 bbq ribs, 2 matcha, 1 nachos with toppings (large)';
+
+    // Verify pre-LLM interceptor check: isMultiItemOrderText recognizes the multi-item structure
+    const { isMultiItemOrderText } = require('../src/services/batchCartService');
+    assert.strictEqual(isMultiItemOrderText(rawMessage), true, 'Must identify multi-item order text');
+
+    // Simulate Gemini extracting the 4 items where the first 3 are exact/high-confidence
+    // and the 4th item "nachos with toppings" is ambiguous (matches both Regular and Large)
+    const mockAiRes = {
+      reply_message: 'Sige po, inaayos na ang inyong order!',
+      detected_action: 'ADD_ITEM',
+      action_payload: {
+        items: [
+          { item_name: 'Hungarian Pizza', quantity: 1, addon: null },
+          { item_name: 'BBQ Ribs', quantity: 1, addon: null },
+          { item_name: 'Matcha Milktea', quantity: 2, addon: null },
+          { item_name: 'nachos with toppings', quantity: 1, addon: null }
+        ],
+        dining_mode: 'Pick-up'
+      }
+    };
+
+    const res = await nlpEngine.executeAiAssistantTurn(psid, session, rawMessage, {
+      aiResponse: mockAiRes
+    });
+
+    assert.strictEqual(res.intent, 'AI_MULTI_ITEM_CONFIRM_PARTIAL');
+
+    // 1. First 3 exact/high-confidence items MUST already be inserted into cart (never dropped!)
+    assert.strictEqual(session.cart.length, 3, 'First 3 items must be inserted into cart immediately');
+    const pizza = session.cart.find(c => c.name.toLowerCase().includes('hungarian pizza'));
+    const ribs = session.cart.find(c => c.name.toLowerCase().includes('bbq ribs'));
+    const matcha = session.cart.find(c => c.name.toLowerCase().includes('matcha'));
+    assert.ok(pizza && pizza.quantity === 1, 'Hungarian Pizza must be in cart with qty 1');
+    assert.ok(ribs && ribs.quantity === 1, 'BBQ Ribs must be in cart with qty 1');
+    assert.ok(matcha && matcha.quantity === 2, 'Matcha Milktea must be in cart with qty 2');
+
+    // 2. Ambiguous item must be queued separately for confirmation
+    assert.strictEqual(session.state, 'AWAITING_SUGGESTION_CONFIRMATION');
+    assert.ok(session.pending_suggestion, 'Pending suggestion must be set for ambiguous item');
+    assert.strictEqual(session.pending_suggestion.name, 'Nachos with Toppings (Large)');
+
+    // 3. Sent message confirms the 3 added items and asks about the ambiguous item
+    const lastMsg = sentMessages[sentMessages.length - 1].messagePayload.text;
+    assert.ok(lastMsg.includes('Naidagdag na po sa cart ang'), 'Must confirm added items');
+    assert.ok(lastMsg.includes('1x Hungarian Pizza'), 'Must list Hungarian Pizza in added items');
+    assert.ok(lastMsg.includes('1x BBQ Ribs'), 'Must list BBQ Ribs in added items');
+    assert.ok(lastMsg.includes('2x Matcha Milktea'), 'Must list Matcha Milktea in added items');
+    assert.ok(lastMsg.includes('Para sa huling item, ang ibig niyo po bang sabihin ay Nachos with Toppings (Large)?'), 'Must ask confirmation for ambiguous Nachos');
+
+    // 4. Customer responds "yes" -> confirms suggestion and adds 4th item to cart alongside first 3
+    sentMessages.length = 0;
+    const confirmRes = await nlpEngine.handleMessageEvent(psid, 'yes');
+    assert.strictEqual(confirmRes.intent, 'SUGGESTION_CONFIRMED');
+    assert.strictEqual(session.cart.length, 4, 'Cart must now contain all 4 items (3 initial + 1 confirmed)');
+    const nachos = session.cart.find(c => c.name.toLowerCase().includes('nachos'));
+    assert.ok(nachos && nachos.quantity === 1, 'Nachos with Toppings (Large) must now be in cart');
+    assert.strictEqual(session.state, 'ordering');
+  });
+
+  await t.test('16. Multi-Item Pre-LLM Guard: handleOrderItemText never runs single-item matchItems on multi-item text', async () => {
+    const psid = `PSID_UAT_MULTI_GUARD_${Date.now()}`;
+    sentMessages.length = 0;
+
+    const session = await nlpEngine.getSession(psid);
+    session.dining_mode = 'Pick-up';
+    session.orderType = 'pickup';
+    session.state = 'ORDERING';
+    session.cart = [];
+
+    const rawMessage = '1 hungarian pizza, 1 bbq ribs, 2 matcha, 1 nachos with toppings (large)';
+
+    // Call handleOrderItemText directly
+    const res = await nlpEngine.handleOrderItemText(psid, session, rawMessage, {});
+
+    // Must NOT be single-item 'ORDER_ITEM_CONFIRM' ("Did you mean: Nachos with Toppings (Large)?")
+    assert.notStrictEqual(res.intent, 'ORDER_ITEM_CONFIRM', 'Must NEVER trigger legacy single-item fuzzy matcher on multi-item string');
+
+    // Cart must have the multi-items inserted, NOT just 1 item!
+    assert.ok(session.cart.length >= 3, `Cart must have at least 3 items processed, got ${session.cart.length}`);
+    const pizza = session.cart.find(c => c.name.toLowerCase().includes('hungarian pizza'));
+    const ribs = session.cart.find(c => c.name.toLowerCase().includes('bbq ribs'));
+    assert.ok(pizza, 'Hungarian Pizza must not be dropped');
+    assert.ok(ribs, 'BBQ Ribs must not be dropped');
+  });
+
   t.after(async () => {
     await systemSettingsService.updateSystemSettings({ is_manual_override: 0 }).catch(() => {});
     try { if (fs.existsSync(testDbPath)) fs.unlinkSync(testDbPath); } catch (_) {}

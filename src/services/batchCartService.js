@@ -28,11 +28,48 @@ function isBatchRemoveIntent(text) {
   return BATCH_REMOVE_REGEX.test(text.toLowerCase());
 }
 
+/**
+ * Detect multi-item ordering queries (comma separated items, conjunctions like "and", "tsaka",
+ * or multiple quantity markers)
+ */
+function isMultiItemOrderText(text) {
+  if (!text || typeof text !== 'string') return false;
+  const t = text.trim();
+  if (!t) return false;
+
+  const foodKeywords = /\b(?:pizza|burger|fries|ribs|matcha|tea|coffee|latte|milktea|nachos|chicken|wings|pasta|spaghetti|carbonara|rice|silog|steak|quesadilla|nuggets|drinks?|meals?|ulam|kape|order|pa-?order|pabili|add|x|\d+|isa|isang|dalawa|dalawang|tatlo|tatlong|apat|lima|one|two|three|four|five)\b/i;
+
+  const commaSegments = t.split(',').map(s => s.trim()).filter(Boolean);
+  if (commaSegments.length >= 2) {
+    const foodSegmentCount = commaSegments.filter(seg => foodKeywords.test(seg)).length;
+    if (foodSegmentCount >= 2) {
+      return true;
+    }
+  }
+
+  // Conjunctions connecting multiple items (e.g., "1 burger and 1 fries", "pizza tsaka milktea")
+  if (/\b(?:and|tsaka|saka|tapos|pati|\+)\b/i.test(t)) {
+    const conjParts = t.split(/\b(?:and|tsaka|saka|tapos|pati|\+)\b/i).map(s => s.trim()).filter(Boolean);
+    const foodCount = conjParts.filter(p => foodKeywords.test(p)).length;
+    if (foodCount >= 2) {
+      return true;
+    }
+  }
+
+  // Multiple quantity markers followed by item words, e.g. "1 burger 2 fries"
+  const qtyMatches = t.match(/\b(?:\d+|isang?|dalawang?|tatlong?|apat(?: na)?|limang?|anim(?: na)?|pitong?|walong?|siyam(?: na)?|sampung?|one|two|three|four|five|six|seven|eight|nine|ten)\s*(?:x|pcs|pieces|orders?|cups?|servings?)?\s+[a-zA-Z]/gi);
+  if (qtyMatches && qtyMatches.length >= 2) {
+    return true;
+  }
+
+  return false;
+}
+
 function isBatchAddIntent(text) {
   if (!text || typeof text !== 'string') return false;
   // If remove keyword is present, it's NOT an add intent
   if (isBatchRemoveIntent(text)) return false;
-  return BATCH_ADD_REGEX.test(text.toLowerCase());
+  return BATCH_ADD_REGEX.test(text.toLowerCase()) || isMultiItemOrderText(text);
 }
 
 /**
@@ -145,6 +182,7 @@ function formatUpdatedCartResponse(cart) {
 module.exports = {
   isBatchAddIntent,
   isBatchRemoveIntent,
+  isMultiItemOrderText,
   executeBatchAdd,
   executeBatchRemove: executeMultiItemRemoval,
   formatUpdatedCartResponse
