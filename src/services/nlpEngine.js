@@ -3599,6 +3599,10 @@ async function handleTextInput(psid, session, rawText) {
     /\b(?:order|delivery)\b.*\b(?:status|balita|nasaan|asan|update)\b/i.test(rawText) ||
     /\b(?:gaano|kailan|kelan|oras|katagal)\b.*\b(?:bago|dumating|makuha|ma kuha|deliver|order)\b/i.test(rawText)
   ) {
+    if ((process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured()) {
+      const aiTurn = await executeAiAssistantTurn(psid, session, rawText);
+      if (aiTurn) return aiTurn;
+    }
     await handleTrackOrder(psid, session);
     return { intent: 'TRACK_ORDER', confidence: 1.0 };
   }
@@ -3735,6 +3739,10 @@ async function handleTextInput(psid, session, rawText) {
   }
 
   if (intent === 'TRACK_ORDER') {
+    if ((process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured()) {
+      const aiTurn = await executeAiAssistantTurn(psid, session, rawText);
+      if (aiTurn) return aiTurn;
+    }
     await handleTrackOrder(psid, session);
     return { intent: 'TRACK_ORDER', confidence: conf };
   }
@@ -5621,6 +5629,16 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
           confidence: 0.98,
           replyLog: reply_message,
           aiAction: 'CHECK_STATUS'
+        };
+      }
+
+      case 'DELAY_COMPLAINT': {
+        await sendTextMessage(psid, reply_message);
+        return {
+          intent: 'AI_DELAY_COMPLAINT',
+          confidence: 0.98,
+          replyLog: reply_message,
+          aiAction: 'DELAY_COMPLAINT'
         };
       }
 

@@ -17,10 +17,19 @@ const config = require('../config/config');
 const storeSettingsService = require('./storeSettingsService');
 const systemSettingsService = require('./systemSettingsService');
 
+let CAFE_PERSONA_CONFIG = null;
+try {
+  CAFE_PERSONA_CONFIG = require('../../config/botPersona').CAFE_PERSONA_CONFIG;
+} catch (_) {
+  try {
+    CAFE_PERSONA_CONFIG = require('../config/botPersona').CAFE_PERSONA_CONFIG;
+  } catch (__) {}
+}
+
 const PRIMARY_AI_MODEL = 'gemini-3.8-flash';
-const FALLBACK_AI_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
+const FALLBACK_AI_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-flash-lite-latest'];
 const MAX_CONVERSATION_MESSAGES = 8;
-const MODEL_COOLDOWN_MS = 2 * 60 * 1000;
+const MODEL_COOLDOWN_MS = 30 * 60 * 1000;
 
 const DETECTED_ACTIONS = [
   'NONE',
@@ -312,6 +321,12 @@ async function loadOperationalContext(psid, session = null) {
     diningMode: session?.dining_mode || (session?.orderType === 'delivery' ? 'Delivery' : (session?.orderType === 'pickup' ? 'Pick-up' : null)),
     cart: cartItems,
     cartSubtotal,
+    deliveryCheck: {
+      isDelivery: session?.dining_mode === 'Delivery' || session?.orderType === 'delivery',
+      address: session?.address || null,
+      distanceKm: session?.delivery_distance_km ?? session?.distance_km ?? null,
+      deliveryFee: session?.delivery_fee ?? session?.deliveryFee ?? null
+    },
     latestOrder
   };
 }
@@ -426,7 +441,9 @@ ACTION DEFINITIONS:
 - CHECK_STATUS: Customer inquires about order progress or tracking.
 - DELAY_COMPLAINT: Customer expresses frustration or asks why order is taking long.
 - SUBMIT_FEEDBACK: Customer gives a rating, review, or feedback on food/service. Extract feedback_text.
-- PROCEED_CHECKOUT: Customer indicates readiness to checkout.`;
+- PROCEED_CHECKOUT: Customer indicates readiness to checkout.${(CAFE_PERSONA_CONFIG && Array.isArray(CAFE_PERSONA_CONFIG.fewShotExamples) && CAFE_PERSONA_CONFIG.fewShotExamples.length > 0)
+  ? '\n\n7. FEW-SHOT CONVERSATIONAL EXAMPLES:\n' + CAFE_PERSONA_CONFIG.fewShotExamples.map((ex, idx) => `[Example ${idx + 1}: ${ex.scenario}]\nCustomer: "${ex.customer}"\nTarget Response: "${ex.assistant}"`).join('\n\n')
+  : ''}`;
 }
 
 /**
@@ -607,6 +624,9 @@ async function generateAssistantResponse(psid, messageText, session = null, opti
           model,
           input,
           system_instruction: systemInstruction,
+          generation_config: {
+            temperature: 0.7
+          },
           response_format: {
             type: 'text',
             mime_type: 'application/json',

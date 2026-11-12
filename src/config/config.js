@@ -37,7 +37,7 @@ module.exports = {
   },
 
   geminiApiKey: process.env.GEMINI_API_KEY || '',
-  geminiModel: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite',
   geminiTimeoutMs: parseInt(process.env.GEMINI_TIMEOUT_MS, 10) || 15000,
 
   webhookSecret: process.env.WEBHOOK_SECRET || '',
