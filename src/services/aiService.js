@@ -25,13 +25,18 @@ const MODEL_COOLDOWN_MS = 2 * 60 * 1000;
 const DETECTED_ACTIONS = [
   'NONE',
   'ADD_ITEM',
-  'VIEW_MENU',
+  'SET_ADDON',
   'VIEW_CART',
   'CLEAR_CART',
+  'VIEW_MENU',
   'RECOMMEND_ITEM',
   'SEND_PICTURE',
+  'SET_DETAILS',
+  'CONFIRM_ORDER',
   'CANCEL_ORDER',
   'CHECK_STATUS',
+  'DELAY_COMPLAINT',
+  'SUBMIT_FEEDBACK',
   'PROCEED_CHECKOUT'
 ];
 
@@ -41,13 +46,13 @@ const ASSISTANT_RESPONSE_SCHEMA = {
   properties: {
     reply_message: {
       type: 'string',
-      description: 'The natural, strictly polite response in courteous Taglish (with po/opo) or English to send to the customer on Messenger.'
+      description: 'The natural, strictly polite plain text response in courteous Taglish (with po/opo) or English to send to the customer on Messenger (zero quick_replies, zero street slang).'
     },
     detected_action: {
       type: 'string',
       enum: DETECTED_ACTIONS
     },
-    action_payload: {
+    extracted_data: {
       type: 'object',
       properties: {
         items: {
@@ -63,16 +68,49 @@ const ASSISTANT_RESPONSE_SCHEMA = {
             required: ['item_name', 'quantity', 'addon']
           }
         },
+        dining_mode: { type: ['string', 'null'], enum: ['Delivery', 'Pick-up', 'Dine-in', null] },
+        customer_name: { type: ['string', 'null'] },
+        phone_number: { type: ['string', 'null'] },
+        address: { type: ['string', 'null'] },
+        landmark: { type: ['string', 'null'] },
+        arriving_time: { type: ['string', 'null'] },
+        payment_mode: { type: ['string', 'null'], enum: ['Cash', 'GCash', null] },
+        note: { type: ['string', 'null'] },
+        feedback_text: { type: ['string', 'null'] }
+      },
+      required: ['items', 'dining_mode', 'customer_name', 'phone_number', 'address', 'landmark', 'arriving_time', 'payment_mode', 'note', 'feedback_text']
+    },
+    action_payload: {
+      type: 'object',
+      properties: {
+        items: {
+          type: ['array', 'null'],
+          items: {
+            type: 'object',
+            properties: {
+              item_name: { type: 'string' },
+              quantity: { type: 'number' },
+              addon: { type: ['string', 'null'] }
+            },
+            required: ['item_name', 'quantity', 'addon']
+          }
+        },
         item_name: { type: ['string', 'null'] },
         quantity: { type: ['number', 'null'] },
         addon: { type: ['string', 'null'] },
-        dining_mode: { type: ['string', 'null'], enum: ['Delivery', 'Pick-up', null] },
-        payment_mode: { type: ['string', 'null'], enum: ['Cash', 'GCash', null] }
-      },
-      required: ['items', 'item_name', 'quantity', 'addon', 'dining_mode', 'payment_mode']
+        dining_mode: { type: ['string', 'null'], enum: ['Delivery', 'Pick-up', 'Dine-in', null] },
+        customer_name: { type: ['string', 'null'] },
+        phone_number: { type: ['string', 'null'] },
+        address: { type: ['string', 'null'] },
+        landmark: { type: ['string', 'null'] },
+        arriving_time: { type: ['string', 'null'] },
+        payment_mode: { type: ['string', 'null'], enum: ['Cash', 'GCash', null] },
+        note: { type: ['string', 'null'] },
+        feedback_text: { type: ['string', 'null'] }
+      }
     }
   },
-  required: ['reply_message', 'detected_action', 'action_payload']
+  required: ['reply_message', 'detected_action', 'extracted_data']
 };
 
 // Rolling per-PSID conversation memory buffer (last 6-8 messages)
@@ -205,6 +243,7 @@ async function loadOperationalContext(psid, session = null) {
         m.name,
         m.price,
         m.description,
+        m.image_url,
         m.is_available,
         COALESCE(i.stock_quantity, m.stock_quantity, 0) AS stock,
         COALESCE(c.name, 'Cafe') AS category
@@ -312,61 +351,82 @@ function buildAssistantSystemInstruction(context = {}) {
 
   return `You are the official conversational Facebook Messenger assistant for Diner's Cafe.
 
-1. CONVERSATIONAL PERSONA & TONE:
+1. CONVERSATIONAL PERSONA & TONE (100% PURE CONVERSATIONAL TEXT):
 - Be warm, polite, empathetic, and respectful at all times.
 - Default to courteous Taglish using "po" and "opo". If the customer writes purely in English, respond in polite, friendly English.
-- Seamlessly understand typos (e.g., "chesecake" -> "Biscoff Cheesecake", "spansh late" -> "Caramel Macchiato"), text shortcuts ("pde ba mgpa-dlvr"), Taglish code-switching, and local Filipino slang without ever failing or emitting robotic error messages.
-- OPEN-DOMAIN CONVERSATION & SMOOTH SEGUES: If the customer talks about their day, cracks a joke, asks for life advice, or goes off-topic, respond empathetically and engagingly FIRST, then smoothly pivot/segue back to food or drinks available on the menu.
-- STRICT PROFESSIONAL TONE (NO STREET SLANG): Always use polite, respectful, professional Taglish ("Magandang araw po", "Opo", "Sige po", "Maraming salamat po"). NEVER use street slang or internet jargon such as "Awtos", "Awtos po!", "lods", "matsala", "awit", "charot", "besh", or "pare".
-- CONTEXTUAL AFFIRMATIVES ("oo", "yes", "sige", "oo ngani", "wala"): Always check the immediately preceding Assistant (model) turn! For example, if you just asked "May gusto pa ba kayong idagdag?" and the customer replies "oo" / "oo ngani" / "yes", reply politely asking "Ano po ang nais ninyong idagdag?" with detected_action = "NONE"; if they reply "wala" / "hindi na", transition to checkout (PROCEED_CHECKOUT).
-- ONE-SHOT MULTI-INTENT EXTRACTION: When the customer sends a combined order (e.g., "pa order bacon burger isa take out gcash payment"), extract ALL entities at once: set detected_action = "ADD_ITEM", put the items in action_payload.items, set dining_mode ("Delivery" or "Pick-up"), and set payment_mode ("Cash" or "GCash").
-- CUSTOMER NAME VALIDATION: Never accept conversational complaints, questions, or sarcasm (e.g., "binigay ko na sayo kanina ha") as a customer name; politely re-prompt for their real full name.
-- "IKAW NA BAHALA" / DEALER'S CHOICE COMBOS: If the customer asks you to pick for them (e.g., "ikaw na bahala", "kahit ano", "ikaw na pumili basta may meal at drinks"), DO NOT just ask them what they want! Pick AT LEAST 1 [AVAILABLE] food/meal item AND AT LEAST 1 [AVAILABLE] drink item from the live menu catalog below, set detected_action = "ADD_ITEM", put ALL selected items inside action_payload.items, and enthusiastically tell the customer which food and drink you added!
-- STRICT GROUNDING & ADD-ON CATEGORY GUARD: NEVER invent food items, prices, or modifiers not in LIVE MENU CATALOG. NEVER recommend or sell [OUT OF STOCK - DO NOT SELL] items. Drink sinkers/add-ons ("Pearls", "Nata de Coco", "Cream Cheese", "Coffee Jelly", "Crushed Oreo") are ONLY for "Drinks & Milktea" items—NEVER attach them (set addon: null) to meals, silog, burgers, pizza, pasta, or starters.
-- PAYMENT MODES: Accepted payment modes are Cash or GCash only.
+- STRICT 100% PURE TEXT UX: NEVER include quick replies, button templates, or structured menus in replies. Every message must be natural, readable plain conversational text.
+- STRICT PROFESSIONAL PERSONA (NO STREET SLANG): Always speak in polite, respectful, professional Taglish ("Magandang araw po", "Opo", "Sige po", "Maraming salamat po"). NEVER use street slang or internet jargon such as "Awtos", "Awtos po!", "lods", "lodi", "matsala", "awit", "charot", "besh", "pare", or "goods".
+- Seamlessly understand typos (e.g., "chesecake" -> "Biscoff Cheesecake", "spansh late" -> "Spanish Latte"), text shortcuts ("pde ba mgpa-dlvr"), Taglish code-switching, and local Filipino terms.
+- OPEN-DOMAIN BANTER & SMOOTH PIVOT: If the customer talks about their day, cracks a joke, or asks for life advice, respond empathetically and engagingly FIRST, then smoothly segue back to cafe favorites.
+- NON-EXISTENT ITEM GUARD: If the customer asks for an item NOT in the LIVE MENU CATALOG below (e.g. sushi, spaghetti, ramen, tacos), NEVER hallucinate or add it! Explicitly and politely inform them that Diner's Cafe does not serve it, and suggest 1-2 available menu items. Set detected_action = "NONE".
+- OUT-OF-STOCK GUARD: NEVER sell, recommend, or add [OUT OF STOCK - DO NOT SELL] items. Politely inform the customer that it is sold out and recommend available alternatives.
+- DRINK-ONLY ADD-ON UPSELL: Drink sinkers/add-ons (+₱20: Pearls, Nata de Coco, Cream Cheese, Coffee Jelly, Egg Pudding) can ONLY be attached to "Drinks & Milktea". NEVER attach them to food/meals/silog/pizza/pasta.
+- "IKAW NA BAHALA" / DEALER'S CHOICE COMBOS: If the customer asks you to pick for them, select AT LEAST 1 [AVAILABLE] food item AND AT LEAST 1 [AVAILABLE] drink item from the live catalog, set detected_action = "ADD_ITEM", put both in extracted_data.items, and tell them what you picked.
+- STATE-LOCK ESCAPE HATCH: If the customer changes their mind, asks questions about the menu, or wants to add items while entering checkout info, gracefully handle their request without getting stuck in checkout.
 
-2. LIVE STORE CONTEXT (TiDB Grounded):
+2. ORDER PROCESSING & LOGISTICS RULES:
+- Dining Modes: "Delivery", "Pick-up", "Dine-in".
+- Required details for Pick-up / Dine-in: Full Name, Phone Number, Arriving Time, Payment Mode (Cash or GCash), Note (optional).
+- Required details for Delivery: Full Name, Phone Number, Complete Delivery Address, Landmark, Payment Mode (Cash or GCash), Note (optional).
+- In-house delivery radius is maximum ${Number(store.maxDeliveryRadiusKm || 3.0).toFixed(1)} km. If an address is beyond 3 km, inform them gently that it is outside our direct radius and can be arranged via third-party courier pending admin fee quote.
+- Strict Order Tracking Separation:
+  - If status is PENDING or PENDING_APPROVAL: Cashier is currently verifying order and payment details (approx 2-5 minutes). It is NOT yet cooking in the kitchen!
+  - If status is IN_PREPARATION: Order is approved and actively cooking in the kitchen.
+  - If status is DISPATCHED: Order is handed to the rider or ready at the counter.
+- Delay Complaint: If customer complains of delay, empathize sincerely with their wait time and provide an honest status update based on their order state without repeating a robotic summary.
+- 5-Minute Cancellation Policy: (1) Unpaid or PENDING orders can be instantly cancelled. (2) Orders already IN_PREPARATION within 5 minutes of placement are forwarded to admin for approval. (3) Orders past 5 minutes in preparation or DISPATCHED cannot be cancelled.
+
+3. LIVE STORE CONTEXT:
 - Store Name: ${store.name || "Diner's Cafe - Tondo Branch"}
 - Operating Status: ${store.isOpen ? 'OPEN' : 'CLOSED'}
 - Operating Hours: ${store.operatingHours || '09:00 AM - 09:00 PM PHT'}
 - Address: ${store.address || "Diner's Cafe, Tondo, Manila"}
-- Delivery Coverage: Maximum ${Number(store.maxDeliveryRadiusKm || 3.0).toFixed(1)} km in-house delivery radius (over 3 km uses third-party Grab/Lalamove pending admin fee quote).
+- Maximum In-House Delivery Radius: ${Number(store.maxDeliveryRadiusKm || 3.0).toFixed(1)} km
 
-3. CUSTOMER SESSION & ACTIVE ORDER CONTEXT:
+4. CUSTOMER SESSION & ACTIVE ORDER CONTEXT:
 - Current State: ${context.sessionState || 'IDLE'}
 - Selected Dining Mode: ${context.diningMode || 'Not selected yet'}
 - Current Cart: ${cartBlock} (Subtotal: ₱${Number(context.cartSubtotal || 0).toFixed(2)})
 - Latest Active Order: ${orderBlock}
 
-4. LIVE MENU CATALOG:
+5. LIVE MENU CATALOG:
 ${menuCatalogBlock}
 
-5. STRUCTURED JSON OUTPUT CONTRACT:
-Return ONLY valid JSON matching the schema:
+6. STRUCTURED JSON OUTPUT CONTRACT:
+Return ONLY valid JSON matching this exact structure:
 {
-  "reply_message": "Natural polite reply to send to the customer.",
-  "detected_action": "NONE | ADD_ITEM | VIEW_MENU | VIEW_CART | CLEAR_CART | RECOMMEND_ITEM | SEND_PICTURE | CANCEL_ORDER | CHECK_STATUS | PROCEED_CHECKOUT",
-  "action_payload": {
-    "items": [{ "item_name": "string", "quantity": 1, "addon": null }],
-    "item_name": "string or null",
-    "quantity": "number or null",
-    "addon": "string or null",
-    "dining_mode": "Delivery | Pick-up | null",
-    "payment_mode": "Cash | GCash | null"
+  "reply_message": "Polite plain-text message without quick replies or street slang.",
+  "detected_action": "NONE | ADD_ITEM | SET_ADDON | VIEW_CART | CLEAR_CART | VIEW_MENU | RECOMMEND_ITEM | SEND_PICTURE | SET_DETAILS | CONFIRM_ORDER | CANCEL_ORDER | CHECK_STATUS | DELAY_COMPLAINT | SUBMIT_FEEDBACK | PROCEED_CHECKOUT",
+  "extracted_data": {
+    "items": [{ "item_name": "string", "quantity": 1, "addon": "string or null" }],
+    "dining_mode": "Delivery | Pick-up | Dine-in | null",
+    "customer_name": "string or null",
+    "phone_number": "string or null",
+    "address": "string or null",
+    "landmark": "string or null",
+    "arriving_time": "string or null",
+    "payment_mode": "Cash | GCash | null",
+    "note": "string or null",
+    "feedback_text": "string or null"
   }
 }
 
-ACTION ROUTING RULES:
-- NONE: General conversation, off-topic banter, empathy + segue, follow-up questions ("Ano po ang nais ninyong idagdag?"), or store FAQs.
-- ADD_ITEM: Customer wants to add/order one OR multiple menu items, one-shot orders ("pa order bacon burger isa take out gcash payment"), resolves a prior recommendation ("add to cart mo nayan"), or asks for "ikaw na bahala" combo. Put EVERY ordered item inside action_payload.items (each with exact grounded item_name, numeric quantity defaulting to 1, and addon only for Drinks & Milktea or null). Mirror items[0] in item_name/quantity/addon. Also populate dining_mode and payment_mode if stated. Never set ADD_ITEM for an [OUT OF STOCK - DO NOT SELL] item.
-- VIEW_CART: Customer asks to see or check their cart (e.g., "patingin ng cart", "ano laman ng cart ko", "view cart"). Never classify cart queries as SEND_PICTURE.
-- CLEAR_CART: Customer asks to empty, delete, or clear their cart (e.g., "burahin mo yung nasa cart ko", "clear cart", "empty cart").
-- RECOMMEND_ITEM: Customer asks for recommendations or bestsellers (e.g., "anong mare-recommend mo na drinks", "ano masarap"). NEVER trigger VIEW_MENU for recommendations—put 2 to 3 specific [AVAILABLE] items with brief descriptions & prices directly inside reply_message.
-- VIEW_MENU: Customer explicitly asks to see the full menu, food list, or drink list.
-- SEND_PICTURE: Customer asks to see a photo/picture of a specific menu dish or drink (NOT "cart" and NOT "menu"). Put the matched menu item name in action_payload.item_name.
-- CANCEL_ORDER: Customer explicitly asks to cancel their active order (e.g., "cancel my order", "pa-cancel", "ayoko na"). Follow the 5-Minute Order Cancellation Policy: (1) Orders that are PENDING or unpaid can be immediately cancelled. (2) Orders already in the kitchen (IN_PREPARATION) within 5 minutes of placement are forwarded to duty staff/admin for cancellation approval. (3) Orders past 5 minutes in kitchen preparation or already DISPATCHED cannot be cancelled. Always set detected_action: "CANCEL_ORDER".
-- CHECK_STATUS: Customer asks about their order status, delivery progress, or tracking.
-- PROCEED_CHECKOUT: Customer confirms they are ready to check out or pay for their cart.`;
+ACTION DEFINITIONS:
+- NONE: General questions, greetings, banter, non-existent menu inquiries, or clarifications.
+- ADD_ITEM: Customer wants to add item(s) to cart, confirms recommendation, or one-shot order. Populate extracted_data.items with all items requested.
+- SET_ADDON: Customer chooses or asks for a drink add-on/sinker (Pearls, Nata, Coffee Jelly, Cream Cheese, Egg Pudding).
+- VIEW_CART: Customer asks to inspect their cart.
+- CLEAR_CART: Customer explicitly requests to remove, delete, or empty their entire cart.
+- VIEW_MENU: Customer asks to see the menu or list of offerings.
+- RECOMMEND_ITEM: Customer asks for suggestions, specials, or bestsellers.
+- SEND_PICTURE: Customer asks to see a photo of a specific dish/drink.
+- SET_DETAILS: Customer provides checkout details (name, phone, address, landmark, time, dining mode, payment mode, note). Extract all provided fields.
+- CONFIRM_ORDER: Customer finalizes/confirms checkout ("confirm", "proceed", "okay na").
+- CANCEL_ORDER: Customer requests cancellation of active order.
+- CHECK_STATUS: Customer inquires about order progress or tracking.
+- DELAY_COMPLAINT: Customer expresses frustration or asks why order is taking long.
+- SUBMIT_FEEDBACK: Customer gives a rating, review, or feedback on food/service. Extract feedback_text.
+- PROCEED_CHECKOUT: Customer indicates readiness to checkout.`;
 }
 
 /**
@@ -404,13 +464,13 @@ function parseAssistantJson(rawText) {
   const rawAction = String(parsed.detected_action || 'NONE').trim().toUpperCase();
   const detectedAction = DETECTED_ACTIONS.includes(rawAction) ? rawAction : 'NONE';
 
-  const rawPayload = (parsed.action_payload && typeof parsed.action_payload === 'object')
-    ? parsed.action_payload
-    : {};
+  const rawData = (parsed.extracted_data && typeof parsed.extracted_data === 'object')
+    ? parsed.extracted_data
+    : ((parsed.action_payload && typeof parsed.action_payload === 'object') ? parsed.action_payload : {});
 
   let normalizedItems = [];
-  if (Array.isArray(rawPayload.items)) {
-    for (const entry of rawPayload.items) {
+  if (Array.isArray(rawData.items)) {
+    for (const entry of rawData.items) {
       if (!entry || typeof entry !== 'object') continue;
       const eName = entry.item_name ? String(entry.item_name).trim() : '';
       if (!eName) continue;
@@ -425,12 +485,12 @@ function parseAssistantJson(rawText) {
     }
   }
 
-  const singleItemName = rawPayload.item_name ? String(rawPayload.item_name).trim() : null;
-  const parsedQty = rawPayload.quantity !== null && rawPayload.quantity !== undefined
-    ? parseInt(rawPayload.quantity, 10)
+  const singleItemName = rawData.item_name ? String(rawData.item_name).trim() : null;
+  const parsedQty = rawData.quantity !== null && rawData.quantity !== undefined
+    ? parseInt(rawData.quantity, 10)
     : null;
   const singleQuantity = Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : null;
-  const singleAddon = rawPayload.addon ? String(rawPayload.addon).trim() : null;
+  const singleAddon = rawData.addon ? String(rawData.addon).trim() : null;
 
   if (normalizedItems.length === 0 && singleItemName) {
     normalizedItems.push({
@@ -445,18 +505,27 @@ function parseAssistantJson(rawText) {
   const addon = singleAddon || (normalizedItems[0] ? normalizedItems[0].addon : null);
 
   let diningMode = null;
-  if (rawPayload.dining_mode) {
-    const dm = String(rawPayload.dining_mode).trim();
+  if (rawData.dining_mode) {
+    const dm = String(rawData.dining_mode).trim();
     if (/delivery/i.test(dm)) diningMode = 'Delivery';
-    else if (/pick[\s-]*up|take[\s-]*out|dine/i.test(dm)) diningMode = 'Pick-up';
+    else if (/pick[\s-]*up|take[\s-]*out/i.test(dm)) diningMode = 'Pick-up';
+    else if (/dine[\s-]*in/i.test(dm)) diningMode = 'Dine-in';
   }
 
   let paymentMode = null;
-  if (rawPayload.payment_mode) {
-    const pm = String(rawPayload.payment_mode).trim();
+  if (rawData.payment_mode) {
+    const pm = String(rawData.payment_mode).trim();
     if (/gcash|g-?cash|online|xendit|e-?wallet/i.test(pm)) paymentMode = 'GCash';
     else if (/cash|cod|kaliwaan/i.test(pm)) paymentMode = 'Cash';
   }
+
+  const customerName = rawData.customer_name ? String(rawData.customer_name).trim() : null;
+  const phoneNumber = rawData.phone_number ? String(rawData.phone_number).trim() : null;
+  const address = rawData.address ? String(rawData.address).trim() : null;
+  const landmark = rawData.landmark ? String(rawData.landmark).trim() : null;
+  const arrivingTime = rawData.arriving_time ? String(rawData.arriving_time).trim() : null;
+  const note = rawData.note ? String(rawData.note).trim() : null;
+  const feedbackText = rawData.feedback_text ? String(rawData.feedback_text).trim() : null;
 
   const sanitizedReply = replyMessage
     .replace(/\bAwtos\s*po!*/gi, 'Paumanhin po.')
@@ -466,17 +535,27 @@ function parseAssistantJson(rawText) {
     .replace(/\s{2,}/g, ' ')
     .trim();
 
+  const resultPayload = {
+    items: normalizedItems,
+    item_name: itemName,
+    quantity,
+    addon,
+    dining_mode: diningMode,
+    customer_name: customerName,
+    phone_number: phoneNumber,
+    address,
+    landmark,
+    arriving_time: arrivingTime,
+    payment_mode: paymentMode,
+    note,
+    feedback_text: feedbackText
+  };
+
   return {
     reply_message: sanitizedReply || replyMessage,
     detected_action: detectedAction,
-    action_payload: {
-      items: normalizedItems,
-      item_name: itemName,
-      quantity,
-      addon,
-      dining_mode: diningMode,
-      payment_mode: paymentMode
-    }
+    extracted_data: resultPayload,
+    action_payload: resultPayload
   };
 }
 

@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const testDbPath = path.join(__dirname, 'test_session_reset.sqlite');
-try { if (fs.existsSync(testDbPath)) fs.unlinkSync(testDbPath); } catch (_) {}
+try { if (fs.existsSync(testDbPath)) fs.unlinkSync(testDbPath); } catch (_) { }
 
 process.env.DB_FORCE_SQLITE = '1';
 process.env.SQLITE_PATH = testDbPath;
@@ -201,6 +201,6 @@ test('Automated Session Reset Lifecycle Suite', async (t) => {
 
   t.after(() => {
     messengerService.callSendAPI = origCallSendAPI;
-    try { if (fs.existsSync(testDbPath)) fs.unlinkSync(testDbPath); } catch (_) {}
+    try { if (fs.existsSync(testDbPath)) fs.unlinkSync(testDbPath); } catch (_) { }
   });
 });

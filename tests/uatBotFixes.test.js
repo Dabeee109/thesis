@@ -511,6 +511,175 @@ test('QA UAT Critical Bug Fixes Regression Suite (8 Fixes)', async (t) => {
     assert.ok(ribs, 'BBQ Ribs must not be dropped');
   });
 
+  await t.test('17. Step 0 Condition A: 30-Minute Inactivity Timeout resets session to IDLE & purges cart', async () => {
+    const psid = `PSID_UAT_INACTIVE_${Date.now()}`;
+    const session = await nlpEngine.getSession(psid);
+    session.state = 'BUILDING_CART';
+    session.cart = [{ id: 1, name: 'Burger', price: 120, quantity: 1 }];
+    await nlpEngine.saveSession(session);
+
+    // Set last_interaction_at to 35 minutes ago in DB
+    await db.query(
+      `UPDATE customers SET last_interaction_at = datetime('now', '-35 minutes') WHERE psid = ?`,
+      [psid]
+    );
+
+    // Incoming message after 35 minutes
+    await nlpEngine.handleMessageEvent(psid, 'kumusta');
+    const resetSession = await nlpEngine.getSession(psid);
+    assert.strictEqual(resetSession.cart.length, 0, 'Cart must be emptied after inactivity timeout');
+    assert.notStrictEqual(resetSession.state, 'BUILDING_CART', 'Prior building cart state must be cleared');
+  });
+
+  await t.test('18. Step 0 Condition C: SUBMIT_FEEDBACK saves to DB, thanks customer & resets to IDLE', async () => {
+    const psid = `PSID_UAT_FEEDBACK_${Date.now()}`;
+    const session = await nlpEngine.getSession(psid);
+    session.state = 'ORDER_ACTIVE';
+    await nlpEngine.saveSession(session);
+
+    const mockAiRes = {
+      reply_message: 'Maraming salamat po sa inyong 5-star feedback! Nagagalak po kami na nagustuhan ninyo.',
+      detected_action: 'SUBMIT_FEEDBACK',
+      extracted_data: {
+        feedback_text: '5 stars sobrang sarap ng Spanish Latte!',
+        items: []
+      }
+    };
+
+    sentMessages.length = 0;
+    const res = await nlpEngine.executeAiAssistantTurn(psid, session, '5 stars sobrang sarap ng Spanish Latte!', {
+      aiResponse: mockAiRes
+    });
+
+    assert.strictEqual(res.intent, 'AI_SUBMIT_FEEDBACK');
+    assert.strictEqual(res.aiAction, 'SUBMIT_FEEDBACK');
+    const afterSession = await nlpEngine.getSession(psid);
+    assert.strictEqual(afterSession.state, 'IDLE', 'Session must be reset to IDLE after feedback submission');
+  });
+
+  await t.test('19. Non-Existent Item Guard: Requesting item not on menu does not add to cart and suggests available items', async () => {
+    const psid = `PSID_UAT_NONEXISTENT_${Date.now()}`;
+    const session = await nlpEngine.getSession(psid);
+    session.state = 'IDLE';
+    session.cart = [];
+    await nlpEngine.saveSession(session);
+
+    const mockAiRes = {
+      reply_message: 'Wala po kaming Sushi sa Diner\'s Cafe. Subukan niyo po ang aming Hungarian Pizza o Bacon Burger!',
+      detected_action: 'ADD_ITEM',
+      action_payload: {
+        items: [{ item_name: 'Sushi Roll', quantity: 1, addon: null }]
+      }
+    };
+
+    const res = await nlpEngine.executeAiAssistantTurn(psid, session, 'pa order ng sushi roll', {
+      aiResponse: mockAiRes
+    });
+
+    assert.strictEqual(res.intent, 'AI_ITEM_NOT_FOUND');
+    assert.strictEqual(res.aiAction, 'NONE');
+    assert.strictEqual(session.cart.length, 0, 'Cart must remain empty when item is not sold');
+  });
+
+  await t.test('20. Strict Tracking Status: PENDING / PENDING_APPROVAL states cashier verification, not cooking in kitchen', async () => {
+    const psid = `PSID_UAT_TRACK_PENDING_${Date.now()}`;
+    const session = await nlpEngine.getSession(psid);
+
+    const [burgerRows] = await db.query(`SELECT id, name, price FROM menu_items WHERE name = 'Bacon Burger' LIMIT 1`);
+    const created = await orderService.createOrder(psid, {
+      customerName: 'Pending Customer',
+      customerPhone: '09171112233',
+      orderType: 'delivery',
+      paymentMethod: 'cash',
+      deliveryAddress: '123 Test St, Tondo',
+      items: [{ menuItemId: burgerRows[0].id, quantity: 1 }],
+      deliveryFee: 49,
+      totalAmount: Number(burgerRows[0].price) + 49
+    });
+
+    await db.query(`UPDATE orders SET status = 'pending' WHERE order_number = ?`, [created.orderNumber]);
+
+    sentMessages.length = 0;
+    await nlpEngine.handleTrackOrder(psid, session);
+    assert.ok(sentMessages.length > 0);
+    const trackMsg = sentMessages[sentMessages.length - 1].messagePayload.text;
+    assert.ok(trackMsg.includes('cashier'), 'Must state cashier verification');
+    assert.ok(!trackMsg.includes('inihahanda sa kusina'), 'Must NOT state it is in kitchen when pending');
+  });
+
+  await t.test('21. DELAY_COMPLAINT returns empathetic message tailored to active order queue status', async () => {
+    const psid = `PSID_UAT_DELAY_${Date.now()}`;
+    const session = await nlpEngine.getSession(psid);
+
+    const [burgerRows] = await db.query(`SELECT id, name, price FROM menu_items WHERE name = 'Bacon Burger' LIMIT 1`);
+    const created = await orderService.createOrder(psid, {
+      customerName: 'Delay Customer',
+      customerPhone: '09172223344',
+      orderType: 'delivery',
+      paymentMethod: 'cash',
+      deliveryAddress: '456 Test St, Tondo',
+      items: [{ menuItemId: burgerRows[0].id, quantity: 1 }],
+      deliveryFee: 49,
+      totalAmount: Number(burgerRows[0].price) + 49
+    });
+    await db.query(`UPDATE orders SET status = 'preparing' WHERE order_number = ?`, [created.orderNumber]);
+
+    const mockAiRes = {
+      reply_message: 'Naiintindihan po namin ang inyong pagmamadali! Niluluto na po ngayon sa kusina ang inyong order.',
+      detected_action: 'DELAY_COMPLAINT',
+      action_payload: {}
+    };
+
+    sentMessages.length = 0;
+    const res = await nlpEngine.executeAiAssistantTurn(psid, session, 'ang tagal naman ng order ko', {
+      aiResponse: mockAiRes
+    });
+
+    assert.strictEqual(res.intent, 'AI_DELAY_COMPLAINT');
+    assert.strictEqual(res.aiAction, 'DELAY_COMPLAINT');
+    const delayMsg = sentMessages[sentMessages.length - 1].messagePayload.text;
+    assert.ok(delayMsg.includes('kusina'), 'Must provide empathetic update mentioning kitchen preparation');
+  });
+
+  await t.test('22. SET_ADDON and SET_DETAILS update session state correctly', async () => {
+    const psid = `PSID_UAT_SLOTS_${Date.now()}`;
+    const session = await nlpEngine.getSession(psid);
+    session.cart = [{ id: 3, name: 'Matcha Milktea', price: 95, quantity: 1, category: 'Drinks & Milktea' }];
+
+    // 1. SET_ADDON
+    const addonAiRes = {
+      reply_message: 'Naidagdag na po ang Pearls (+₱20.00).',
+      detected_action: 'SET_ADDON',
+      extracted_data: { addon: 'Pearls' }
+    };
+    const addonRes = await nlpEngine.executeAiAssistantTurn(psid, session, 'lagyan mo ng pearls', {
+      aiResponse: addonAiRes
+    });
+    assert.strictEqual(addonRes.intent, 'AI_SET_ADDON');
+    assert.strictEqual(session.cart[0].addons[0], 'Pearls');
+
+    // 2. SET_DETAILS
+    const detailsAiRes = {
+      reply_message: 'Salamat po Maria! Naitala na po ang inyong detalye.',
+      detected_action: 'SET_DETAILS',
+      extracted_data: {
+        customer_name: 'Maria Santos',
+        phone_number: '09181234567',
+        dining_mode: 'Pick-up',
+        arriving_time: '2:30 PM',
+        payment_mode: 'Cash'
+      }
+    };
+    const detailsRes = await nlpEngine.executeAiAssistantTurn(psid, session, 'Maria Santos 09181234567 pickup 2:30pm cash', {
+      aiResponse: detailsAiRes
+    });
+    assert.strictEqual(detailsRes.intent, 'AI_SET_DETAILS');
+    assert.strictEqual(session.customer_name, 'Maria Santos');
+    assert.strictEqual(session.phone_number, '09181234567');
+    assert.strictEqual(session.dining_mode, 'Pick-up');
+    assert.strictEqual(session.arriving_time, '2:30 PM');
+  });
+
   t.after(async () => {
     await systemSettingsService.updateSystemSettings({ is_manual_override: 0 }).catch(() => {});
     try { if (fs.existsSync(testDbPath)) fs.unlinkSync(testDbPath); } catch (_) {}

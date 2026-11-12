@@ -53,6 +53,17 @@ function initSqliteFallback() {
         conversation_state TEXT DEFAULT 'IDLE',
         cart_json TEXT DEFAULT NULL,
         session_json TEXT DEFAULT NULL,
+        last_interaction_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS cart_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sender_psid TEXT NOT NULL,
+        menu_id INTEGER NOT NULL REFERENCES menu_items(id) ON DELETE CASCADE,
+        quantity INTEGER NOT NULL DEFAULT 1,
+        notes TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
@@ -407,6 +418,7 @@ function initSqliteFallback() {
 
     // Conversation Flow v2 migrations
     try { sqliteDb.exec(`ALTER TABLE customers ADD COLUMN session_json TEXT DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE customers ADD COLUMN last_interaction_at DATETIME DEFAULT CURRENT_TIMESTAMP;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN feedback_requested_at DATETIME DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN gcash_ref TEXT DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN receipt_url TEXT DEFAULT NULL;`); } catch (e) { }
@@ -1158,8 +1170,8 @@ function executeSqliteQuery(sql, params = []) {
 
   // Normalize MySQL SQL dialects to SQLite if needed
   const normalizedSql = sql
-    .replace(/TIMESTAMPDIFF\(\s*SECOND\s*,\s*([a-zA-Z0-9_.]+)\s*,\s*NOW\(\)\s*\)/gi, "(CAST((strftime('%s', datetime('now')) - strftime('%s', $1)) AS INTEGER))")
-    .replace(/TIMESTAMPDIFF\(\s*MINUTE\s*,\s*([a-zA-Z0-9_.]+)\s*,\s*NOW\(\)\s*\)/gi, "(CAST(((strftime('%s', datetime('now')) - strftime('%s', $1)) / 60) AS INTEGER))")
+    .replace(/TIMESTAMPDIFF\(\s*SECOND\s*,\s*(.+?)\s*,\s*(?:NOW\(\)|datetime\('now'\))\s*\)/gi, "(CAST((strftime('%s', datetime('now')) - strftime('%s', $1)) AS INTEGER))")
+    .replace(/TIMESTAMPDIFF\(\s*MINUTE\s*,\s*(.+?)\s*,\s*(?:NOW\(\)|datetime\('now'\))\s*\)/gi, "(CAST(((strftime('%s', datetime('now')) - strftime('%s', $1)) / 60) AS INTEGER))")
     .replace(/NOW\(\)/gi, "datetime('now')")
     .replace(/DATE_SUB\(NOW\(\),\s*INTERVAL\s+(\d+)\s+MINUTE\)/gi, "datetime('now', '-$1 minutes')")
     .replace(/IFNULL/gi, "COALESCE")

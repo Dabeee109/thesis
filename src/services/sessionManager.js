@@ -277,6 +277,7 @@ async function saveSession(session) {
            delivery_address = COALESCE(NULLIF(?, ''), delivery_address),
            phone_number = COALESCE(NULLIF(?, ''), phone_number),
            distance_km = COALESCE(?, distance_km),
+           last_interaction_at = CURRENT_TIMESTAMP,
            updated_at = CURRENT_TIMESTAMP 
        WHERE psid = ?`,
       [
@@ -301,6 +302,7 @@ async function saveSession(session) {
              delivery_address = COALESCE(NULLIF(?, ''), delivery_address),
              phone_number = COALESCE(NULLIF(?, ''), phone_number),
              distance_km = COALESCE(?, distance_km),
+             last_interaction_at = CURRENT_TIMESTAMP,
              updated_at = CURRENT_TIMESTAMP 
          WHERE psid = ?`,
         [
@@ -443,6 +445,14 @@ async function resetUserSession(psid, options = {}) {
   session.warning25Sent = false;
   session.purged30Sent = false;
   session.lastInteraction = Date.now();
+
+  if (psidStr) {
+    await db.query(`DELETE FROM cart_items WHERE sender_psid = ?`, [psidStr]).catch(() => {});
+    await db.query(
+      `UPDATE customers SET cart_json = '[]', updated_at = CURRENT_TIMESTAMP WHERE psid = ?`,
+      [psidStr]
+    ).catch(() => {});
+  }
 
   await saveSession(session);
   return session;
