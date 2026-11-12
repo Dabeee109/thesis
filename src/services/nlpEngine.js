@@ -50,7 +50,7 @@ const {
 } = require('./batchCartService');
 const notificationService = require('./notificationService');
 const { queryWitAi, localNluParse } = require('./witAiService');
-const { getSession, saveSession, clearSessionCart, resetUserSession } = require('./sessionManager');
+const { getSession, saveSession, clearSessionCart, resetUserSession, resetCustomerSession } = require('./sessionManager');
 const { botMessages, LABELS } = require('./botMessages');
 const {
   normalize,
@@ -1737,6 +1737,21 @@ async function handleMessageEvent(psid, incomingText = '', payload = null, locat
         [String(psid)]
       );
     } catch (_) {}
+  }
+
+  // Step 0 Condition D: Exact Single-Word "reset" Command (LLM Bypass & Instant Reply)
+  const exactCommand = (incomingText || '').trim();
+  if (exactCommand.toLowerCase() === 'reset') {
+    await resetCustomerSession(psid);
+    try {
+      await db.query(
+        `UPDATE customers SET last_interaction_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE psid = ?`,
+        [String(psid)]
+      );
+    } catch (_) {}
+    const resetReply = "Na-reset na po ang ating chat session at nabura na rin ang mga hindi natuloy na laman ng inyong cart. Maaari na po kayong magsimula muli—ano pong nais ninyong i-order?";
+    await sendTextMessage(psid, resetReply);
+    return { intent: 'SESSION_RESET_COMMAND', confidence: 1.0, replyLog: resetReply };
   }
 
   // Always check live DB status for admin-voided/cancelled orders before routing
@@ -6351,6 +6366,8 @@ module.exports = {
   processMessage,
   handleMessageEvent,
   handleTextInput,
+  resetCustomerSession,
+  resetUserSession,
   macroState,
   expireStaleState,
   sendFullMenu,

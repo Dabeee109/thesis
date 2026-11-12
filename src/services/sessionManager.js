@@ -465,12 +465,17 @@ function clearMemorySessions() {
   userSessions.clear();
 }
 
+async function resetCustomerSession(psid) {
+  return resetUserSession(psid, { targetState: 'IDLE' });
+}
+
 module.exports = {
   ensureCustomer,
   getSession,
   saveSession,
   clearSessionCart,
   resetUserSession,
+  resetCustomerSession,
   clearMemorySessions,
   userSessions
 };

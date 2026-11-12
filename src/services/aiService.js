@@ -699,11 +699,182 @@ async function generateAssistantResponse(psid, messageText, session = null, opti
   return null;
 }
 
+const DISCOUNT_ID_SCHEMA = {
+  type: 'object',
+  properties: {
+    is_valid: {
+      type: 'boolean',
+      description: 'True if genuine Philippine Senior Citizen (OSCA) or PWD ID, unexpired, and matching customer name'
+    },
+    id_type: {
+      type: 'string',
+      enum: ['SENIOR_CITIZEN', 'PWD', 'INVALID'],
+      description: 'Detected ID type'
+    },
+    extracted_name: {
+      type: ['string', 'null'],
+      description: 'Full name printed on the ID'
+    },
+    id_number: {
+      type: ['string', 'null'],
+      description: 'Identification number (OSCA ID or PWD card number)'
+    },
+    is_expired: {
+      type: 'boolean',
+      description: 'True if explicitly expired before current year 2026'
+    },
+    rejection_reason: {
+      type: ['string', 'null'],
+      description: 'Detailed explanation if invalid, non-qualifying, expired, or name mismatch'
+    },
+    name_matches_customer: {
+      type: 'boolean',
+      description: 'True if the name on the ID reasonably matches the customer name'
+    }
+  },
+  required: ['is_valid', 'id_type', 'extracted_name', 'id_number', 'is_expired', 'rejection_reason', 'name_matches_customer']
+};
+
+/**
+ * Generate a conversational structured response using Gemini (alias for generateAssistantResponse).
+ */
+async function generateConversationalResponse(psid, userMessage, context = null, options = {}) {
+  const session = options.session || null;
+  const mergedOptions = { ...options };
+  if (context) mergedOptions.context = context;
+  return generateAssistantResponse(psid, userMessage, session, mergedOptions);
+}
+
+/**
+ * Verify a Senior Citizen (OSCA) or PWD ID image using Gemini Vision OCR with structured JSON output
+ * and TiDB Cloud anti-abuse verification (>2 uses/day).
+ */
+async function verifyDiscountIdImage(imageUrlOrBase64, customerName = '', options = {}) {
+  const client = options.client || getGenAIClient();
+  const cName = String(customerName || '').trim();
+
+  let verification = {
+    is_valid: false,
+    id_type: 'INVALID',
+    extracted_name: null,
+    id_number: null,
+    is_expired: false,
+    rejection_reason: 'Unable to process ID image.',
+    name_matches_customer: false,
+    discount_rate: 0.00
+  };
+
+  if (!imageUrlOrBase64) {
+    verification.rejection_reason = 'No image provided for verification.';
+    return verification;
+  }
+
+  if (options.mockResult) {
+    verification = { ...verification, ...options.mockResult };
+  } else if (!client) {
+    verification.rejection_reason = 'AI Vision service is temporarily unavailable.';
+    return verification;
+  } else if (client.interactions?.create || client.models?.generateContent) {
+    const prompt = `You are an expert fraud-detection AI inspecting Philippine Senior Citizen (OSCA) or Person with Disabilities (PWD) identification cards for Diner's Cafe.
+Current year: 2026.
+Customer Name to cross-reference: "${cName}".
+
+INSPECTION RULES:
+1. Genuine OSCA / Senior Citizen ID: Issued by Republic of the Philippines Office of Senior Citizens Affairs (OSCA) or City/Municipality.
+2. Genuine PWD ID: Issued by National Council on Disability Affairs (NCDA) or City/Municipal Social Welfare and Development Office (MSWDO/PDAO).
+3. Extract the full name printed on the card and the ID number.
+4. If the card explicitly shows an expiration date prior to 2026, flag is_expired = true and rejection_reason = "Expired ID card".
+5. REJECT: Driver's licenses, student/school IDs, company badges, random selfies, blurry photos, or stock/sample photos found online. Set id_type = "INVALID", is_valid = false.
+6. Verify whether extracted_name reasonably matches "${cName}". If names clearly do not match, set name_matches_customer = false, is_valid = false.`;
+
+    try {
+      const models = resolveModelChain(options.preferredModel || 'gemini-2.5-flash');
+      for (const model of models) {
+        try {
+          let outputText = '';
+          if (client.interactions?.create) {
+            const interaction = await client.interactions.create({
+              model,
+              input: [
+                { type: 'text', text: prompt },
+                { type: 'image_url', image_url: { url: imageUrlOrBase64 } }
+              ],
+              generation_config: { temperature: 0.1 },
+              response_format: {
+                type: 'text',
+                mime_type: 'application/json',
+                schema: DISCOUNT_ID_SCHEMA
+              }
+            });
+            outputText = interaction?.output_text || '';
+          } else if (client.models?.generateContent) {
+            const response = await client.models.generateContent({
+              model,
+              contents: [
+                {
+                  role: 'user',
+                  parts: [
+                    { text: prompt },
+                    { text: `Image URL: ${imageUrlOrBase64}` }
+                  ]
+                }
+              ]
+            });
+            outputText = response?.text || '';
+          }
+
+          if (outputText) {
+            const parsed = parseAssistantJson(outputText);
+            if (parsed && typeof parsed.is_valid === 'boolean') {
+              verification = {
+                is_valid: Boolean(parsed.is_valid),
+                id_type: parsed.id_type || 'INVALID',
+                extracted_name: parsed.extracted_name || null,
+                id_number: parsed.id_number || null,
+                is_expired: Boolean(parsed.is_expired),
+                rejection_reason: parsed.rejection_reason || null,
+                name_matches_customer: Boolean(parsed.name_matches_customer),
+                discount_rate: parsed.is_valid ? 0.20 : 0.00
+              };
+              break;
+            }
+          }
+        } catch (modelErr) {
+          console.warn(`[verifyDiscountIdImage] Model ${model} failed:`, modelErr.message);
+        }
+      }
+    } catch (err) {
+      console.warn('[verifyDiscountIdImage Error]', err.message);
+    }
+  }
+
+  // 3-Layer Check: Anti-abuse TiDB validation (>2 uses/day across accounts)
+  if (verification.is_valid && verification.id_number) {
+    try {
+      const [rows] = await db.query(
+        `SELECT COUNT(*) AS count FROM orders 
+         WHERE (customer_notes LIKE ? OR note LIKE ?) 
+           AND created_at >= datetime('now', 'start of day')`,
+        [`%${verification.id_number}%`, `%${verification.id_number}%`]
+      );
+      const count = rows && rows[0] ? Number(rows[0].count) : 0;
+      if (count >= 2) {
+        verification.is_valid = false;
+        verification.rejection_reason = 'Limit of 2 discount uses per day exceeded for this ID card.';
+        verification.discount_rate = 0.00;
+      }
+    } catch (_) {}
+  }
+
+  return verification;
+}
+
 module.exports = {
   PRIMARY_AI_MODEL,
   MAX_CONVERSATION_MESSAGES,
   DETECTED_ACTIONS,
   ASSISTANT_RESPONSE_SCHEMA,
+  DISCOUNT_ID_SCHEMA,
   normalizeModelName,
   isAiConfigured,
   getConversationHistory,
@@ -713,6 +884,8 @@ module.exports = {
   buildAssistantSystemInstruction,
   parseAssistantJson,
   buildInputWithHistory,
-  generateAssistantResponse
+  generateAssistantResponse,
+  generateConversationalResponse,
+  verifyDiscountIdImage
 };
 
