@@ -1241,6 +1241,172 @@ async function markOrderPaymentInvalid(orderId, reason = '', actor = null) {
   return { ...order, payment_status: 'INVALID', mismatch_notes: trimmedReason };
 }
 
+/**
+ * Staff Rejects Invalid Payment Proof (Targeted Fix 2)
+ * 1. Validates reason is non-empty
+ * 2. In TiDB Cloud / SQLite, updates payment_status = 'REJECTED', status = 'cancelled', cancellation_reason = reason
+ * 3. Restores recipe ingredient stock to inventory_items (via restoreIngredientsForOrder) and general stock
+ * 4. Records audit log in order_audit_logs
+ * 5. Sends polite plain-text Messenger notification to customer (sender_psid)
+ * 6. Broadcasts real-time events to dashboard
+ */
+async function rejectOrderPayment(orderId, reason = '', actor = null) {
+  const [rows] = await db.query(
+    `SELECT o.*, c.psid, c.first_name, c.last_name 
+     FROM orders o 
+     LEFT JOIN customers c ON o.customer_id = c.id 
+     WHERE o.id = ?`,
+    [orderId]
+  );
+  if (rows.length === 0) throw new Error(`Order #${orderId} not found.`);
+  const order = rows[0];
+
+  const trimmedReason = (reason || '').trim();
+  if (!trimmedReason) {
+    throw new Error('Rejection reason is required.');
+  }
+
+  // 1. Update orders table in TiDB Cloud / SQLite
+  await db.query(
+    `UPDATE orders 
+     SET payment_status = 'REJECTED', status = 'cancelled', cancellation_reason = ?, updated_at = CURRENT_TIMESTAMP 
+     WHERE id = ?`,
+    [trimmedReason, orderId]
+  );
+
+  // In case TiDB Cloud has an order_status column or legacy schema
+  try {
+    await db.query(
+      `UPDATE orders SET order_status = 'CANCELLED' WHERE id = ?`,
+      [orderId]
+    );
+  } catch (e) {
+    // Ignore if column does not exist
+  }
+
+  // 2. Update payments table if present
+  try {
+    await db.query(
+      `UPDATE payments 
+       SET status = 'mismatch_flagged', is_mismatch = 1, mismatch_notes = ?, updated_at = CURRENT_TIMESTAMP 
+       WHERE order_id = ?`,
+      [trimmedReason, orderId]
+    );
+  } catch (pErr) {
+    // Ignore if table/row not present
+  }
+
+  // 3. Restore raw recipe ingredient stock back to inventory_items
+  await restoreIngredientsForOrder(orderId).catch(err => {
+    console.warn('[orderService] Failed to restore recipe ingredients on payment rejection:', err.message);
+  });
+
+  // Restore inventory & menu_items quantities
+  try {
+    const [items] = await db.query(
+      `SELECT menu_item_id, quantity FROM order_items WHERE order_id = ?`,
+      [orderId]
+    );
+    for (const it of items) {
+      await db.query(
+        `UPDATE inventory 
+         SET stock_quantity = stock_quantity + ?, updated_at = CURRENT_TIMESTAMP 
+         WHERE menu_item_id = ?`,
+        [it.quantity, it.menu_item_id]
+      ).catch(() => {});
+
+      await db.query(
+        `UPDATE menu_items 
+         SET stock_quantity = stock_quantity + ?, updated_at = CURRENT_TIMESTAMP 
+         WHERE id = ?`,
+        [it.quantity, it.menu_item_id]
+      ).catch(() => {});
+      await db.query(
+        `UPDATE menu_items 
+         SET stock = stock + ?, updated_at = CURRENT_TIMESTAMP 
+         WHERE id = ?`,
+        [it.quantity, it.menu_item_id]
+      ).catch(() => {});
+
+      const [invRows] = await db.query(`SELECT id FROM inventory WHERE menu_item_id = ?`, [it.menu_item_id]);
+      if (invRows && invRows.length > 0) {
+        await db.query(
+          `INSERT INTO inventory_logs (inventory_id, change_amount, reason, reference_id) 
+           VALUES (?, ?, ?, ?)`,
+          [invRows[0].id, it.quantity, `Stock restored from rejected payment Order #${order.order_number}`, order.order_number]
+        ).catch(() => {});
+      }
+    }
+  } catch (invErr) {
+    console.warn('[orderService] Failed to restore inventory items:', invErr.message);
+  }
+
+  // 4. Log in order_audit_logs
+  try {
+    const actorId = actor ? (actor.id || actor.userId || null) : null;
+    const actorName = actor ? (actor.username || actor.name || 'Staff') : 'Staff';
+    await db.query(
+      `INSERT INTO order_audit_logs (order_id, order_number, action, actor_id, actor_name, reason, details)
+       VALUES (?, ?, 'PAYMENT_REJECTED', ?, ?, ?, ?)`,
+      [orderId, order.order_number, actorId, actorName, trimmedReason, `Payment proof rejected and order cancelled: ${trimmedReason}`]
+    );
+  } catch (aErr) {
+    console.warn('[orderService] Failed to insert audit log for payment rejection:', aErr.message);
+  }
+
+  // 5. Automated plain-text Messenger notification to customer (sender_psid)
+  const senderPsid = order.psid;
+  const promptMsg = `Paumanhin po, hindi po tinanggap ang inyong payment proof para sa Order #${order.order_number}.\n\n⚠️ Dahilan: ${trimmedReason}\n\nKanselado na po ang inyong order. Maaari po kayong mag-order muli anumang oras gamit ang valid at malinaw na resibo. Maraming salamat po sa inyong pag-unawa!`;
+
+  if (senderPsid && !senderPsid.startsWith('POS_MANUAL_')) {
+    await sendTextMessage(senderPsid, promptMsg).catch(err => {
+      console.warn('[orderService] Failed to send payment rejection message:', err.message);
+    });
+
+    try {
+      const session = await getSession(senderPsid);
+      session.checkout_step = null;
+      session.state = 'IDLE';
+      session.current_step = null;
+      session.activeOrderNumber = null;
+      session.active_order_id = null;
+      session.order_id = null;
+      await saveSession(session);
+    } catch (sErr) {
+      console.warn('[orderService] Failed to reset session on payment rejection:', sErr.message);
+    }
+  }
+
+  await sendNotification(senderPsid, 'payment_rejected', `Order #${order.order_number} Payment Proof Rejected`, promptMsg).catch(() => {});
+
+  // 6. Broadcast real-time SSE events
+  broadcastSSE('ORDER_PAYMENT_REJECTED', {
+    orderId,
+    orderNumber: order.order_number,
+    payment_status: 'REJECTED',
+    status: 'cancelled',
+    reason: trimmedReason
+  });
+
+  broadcastSSE('ORDER_STATUS_CHANGED', {
+    orderId,
+    orderNumber: order.order_number,
+    newStatus: 'cancelled'
+  });
+
+  broadcastSSE('INVENTORY_UPDATED', {
+    orderNumber: order.order_number,
+    reason: 'Restored from rejected payment'
+  });
+
+  return {
+    ...order,
+    status: 'cancelled',
+    payment_status: 'REJECTED',
+    cancellation_reason: trimmedReason
+  };
+}
+
 module.exports = {
   createOrder,
   updateOrderStatus,
@@ -1255,5 +1421,6 @@ module.exports = {
   approveCancellationRequest,
   declineCancellationRequest,
   verifyOrderPayment,
-  markOrderPaymentInvalid
+  markOrderPaymentInvalid,
+  rejectOrderPayment
 };

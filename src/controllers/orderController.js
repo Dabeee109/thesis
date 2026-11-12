@@ -385,6 +385,31 @@ async function invalidPayment(req, res) {
   }
 }
 
+/**
+ * Reject Invalid Payment Proof & Cancel Order (Targeted Fix 2)
+ * POST /api/orders/:id/reject-payment
+ */
+async function rejectPayment(req, res) {
+  try {
+    const { id } = req.params;
+    const { reason, notes } = req.body;
+    const finalReason = (reason || notes || '').trim();
+    if (!finalReason) {
+      return res.status(400).json({ success: false, message: 'Rejection reason is required.' });
+    }
+    const actor = req.user || { id: null, username: 'Staff' };
+    const updated = await orderService.rejectOrderPayment(parseInt(id, 10), finalReason, actor);
+    return res.json({
+      success: true,
+      message: `Payment proof for Order #${updated.order_number} has been rejected. Order cancelled and customer notified.`,
+      order: updated
+    });
+  } catch (err) {
+    console.error('[Reject Payment Error]', err);
+    return res.status(500).json({ success: false, message: err.message || 'Failed to reject payment.' });
+  }
+}
+
 module.exports = {
   getOrders,
   getOrder,
@@ -392,6 +417,7 @@ module.exports = {
   cancelOrder,
   verifyPayment,
   invalidPayment,
+  rejectPayment,
   getSummaryKPIs,
   createManualOrder,
   requestVoid,

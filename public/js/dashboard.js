@@ -864,15 +864,15 @@ async function viewOrderDetails(orderId) {
                 </a>
               </div>
             ` : `
-              <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border-subtle);">
+              <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border-subtle);" onclick="event.stopPropagation()">
                 <div style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 6px;">
-                  📸 Proof of Payment (Click to view full image):
+                  📸 <a href="javascript:void(0)" onclick="openImageLightbox(event, '${escapeHtml(o.payment_proof_image || o.receipt_url)}')" style="color: var(--brand-crema); text-decoration: underline; cursor: pointer; font-weight: 600;">Proof of Payment (Click to view full image):</a>
                 </div>
-                <a href="${escapeHtml(o.payment_proof_image || o.receipt_url)}" target="_blank" rel="noopener noreferrer" title="View Full Payment Proof in new tab">
+                <div style="display: inline-block; cursor: pointer;" onclick="openImageLightbox(event, '${escapeHtml(o.payment_proof_image || o.receipt_url)}')">
                   <img src="${escapeHtml(o.payment_proof_image || o.receipt_url)}" alt="GCash Receipt" 
                        style="max-height: 125px; max-width: 220px; object-fit: contain; border-radius: 6px; border: 1px solid var(--border-subtle); background: #111; box-shadow: 0 2px 8px rgba(0,0,0,0.4); cursor: pointer; transition: transform 0.2s;" 
                        onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'" />
-                </a>
+                </div>
               </div>
             `
           ) : `
@@ -885,16 +885,63 @@ async function viewOrderDetails(orderId) {
 
           <!-- Staff Verification Action Buttons: Strictly SHOW for PENDING / PENDING_APPROVAL only; HIDE/REMOVE for IN_PREPARATION, DISPATCHED, DELIVERED, CANCELLED -->
           ${showPaymentActionButtons ? `
-            <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); display: flex; gap: 10px; flex-wrap: wrap;">
-              <button type="button" class="btn btn-success btn-sm" onclick="markPaymentVerified(${o.id}, '${o.order_number}')" 
+            <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); display: flex; gap: 10px; flex-wrap: wrap;" onclick="event.stopPropagation()">
+              <button type="button" class="btn btn-success btn-sm" onclick="event.stopPropagation(); markPaymentVerified(${o.id}, '${o.order_number}')" 
                       style="font-weight: 700; background: #10b981; color: #fff; border: none; padding: 7px 14px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;"
                       ${o.payment_status === 'Paid' ? 'disabled style="opacity: 0.55; cursor: not-allowed;"' : ''}>
                 <span>✅ Mark Payment Verified / Paid</span>
               </button>
-              <button type="button" class="btn btn-danger btn-sm" onclick="markPaymentInvalid(${o.id}, '${o.order_number}')" 
+              <button type="button" class="btn btn-danger btn-sm" id="btn-toggle-reject-payment" onclick="event.stopPropagation(); toggleInlineRejectPayment(event, ${o.id}, '${o.order_number}')" 
                       style="font-weight: 700; background: #ef4444; color: #fff; border: none; padding: 7px 14px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;">
-                <span>⚠️ Invalid Payment Proof</span>
+                <span>⚠️ Reject Invalid Payment Proof</span>
               </button>
+            </div>
+
+            <!-- Inline Rejection Panel (Targeted Fix 2) -->
+            <div id="inline-reject-payment-panel" style="display: none; margin-top: 14px; padding: 14px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px;" onclick="event.stopPropagation()">
+              <div style="font-weight: 700; color: #ef4444; font-size: 0.92rem; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                <span>⚠️ Select Rejection Reason</span>
+              </div>
+              <p style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 12px; line-height: 1.4;">
+                Pumili ng dahilan kung bakit hindi tanggap ang payment proof para sa <strong style="color: var(--brand-crema);">Order #${escapeHtml(o.order_number)}</strong>. Ipapadala ito sa customer sa Messenger at ika-kansela ang order habang ibinabalik ang raw ingredients stock:
+              </p>
+
+              <div id="reject-reason-options-group" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;">
+                <label class="reject-reason-option" onclick="event.stopPropagation(); selectRejectReason('Blurred / Unreadable Receipt')" style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 8px 12px; background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 0.88rem; transition: all 0.2s;">
+                  <input type="radio" name="reject_reason_choice" value="Blurred / Unreadable Receipt" onchange="event.stopPropagation(); selectRejectReason(this.value)">
+                  <span>📷 <strong>Blurred / Unreadable Receipt</strong> <span style="color: var(--text-muted); font-size: 0.8rem;">(Malabo ang larawan ng resibo)</span></span>
+                </label>
+                <label class="reject-reason-option" onclick="event.stopPropagation(); selectRejectReason('Incorrect Amount Paid')" style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 8px 12px; background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 0.88rem; transition: all 0.2s;">
+                  <input type="radio" name="reject_reason_choice" value="Incorrect Amount Paid" onchange="event.stopPropagation(); selectRejectReason(this.value)">
+                  <span>💰 <strong>Incorrect Amount Paid</strong> <span style="color: var(--text-muted); font-size: 0.8rem;">(Mali ang binayarang halaga)</span></span>
+                </label>
+                <label class="reject-reason-option" onclick="event.stopPropagation(); selectRejectReason('Invalid / Fake Reference Number')" style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 8px 12px; background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 0.88rem; transition: all 0.2s;">
+                  <input type="radio" name="reject_reason_choice" value="Invalid / Fake Reference Number" onchange="event.stopPropagation(); selectRejectReason(this.value)">
+                  <span>🔢 <strong>Invalid / Fake Reference Number</strong> <span style="color: var(--text-muted); font-size: 0.8rem;">(Hindi mahanap o peke ang ref number)</span></span>
+                </label>
+                <label class="reject-reason-option" onclick="event.stopPropagation(); selectRejectReason('Duplicate Receipt Used')" style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 8px 12px; background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 0.88rem; transition: all 0.2s;">
+                  <input type="radio" name="reject_reason_choice" value="Duplicate Receipt Used" onchange="event.stopPropagation(); selectRejectReason(this.value)">
+                  <span>🔄 <strong>Duplicate Receipt Used</strong> <span style="color: var(--text-muted); font-size: 0.8rem;">(Nagamit na ang resibo sa ibang order)</span></span>
+                </label>
+                <label class="reject-reason-option" onclick="event.stopPropagation(); selectRejectReason('Other Reason')" style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 8px 12px; background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 0.88rem; transition: all 0.2s;">
+                  <input type="radio" name="reject_reason_choice" value="Other Reason" onchange="event.stopPropagation(); selectRejectReason(this.value)">
+                  <span>📝 <strong>Other Reason</strong> <span style="color: var(--text-muted); font-size: 0.8rem;">(Iba pang dahilan)</span></span>
+                </label>
+              </div>
+
+              <div id="reject-custom-note-container" style="display: none; margin-bottom: 12px;" onclick="event.stopPropagation()">
+                <label style="font-size: 0.82rem; color: var(--text-secondary); display: block; margin-bottom: 4px; font-weight: 600;">Custom Note / Detalye para sa customer:</label>
+                <textarea id="reject-custom-note-input" class="form-control" rows="2" placeholder="I-type dito ang karagdagang detalye..." style="width: 100%; font-size: 0.86rem; padding: 8px; border-radius: 6px; background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle); color: #fff;" onclick="event.stopPropagation()"></textarea>
+              </div>
+
+              <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;" onclick="event.stopPropagation()">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); cancelInlineRejectPayment()" style="font-weight: 600; padding: 6px 14px; border-radius: 6px;">
+                  Cancel
+                </button>
+                <button type="button" id="btn-confirm-reject-payment" class="btn btn-danger btn-sm" disabled onclick="event.stopPropagation(); submitRejectPayment(${o.id}, '${o.order_number}')" style="font-weight: 700; background: #ef4444; color: #fff; padding: 6px 16px; border-radius: 6px; border: none; cursor: not-allowed; opacity: 0.6; display: inline-flex; align-items: center; gap: 6px;">
+                  <span>Confirm Reject Payment</span>
+                </button>
+              </div>
             </div>
           ` : ''}
         </div>
@@ -1315,6 +1362,212 @@ async function markPaymentVerified(orderId, orderNumber) {
   }
 }
 
+// ----------------------------------------------------------------------------
+// 2B. Payment Proof Lightbox & Rejection Handlers (Targeted Fixes 1 & 2)
+// ----------------------------------------------------------------------------
+
+/**
+ * Full-Screen Image Lightbox Viewer (Targeted Fix 1)
+ * High-priority z-index: 9999 overlay with full image display and clear close handlers.
+ */
+function openImageLightbox(event, imgUrl, title = 'Proof of Payment') {
+  if (event) {
+    if (typeof event.preventDefault === 'function') event.preventDefault();
+    if (typeof event.stopPropagation === 'function') event.stopPropagation();
+  }
+  if (!imgUrl) return;
+
+  let modal = document.getElementById('modal-image-lightbox');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-image-lightbox';
+    modal.className = 'modal-overlay';
+    modal.style.cssText = 'z-index: 9999; display: none; background: rgba(0, 0, 0, 0.88); backdrop-filter: blur(4px); align-items: center; justify-content: center; position: fixed; inset: 0;';
+    modal.onclick = (e) => closeImageLightbox(e);
+    modal.innerHTML = `
+      <div style="position: relative; max-width: 95vw; max-height: 95vh; display: flex; flex-direction: column; align-items: center; justify-content: center;" onclick="event.stopPropagation()">
+        <button type="button" class="modal-close" onclick="closeImageLightbox(event)" style="position: absolute; top: -16px; right: -16px; width: 36px; height: 36px; border-radius: 50%; background: rgba(30,30,30,0.9); border: 1px solid var(--border-subtle); color: #fff; font-size: 1.4rem; line-height: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10001; box-shadow: 0 4px 12px rgba(0,0,0,0.5);" title="Close Lightbox">&times;</button>
+        <div id="lightbox-image-container" style="display: flex; flex-direction: column; align-items: center;">
+          <img id="lightbox-img" src="" alt="Proof of Payment" style="max-height: 85vh; max-width: 90vw; object-fit: contain; border-radius: 8px; box-shadow: 0 8px 30px rgba(0,0,0,0.7); border: 1px solid rgba(255,255,255,0.15);" onerror="handleLightboxImageError(this)" />
+          <div id="lightbox-error-msg" style="display: none; padding: 20px; text-align: center; background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; border-radius: 8px; color: #fff; margin-top: 10px;">
+            <p style="margin-bottom: 10px; font-weight: 600;">Image failed to load or link expired</p>
+            <a id="lightbox-fallback-link" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm" style="text-decoration: none; padding: 6px 14px; border-radius: 6px; display: inline-flex; align-items: center; gap: 6px;">
+              <span>🔗 Open in New Tab</span>
+            </a>
+          </div>
+        </div>
+        <div style="margin-top: 10px; display: flex; gap: 12px; align-items: center;">
+          <a id="lightbox-download-link" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="font-size: 0.8rem; padding: 4px 12px; text-decoration: none; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px;">
+            <span>↗️ Open in New Tab</span>
+          </a>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+
+  const imgEl = modal.querySelector('#lightbox-img');
+  const errorMsg = modal.querySelector('#lightbox-error-msg');
+  const fallbackLink = modal.querySelector('#lightbox-fallback-link');
+  const downloadLink = modal.querySelector('#lightbox-download-link');
+
+  if (errorMsg) errorMsg.style.display = 'none';
+  if (imgEl) {
+    imgEl.style.display = 'block';
+    imgEl.src = imgUrl;
+  }
+  if (fallbackLink) fallbackLink.href = imgUrl;
+  if (downloadLink) downloadLink.href = imgUrl;
+
+  modal.style.display = 'flex';
+  modal.classList.add('active');
+}
+
+function handleLightboxImageError(imgEl) {
+  if (imgEl) imgEl.style.display = 'none';
+  const errorMsg = document.getElementById('lightbox-error-msg');
+  if (errorMsg) errorMsg.style.display = 'block';
+}
+
+function closeImageLightbox(event) {
+  if (event) {
+    if (typeof event.preventDefault === 'function') event.preventDefault();
+    if (typeof event.stopPropagation === 'function') event.stopPropagation();
+  }
+  const modal = document.getElementById('modal-image-lightbox');
+  if (modal) {
+    modal.style.display = 'none';
+    modal.classList.remove('active');
+  }
+}
+
+/**
+ * Inline Rejection State & Handlers (Targeted Fix 2)
+ */
+let selectedRejectionReason = '';
+
+function toggleInlineRejectPayment(event, orderId, orderNumber) {
+  if (event) {
+    if (typeof event.preventDefault === 'function') event.preventDefault();
+    if (typeof event.stopPropagation === 'function') event.stopPropagation();
+  }
+  const panel = document.getElementById('inline-reject-payment-panel');
+  if (!panel) return;
+
+  const isHidden = panel.style.display === 'none' || panel.style.display === '';
+  panel.style.display = isHidden ? 'block' : 'none';
+
+  if (isHidden) {
+    selectedRejectionReason = '';
+    const radios = panel.querySelectorAll('input[name="reject_reason_choice"]');
+    radios.forEach(r => { r.checked = false; });
+    const options = panel.querySelectorAll('.reject-reason-option');
+    options.forEach(opt => {
+      opt.style.borderColor = 'var(--border-subtle)';
+      opt.style.background = 'var(--bg-surface-elevated)';
+    });
+    const noteContainer = document.getElementById('reject-custom-note-container');
+    if (noteContainer) noteContainer.style.display = 'none';
+    const noteInput = document.getElementById('reject-custom-note-input');
+    if (noteInput) noteInput.value = '';
+    const submitBtn = document.getElementById('btn-confirm-reject-payment');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.style.opacity = '0.6';
+      submitBtn.style.cursor = 'not-allowed';
+    }
+  }
+}
+
+function selectRejectReason(reason) {
+  selectedRejectionReason = reason;
+  const panel = document.getElementById('inline-reject-payment-panel');
+  if (panel) {
+    const radio = panel.querySelector(`input[name="reject_reason_choice"][value="${reason}"]`);
+    if (radio) radio.checked = true;
+
+    // Visually highlight selected option
+    const options = panel.querySelectorAll('.reject-reason-option');
+    options.forEach(opt => {
+      const radioInside = opt.querySelector('input');
+      const isSelected = radioInside && radioInside.checked;
+      opt.style.borderColor = isSelected ? '#ef4444' : 'var(--border-subtle)';
+      opt.style.background = isSelected ? 'rgba(239, 68, 68, 0.15)' : 'var(--bg-surface-elevated)';
+    });
+
+    const noteContainer = document.getElementById('reject-custom-note-container');
+    if (noteContainer) {
+      noteContainer.style.display = (reason === 'Other Reason' || reason.includes('Etc')) ? 'block' : 'none';
+      if (reason === 'Other Reason' || reason.includes('Etc')) {
+        document.getElementById('reject-custom-note-input')?.focus();
+      }
+    }
+
+    const submitBtn = document.getElementById('btn-confirm-reject-payment');
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.style.opacity = '1';
+      submitBtn.style.cursor = 'pointer';
+    }
+  }
+}
+
+function cancelInlineRejectPayment() {
+  const panel = document.getElementById('inline-reject-payment-panel');
+  if (panel) panel.style.display = 'none';
+  selectedRejectionReason = '';
+}
+
+async function submitRejectPayment(orderId, orderNumber) {
+  let finalReason = selectedRejectionReason;
+  if (!finalReason) {
+    API.toast('Please select a rejection reason before confirming.', 'warning');
+    return;
+  }
+  if (finalReason === 'Other Reason') {
+    const customNote = (document.getElementById('reject-custom-note-input')?.value || '').trim();
+    if (!customNote) {
+      API.toast('Please enter your custom note / reason.', 'warning');
+      document.getElementById('reject-custom-note-input')?.focus();
+      return;
+    }
+    finalReason = customNote;
+  } else {
+    const customNote = (document.getElementById('reject-custom-note-input')?.value || '').trim();
+    if (customNote) {
+      finalReason = `${finalReason} (${customNote})`;
+    }
+  }
+
+  const submitBtn = document.getElementById('btn-confirm-reject-payment');
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span>⏳ Rejecting Payment...</span>';
+  }
+
+  try {
+    const res = await API.post(`/orders/${orderId}/reject-payment`, {
+      reason: finalReason
+    });
+    if (res && res.success) {
+      API.toast(`⚠️ Payment for Order #${orderNumber} rejected. Customer notified on Messenger!`, 'info');
+      await Promise.all([loadOrders(), loadKPIs()]);
+      if (typeof viewOrderDetails === 'function') {
+        await viewOrderDetails(orderId);
+      }
+    } else {
+      API.toast(res?.message || 'Failed to reject payment.', 'error');
+    }
+  } catch (err) {
+    API.toast(err.message || 'Error rejecting payment.', 'error');
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '<span>Confirm Reject Payment</span>';
+    }
+  }
+}
+
 /**
  * Opens the Invalid Payment Proof modal with selectable reasons
  */
@@ -1396,13 +1649,13 @@ async function handleInvalidPaymentSubmit(event) {
   }
 
   try {
-    const res = await API.post(`/orders/${orderId}/invalid-payment`, {
+    const res = await API.post(`/orders/${orderId}/reject-payment`, {
       reason: finalReason,
       reasonCode: radioValue
     });
 
     if (res && res.success) {
-      API.toast(`⚠️ Payment proof for Order #${orderNumber} marked as invalid. Customer notified on Messenger!`, 'info');
+      API.toast(`⚠️ Payment proof for Order #${orderNumber} rejected. Customer notified on Messenger!`, 'info');
       closeModal('modal-invalid-payment');
       await Promise.all([loadOrders(), loadKPIs()]);
       // Refresh the order details modal if currently open
@@ -1434,6 +1687,14 @@ window.markPaymentInvalid = markPaymentInvalid;
 window.openInvalidPaymentModal = openInvalidPaymentModal;
 window.toggleCustomReasonField = toggleCustomReasonField;
 window.handleInvalidPaymentSubmit = handleInvalidPaymentSubmit;
+
+window.openImageLightbox = openImageLightbox;
+window.closeImageLightbox = closeImageLightbox;
+window.handleLightboxImageError = handleLightboxImageError;
+window.toggleInlineRejectPayment = toggleInlineRejectPayment;
+window.selectRejectReason = selectRejectReason;
+window.cancelInlineRejectPayment = cancelInlineRejectPayment;
+window.submitRejectPayment = submitRejectPayment;
 
 // ----------------------------------------------------------------------------
 // 3. Menu Management
