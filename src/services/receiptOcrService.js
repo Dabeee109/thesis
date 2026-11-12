@@ -20,11 +20,11 @@ function parseReceiptText(rawText = '') {
   const text = rawText.trim();
 
   // 1. Extract 13-digit GCash Reference Number
-  // Primary regex: /\b\d{4}\s?\d{3}\s?\d{6}\b/ (removes spaces to get 13 digits)
+  // Supports "7047 160 660300", multi-space OCR output, hyphens, or contiguous 13 digits
   let referenceNumber = null;
-  const primaryMatch = text.match(/\b\d{4}\s?\d{3}\s?\d{6}\b/);
+  const primaryMatch = text.match(/\b\d{4}[\s-]*\d{3}[\s-]*\d{6}\b/);
   if (primaryMatch) {
-    referenceNumber = primaryMatch[0].replace(/\s+/g, '');
+    referenceNumber = primaryMatch[0].replace(/[\s-]+/g, '');
   } else {
     // Fallback: 13 contiguous digits
     const contiguousMatch = text.match(/\b\d{13}\b/);
@@ -32,10 +32,10 @@ function parseReceiptText(rawText = '') {
       referenceNumber = contiguousMatch[0];
     } else {
       // Fallback: labeled reference number e.g. "Ref No. 1009 876 543210" or "Reference No: 1009876543210"
-      const labeledMatch = text.match(/(?:ref(?:erence)?(?:\s*no\.?)?)\s*[:#]?\s*([0-9\s]{13,16})/i);
+      const labeledMatch = text.match(/(?:ref(?:erence)?(?:\s*no\.?)?)\s*[:#.]?\s*([0-9\s-]{9,22})/i);
       if (labeledMatch) {
-        const cleaned = labeledMatch[1].replace(/\s+/g, '');
-        if (cleaned.length === 13) {
+        const cleaned = labeledMatch[1].replace(/[\s-]+/g, '');
+        if (cleaned.length >= 9 && cleaned.length <= 13) {
           referenceNumber = cleaned;
         }
       }
@@ -107,10 +107,13 @@ async function recognizeReceipt(imageInput) {
     } else if (typeof imageInput === 'string' && (imageInput.startsWith('text:') || imageInput.includes('\n'))) {
       ocrText = imageInput.replace(/^text:/, '');
     } else {
-      // Run Tesseract OCR on image URL or local path
-      const result = await Tesseract.recognize(imageInput, 'eng', {
-        logger: () => {} // silent logger
-      });
+      // Run Tesseract OCR on image URL, Buffer, or local path with 15s timeout guard
+      const result = await Promise.race([
+        Tesseract.recognize(imageInput, 'eng', {
+          logger: () => {} // silent logger
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('OCR timeout')), 15000))
+      ]);
       ocrText = result?.data?.text || '';
     }
 

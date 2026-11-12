@@ -746,6 +746,7 @@ async function initDatabase() {
         { table: 'orders', column: 'dining_mode', type: "VARCHAR(50) DEFAULT 'Delivery'" },
         { table: 'orders', column: 'arriving_time', type: 'VARCHAR(100) NULL' },
         { table: 'orders', column: 'note', type: 'TEXT NULL' },
+        { table: 'orders', column: 'is_preorder', type: 'TINYINT(1) NOT NULL DEFAULT 0' },
         { table: 'payments', column: 'receipt_url', type: 'TEXT NULL' },
         { table: 'deliveries', column: 'customer_lat', type: 'DECIMAL(10, 7) NULL' },
         { table: 'deliveries', column: 'customer_lng', type: 'DECIMAL(10, 7) NULL' },

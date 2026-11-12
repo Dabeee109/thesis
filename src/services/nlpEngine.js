@@ -1179,10 +1179,19 @@ async function handlePaymentProofUpload(psid, session, imgAttachment) {
   let ocrInput = rawUrl;
   if (typeof rawUrl === 'string' && (rawUrl.startsWith('http://') || rawUrl.startsWith('https://'))) {
     try {
-      const res = await fetch(rawUrl);
-      if (res.ok) {
-        fileBuffer = Buffer.from(await res.arrayBuffer());
-        ocrInput = fileBuffer;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 12000);
+      try {
+        const res = await fetch(rawUrl, {
+          headers: { 'User-Agent': 'DinersCafeBot/1.0' },
+          signal: controller.signal
+        });
+        if (res.ok) {
+          fileBuffer = Buffer.from(await res.arrayBuffer());
+          ocrInput = fileBuffer;
+        }
+      } finally {
+        clearTimeout(timer);
       }
     } catch (dlErr) {
       console.warn('[handlePaymentProofUpload] Image fetch error:', dlErr.message);
@@ -1447,7 +1456,16 @@ async function handleMessageEvent(psid, incomingText = '', payload = null, locat
   try {
     // 0a. Handle Attachments (Receipt images for OCR or Senior/PWD ID proof)
     if (attachments && attachments.length > 0) {
-      const imgAttachment = attachments.find(a => a.type === 'image');
+      const isAwaitingProof = (
+        session.checkout_step === 'AWAITING_PAYMENT_PROOF' ||
+        session.state === 'AWAITING_PAYMENT_PROOF' ||
+        session.current_step === 'AWAITING_PAYMENT_PROOF' ||
+        Boolean(session.pendingGCashOrder)
+      );
+      const imgAttachment =
+        attachments.find(a => a.type === 'image') ||
+        (isAwaitingProof ? attachments.find(a => a?.payload?.url || a?.url) : null);
+
       if (imgAttachment) {
         if (session.state === 'AWAITING_DISCOUNT_PROOF' || session.current_step === 'AWAITING_DISCOUNT_PROOF') {
           const subtotal = session.order_subtotal || calculateCartSubtotal(session.cart) || 0;
@@ -1463,14 +1481,20 @@ async function handleMessageEvent(psid, incomingText = '', payload = null, locat
         }
 
         // Requirement 2: Handle Payment Proof Image when AWAITING_PAYMENT_PROOF
-        if (
-          session.checkout_step === 'AWAITING_PAYMENT_PROOF' ||
-          session.state === 'AWAITING_PAYMENT_PROOF' ||
-          session.current_step === 'AWAITING_PAYMENT_PROOF'
-        ) {
+        if (isAwaitingProof) {
           detectedIntent = 'PAYMENT_PROOF_IMAGE';
-          const proofRes = await handlePaymentProofUpload(psid, session, imgAttachment);
-          return { intent: 'AWAITING_PAYMENT_PROOF', confidence: 1.0, replyLog: proofRes?.replyLog };
+          try {
+            const proofRes = await handlePaymentProofUpload(psid, session, imgAttachment);
+            return { intent: proofRes?.intent || 'AWAITING_PAYMENT_PROOF', confidence: 1.0, replyLog: proofRes?.replyLog };
+          } catch (proofErr) {
+            console.error('[Payment Proof Upload Error]', proofErr);
+            const fallbackPayMsg = 'Nagkaroon po ng pansamantalang aberya sa pag-verify ng screenshot. Paki-type na lamang ang 13-digit GCash Reference Number (hal. 7047160660300) upang maituloy agad ang order.';
+            await sendQuickReplies(psid, fallbackPayMsg, [
+              { title: '❌ Cancel Checkout', payload: 'CANCEL_PENDING_GCASH' },
+              { title: '📋 Menu', payload: 'MENU_HOME' }
+            ]);
+            return { intent: 'PAYMENT_PROOF_ERROR_RECOVERY', confidence: 1.0, replyLog: fallbackPayMsg };
+          }
         }
 
         detectedIntent = 'RECEIPT_IMAGE_ATTACHMENT';
@@ -2824,7 +2848,8 @@ async function handleTextInput(psid, session, rawText) {
     session.state === 'AWAITING_PAYMENT_VERIFICATION' ||
     session.current_step === 'AWAITING_PAYMENT_VERIFICATION' ||
     session.state === 'AWAITING_DELIVERY_DETAILS' ||
-    session.current_step === 'AWAITING_DELIVERY_DETAILS'
+    session.current_step === 'AWAITING_DELIVERY_DETAILS' ||
+    Boolean(session.pendingGCashOrder)
   ) {
     return await handlePaymentProofTextInput(psid, session, rawText);
   }

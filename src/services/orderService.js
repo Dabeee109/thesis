@@ -246,9 +246,9 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
       if ((insertErr.message || '').includes('Unknown column') || (insertErr.message || '').includes('no such column')) {
         const [resFallback] = await db.query(
           `INSERT INTO orders 
-           (order_number, customer_id, order_type, status, subtotal, delivery_fee, total_amount, delivery_address, customer_phone, distance_km, customer_notes, payment_status, payment_ref_number, payment_proof_image, customer_lat, customer_lng, is_preorder)
-           VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [orderNumber, customerId, orderType, subtotal, deliveryFee, totalAmount, effectiveDeliveryAddress, phone || null, effectiveDistanceKm, effectiveNotes, initialPaymentStatus, initialPaymentRef, initialPaymentProof, customerLat, customerLng, isPreorder]
+           (order_number, customer_id, order_type, status, subtotal, delivery_fee, total_amount, delivery_address, customer_phone, distance_km, customer_notes, payment_status, payment_ref_number, payment_proof_image, customer_lat, customer_lng)
+           VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [orderNumber, customerId, orderType, subtotal, deliveryFee, totalAmount, effectiveDeliveryAddress, phone || null, effectiveDistanceKm, effectiveNotes, initialPaymentStatus, initialPaymentRef, initialPaymentProof, customerLat, customerLng]
         );
         orderResult = resFallback;
         break;

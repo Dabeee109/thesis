@@ -222,7 +222,7 @@ test('Personal GCash Pay-First & Anti-Flood Suite', async (t) => {
       payload: { url: { text: `GCash Express Send\nAmount Sent: PHP 10.00\nRef No. 1099 888 777666` } }
     }];
     const underRes = await nlpEngine.handleMessageEvent(psidAttacker, '', null, null, underpaidImg);
-    assert.strictEqual(underRes.intent, 'AWAITING_PAYMENT_PROOF'); // outer wrapper returns AWAITING_PAYMENT_PROOF; inner text warns underpaid
+    assert.strictEqual(underRes.intent, 'PAYMENT_AMOUNT_MISMATCH');
     const sentMsgs = getSent(psidAttacker);
     assert.ok(sentMsgs.some(m => (m.messagePayload?.text || '').includes('Mas mababa')), 'Must warn customer about underpaid screenshot');
 
@@ -335,3 +335,4 @@ test('Personal GCash Pay-First & Anti-Flood Suite', async (t) => {
     }
   });
 });
+

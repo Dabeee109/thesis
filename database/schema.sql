@@ -135,6 +135,7 @@ CREATE TABLE `orders` (
   `arriving_time` VARCHAR(100) DEFAULT NULL,
   `customer_notes` TEXT DEFAULT NULL,
   `note` TEXT DEFAULT NULL,
+  `is_preorder` TINYINT(1) NOT NULL DEFAULT 0,
   `cancellation_reason` VARCHAR(255) DEFAULT NULL,
   `feedback_requested_at` DATETIME DEFAULT NULL COMMENT 'Timestamp when post-delivery feedback prompt was requested',
   `gcash_ref` VARCHAR(100) DEFAULT NULL COMMENT 'Verified GCash reference number',
