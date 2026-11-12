@@ -418,7 +418,7 @@ function initSqliteFallback() {
 
     // Conversation Flow v2 migrations
     try { sqliteDb.exec(`ALTER TABLE customers ADD COLUMN session_json TEXT DEFAULT NULL;`); } catch (e) { }
-    try { sqliteDb.exec(`ALTER TABLE customers ADD COLUMN last_interaction_at DATETIME DEFAULT CURRENT_TIMESTAMP;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE customers ADD COLUMN last_interaction_at DATETIME DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN feedback_requested_at DATETIME DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN gcash_ref TEXT DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN receipt_url TEXT DEFAULT NULL;`); } catch (e) { }

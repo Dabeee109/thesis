@@ -2981,17 +2981,20 @@ async function handleTextInput(psid, session, rawText) {
         return { intent: 'DINING_MODE_DELIVERY', confidence: 1.0, replyLog: msg };
       }
     } else {
-      // Customer has NOT chosen dining mode yet: lock progression and reply ONLY with the exact Welcome Greeting
+      // Prioritize Conversational AI so customer questions (e.g. "Ano ba ang kaya mong gawin?"),
+      // menu inquiries, recommendations, or orders are answered intelligently without infinite greeting loops.
+      if ((process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured()) {
+        const aiTurn = await executeAiAssistantTurn(psid, session, rawText);
+        if (aiTurn) return aiTurn;
+      }
+
+      // Customer has NOT chosen dining mode yet: reply with Welcome Greeting
       session.state = 'AWAITING_DINING_MODE';
       session.current_step = 'AWAITING_DINING_MODE';
       await saveSession(session);
 
       const greetingMsg = "Hello po! Welcome to Diner's Cafe! Ask ko lang po muna bago tayo magsimula, will this be for Dine In, Delivery, or Take Out?";
-      await sendQuickReplies(psid, greetingMsg, [
-        { title: 'Dine In', payload: 'DINING_MODE_DINE_IN' },
-        { title: 'Delivery', payload: 'DINING_MODE_DELIVERY' },
-        { title: 'Take Out', payload: 'DINING_MODE_TAKE_OUT' }
-      ]);
+      await sendTextMessage(psid, greetingMsg);
       return { intent: 'AWAITING_DINING_MODE_GATEWAY', confidence: 1.0, replyLog: greetingMsg };
     }
   }
@@ -3631,15 +3634,15 @@ async function handleTextInput(psid, session, rawText) {
   }
 
   if (['hi', 'hello', 'hey', 'good morning', 'kumusta'].includes(norm) || /^(?:hi|hello|magandang (?:araw|umaga|hapon|gabi))\b/i.test(norm)) {
+    if ((process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured()) {
+      const aiTurn = await executeAiAssistantTurn(psid, session, rawText);
+      if (aiTurn) return aiTurn;
+    }
     if (!session.dining_mode && !session.orderType) {
       session.state = 'AWAITING_DINING_MODE';
       await saveSession(session);
-      const greetingMsg = `Hello po! Welcome to Diner's Cafe! Ask ko lang po muna bago tayo magsimula, will this be for **Dine In**, **Delivery**, or **Take Out**?`;
-      await sendQuickReplies(psid, greetingMsg, [
-        { title: 'Dine In', payload: 'DINING_MODE_DINE_IN' },
-        { title: 'Delivery', payload: 'DINING_MODE_DELIVERY' },
-        { title: 'Take Out', payload: 'DINING_MODE_TAKE_OUT' }
-      ]);
+      const greetingMsg = `Hello po! Welcome to Diner's Cafe! Ask ko lang po muna bago tayo magsimula, will this be for Dine In, Delivery, or Take Out?`;
+      await sendTextMessage(psid, greetingMsg);
       return { intent: 'GREETING_STAGE1', confidence: 1.0, replyLog: greetingMsg };
     }
     const welcome = botMessages.welcome();
