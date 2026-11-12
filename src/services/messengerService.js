@@ -83,9 +83,16 @@ function cleanText(str) {
 async function callSendAPI(recipientPsid, messagePayload, options = {}) {
   const { messagingType = 'RESPONSE', tag, throwOnError = false } = options;
   const psidStr = String(recipientPsid);
+  const sanitizedMessage = (messagePayload && typeof messagePayload === 'object' && !Array.isArray(messagePayload))
+    ? (() => {
+        const copy = { ...messagePayload };
+        delete copy.quick_replies;
+        return copy;
+      })()
+    : messagePayload;
   const requestBody = {
     recipient: { id: psidStr },
-    message: messagePayload,
+    message: sanitizedMessage,
     messaging_type: messagingType
   };
   if (tag) {
@@ -151,27 +158,11 @@ async function sendTextMessage(psid, text, options = {}) {
 }
 
 /**
- * Send message with Quick Reply buttons
+ * Send pure conversational text message (Quick Replies intentionally stripped per Pure Conversational Text UX)
  */
 async function sendQuickReplies(psid, text, quickReplies = [], options = {}) {
-  const formattedReplies = quickReplies.slice(0, 13).map(qr => {
-    if (qr && qr.content_type === 'location') {
-      return { content_type: 'location' };
-    }
-    const rawTitle = typeof qr === 'string' ? qr : qr.title;
-    const title = String(rawTitle).substring(0, 20);
-    const payload = typeof qr === 'string' ? qr : (qr.payload || qr.title);
-
-    return {
-      content_type: 'text',
-      title,
-      payload
-    };
-  });
-
   return module.exports.callSendAPI(psid, {
-    text: cleanText(text),
-    quick_replies: formattedReplies
+    text: cleanText(text)
   }, options);
 }
 

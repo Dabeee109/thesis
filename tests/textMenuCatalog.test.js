@@ -139,10 +139,7 @@ test('Categorized Plain-Text Menu & Unicode Strikethrough Suite', async (t) => {
     }
 
     const lastPayload = msgs[msgs.length - 1].messagePayload;
-    assert.ok(Array.isArray(lastPayload.quick_replies));
-    assert.ok(lastPayload.quick_replies.some(q => q.payload === 'VIEW_DRINKS'));
-    assert.ok(lastPayload.quick_replies.some(q => q.payload === 'VIEW_FOOD'));
-    assert.ok(lastPayload.quick_replies.some(q => q.payload === 'VIEW_CART'));
+    assert.strictEqual(lastPayload.quick_replies, undefined, 'Outgoing payloads must strip quick_replies per Pure Conversational Text UX');
 
     // Test postback filter VIEW_DRINKS
     sentMessages.length = 0;

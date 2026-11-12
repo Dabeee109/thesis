@@ -123,7 +123,7 @@ CREATE TABLE `orders` (
   `order_number` VARCHAR(50) NOT NULL UNIQUE COMMENT 'e.g. DNR-20260901-001',
   `customer_id` INT UNSIGNED NOT NULL,
   `order_type` ENUM('delivery', 'pickup') NOT NULL DEFAULT 'delivery',
-  `status` ENUM('pending', 'preparing', 'dispatched', 'delivered', 'cancelled', 'PAID') NOT NULL DEFAULT 'pending',
+  `status` ENUM('pending', 'preparing', 'dispatched', 'delivered', 'cancelled', 'voided', 'PAID', 'FOR_CONFIRMATION', 'PENDING_ADMIN_QUOTE') NOT NULL DEFAULT 'pending',
   `subtotal` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
   `delivery_fee` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
   `total_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,

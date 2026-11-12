@@ -43,14 +43,7 @@ test('Drinks & Milktea Add-ons Upselling Flow', async (t) => {
     assert.equal(sentMessages.length, 1);
     const m0 = sentMessages[0].messagePayload;
     assert.ok(m0.text.includes('Nais niyo po ba itong lagyan ng Add-ons tulad ng Pearls, Nata de Coco, o Cream Cheese (+₱20 bawat isa)?'));
-    
-    const qrTitles = m0.quick_replies.map(q => q.title);
-    assert.deepEqual(qrTitles, [
-      'Pearls (+₱20)',
-      'Nata de Coco (+₱20)',
-      'Cream Cheese (+₱20)',
-      'Wala / Skip'
-    ]);
+    assert.equal(m0.quick_replies, undefined);
   });
 
   await t.test('2. Scenario C: User inquires about options ("Ano ang mga add-ons?")', async () => {
@@ -79,14 +72,7 @@ test('Drinks & Milktea Add-ons Upselling Flow', async (t) => {
     assert.ok(m0.text.includes('• Coffee Jelly'));
     assert.ok(m0.text.includes('• Egg Pudding'));
     assert.ok(m0.text.includes("Alin po rito ang nais ninyong idagdag? (O sabihin lamang ang 'Wala' kung ayaw mag-add)."));
-
-    const qrTitles = m0.quick_replies.map(q => q.title);
-    assert.deepEqual(qrTitles, [
-      'Pearls',
-      'Nata de Coco',
-      'Cream Cheese',
-      'Wala / Skip'
-    ]);
+    assert.equal(m0.quick_replies, undefined);
   });
 
   await t.test('3. Scenario A: User selects Pearls', async () => {

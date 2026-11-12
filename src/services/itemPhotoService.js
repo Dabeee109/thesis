@@ -13,7 +13,7 @@ const PHOTO_KEYWORD_REGEX =
   /\b(?:picture|pictures|pic|pics|photo|photos|itsura|hitsura|patingin|pa-?tingin|tingin|image|images|look\s*like|looks\s*like|mukha)\b/i;
 
 const NON_ITEM_PHOTO_BLOCKLIST =
-  /\b(?:menu|catalog|listahan|receipt|resibo|gcash|proof|payment|senior|pwd)\b/i;
+  /\b(?:menu|catalog|listahan|receipt|resibo|gcash|proof|payment|senior|pwd|cart)\b/i;
 
 /**
  * Determine if incoming customer message is asking to see a photo of a menu item.
@@ -169,3 +169,4 @@ module.exports = {
   resolvePhotoAttachmentUrl,
   findBestFuzzyMenuMatch
 };
+

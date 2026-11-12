@@ -26,6 +26,8 @@ const DETECTED_ACTIONS = [
   'NONE',
   'ADD_ITEM',
   'VIEW_MENU',
+  'VIEW_CART',
+  'RECOMMEND_ITEM',
   'SEND_PICTURE',
   'CANCEL_ORDER',
   'CHECK_STATUS',
@@ -47,12 +49,25 @@ const ASSISTANT_RESPONSE_SCHEMA = {
     action_payload: {
       type: 'object',
       properties: {
+        items: {
+          type: ['array', 'null'],
+          description: 'List of menu items to add when detected_action is ADD_ITEM (supports single-item, multi-item, and combo orders).',
+          items: {
+            type: 'object',
+            properties: {
+              item_name: { type: 'string' },
+              quantity: { type: 'number' },
+              addon: { type: ['string', 'null'] }
+            },
+            required: ['item_name', 'quantity', 'addon']
+          }
+        },
         item_name: { type: ['string', 'null'] },
         quantity: { type: ['number', 'null'] },
         addon: { type: ['string', 'null'] },
         dining_mode: { type: ['string', 'null'], enum: ['Delivery', 'Pick-up', null] }
       },
-      required: ['item_name', 'quantity', 'addon', 'dining_mode']
+      required: ['items', 'item_name', 'quantity', 'addon', 'dining_mode']
     }
   },
   required: ['reply_message', 'detected_action', 'action_payload']
@@ -216,7 +231,10 @@ async function loadOperationalContext(psid, session = null) {
         [String(psid)]
       );
       if (orderRows && orderRows.length > 0) {
-        latestOrder = orderRows[0];
+        const st = String(orderRows[0].status || '').toLowerCase();
+        if (!['cancelled', 'voided'].includes(st)) {
+          latestOrder = orderRows[0];
+        }
       }
     } catch (err) {
       console.warn('[aiService] Failed to query active order context:', err.message);
@@ -285,16 +303,19 @@ function buildAssistantSystemInstruction(context = {}) {
 1. CONVERSATIONAL PERSONA & TONE:
 - Be warm, polite, empathetic, and respectful at all times.
 - Default to courteous Taglish using "po" and "opo". If the customer writes purely in English, respond in polite, friendly English.
-- Seamlessly understand typos (e.g., "chesecake" -> "Biscoff Cheesecake", "spansh late" -> "Signature Spanish Latte"), text shortcuts ("pde ba mgpa-dlvr"), Taglish code-switching, and local Filipino slang without ever failing or emitting robotic error messages.
-- OPEN-DOMAIN CONVERSATION & SMOOTH SEGUES: If the customer talks about their day, cracks a joke, asks for life advice, or goes off-topic, respond empathetically and engagingly FIRST, then smoothly pivot/segue back to food or drinks available on the menu (for example: "Naku, nakakapagod nga po ang araw na iyan! Magpahinga po muna kayo. Kung nais niyo po ng malamig na pampalamig habang nagpapahinga, available po ang ating Lychee Fruit Tea o Signature Spanish Latte!").
-- STRICT GROUNDING: NEVER invent food items, prices, or modifiers that are not in the LIVE MENU CATALOG below. NEVER recommend or add an item tagged [OUT OF STOCK - DO NOT SELL]; instead politely inform the customer that it is sold out and suggest an in-stock alternative.
+- Seamlessly understand typos (e.g., "chesecake" -> "Biscoff Cheesecake", "spansh late" -> "Caramel Macchiato"), text shortcuts ("pde ba mgpa-dlvr"), Taglish code-switching, and local Filipino slang without ever failing or emitting robotic error messages.
+- OPEN-DOMAIN CONVERSATION & SMOOTH SEGUES: If the customer talks about their day, cracks a joke, asks for life advice, or goes off-topic, respond empathetically and engagingly FIRST, then smoothly pivot/segue back to food or drinks available on the menu.
+- CONTEXTUAL MEMORY & REFERENTIAL PHRASES: Always read the recent conversation history (user & model turns). If the customer uses referential phrases such as "add to cart mo nayan", "yan na lang", "yun po", or "order that one", resolve them directly to the menu item(s) you just recommended or discussed in the previous model turn and set detected_action = "ADD_ITEM" with those exact item(s) in action_payload.items.
+- "IKAW NA BAHALA" / DEALER'S CHOICE COMBOS: If the customer asks you to pick for them (e.g., "ikaw na bahala", "kahit ano", "ikaw na pumili basta may meal at drinks"), DO NOT just ask them what they want! Pick AT LEAST 1 [AVAILABLE] food/meal item AND AT LEAST 1 [AVAILABLE] drink item from the live menu catalog below, set detected_action = "ADD_ITEM", put ALL selected items inside action_payload.items, and enthusiastically tell the customer which food and drink you added!
+- STRICT GROUNDING & ADD-ON CATEGORY GUARD: NEVER invent food items, prices, or modifiers not in LIVE MENU CATALOG. NEVER recommend or sell [OUT OF STOCK - DO NOT SELL] items. Drink sinkers/add-ons ("Pearls", "Nata de Coco", "Cream Cheese", "Coffee Jelly", "Crushed Oreo") are ONLY for "Drinks & Milktea" items—NEVER attach them (set addon: null) to meals, silog, burgers, pizza, pasta, or starters.
+- PAYMENT MODES: Accepted payment modes are Cash or GCash only.
 
 2. LIVE STORE CONTEXT (TiDB Grounded):
 - Store Name: ${store.name || "Diner's Cafe - Tondo Branch"}
 - Operating Status: ${store.isOpen ? 'OPEN' : 'CLOSED'}
 - Operating Hours: ${store.operatingHours || '09:00 AM - 09:00 PM PHT'}
 - Address: ${store.address || "Diner's Cafe, Tondo, Manila"}
-- Delivery Coverage: Maximum ${Number(store.maxDeliveryRadiusKm || 3.0).toFixed(1)} km in-house delivery radius around Tondo, Manila.
+- Delivery Coverage: Maximum ${Number(store.maxDeliveryRadiusKm || 3.0).toFixed(1)} km in-house delivery radius (over 3 km uses third-party Grab/Lalamove pending admin fee quote).
 
 3. CUSTOMER SESSION & ACTIVE ORDER CONTEXT:
 - Current State: ${context.sessionState || 'IDLE'}
@@ -309,8 +330,9 @@ ${menuCatalogBlock}
 Return ONLY valid JSON matching the schema:
 {
   "reply_message": "Natural polite reply to send to the customer.",
-  "detected_action": "NONE | ADD_ITEM | VIEW_MENU | SEND_PICTURE | CANCEL_ORDER | CHECK_STATUS | PROCEED_CHECKOUT",
+  "detected_action": "NONE | ADD_ITEM | VIEW_MENU | VIEW_CART | RECOMMEND_ITEM | SEND_PICTURE | CANCEL_ORDER | CHECK_STATUS | PROCEED_CHECKOUT",
   "action_payload": {
+    "items": [{ "item_name": "string", "quantity": 1, "addon": null }],
     "item_name": "string or null",
     "quantity": "number or null",
     "addon": "string or null",
@@ -319,13 +341,15 @@ Return ONLY valid JSON matching the schema:
 }
 
 ACTION ROUTING RULES:
-- NONE: General conversation, off-topic banter, empathy + segue, menu questions, recommendations without ordering, or store FAQs.
-- ADD_ITEM: Customer wants to add/order a specific menu item (even with typos or shortcuts). Put the exact grounded menu item name in action_payload.item_name, numeric quantity in action_payload.quantity (default 1), optional add-on (e.g. "Pearls", "Nata de Coco", "Cheese Foam", "Cream Cheese", "Crushed Oreo") in action_payload.addon, and "Delivery" / "Pick-up" in action_payload.dining_mode if mentioned. Note: Never set ADD_ITEM for an [OUT OF STOCK - DO NOT SELL] item; use NONE and inform them politely.
-- VIEW_MENU: Customer asks to see the full menu, food list, or drink list.
-- SEND_PICTURE: Customer asks to see a picture/photo/look ("patingin", "itsura", "pic", "photo") of a specific dish or drink. Put the matched menu item name in action_payload.item_name.
+- NONE: General conversation, off-topic banter, empathy + segue, or store FAQs.
+- ADD_ITEM: Customer wants to add/order one OR multiple menu items, resolves a prior recommendation ("add to cart mo nayan"), or asks for "ikaw na bahala" combo. Put EVERY ordered item inside action_payload.items (each with exact grounded item_name, numeric quantity defaulting to 1, and addon only for Drinks & Milktea or null). Mirror items[0] in item_name/quantity/addon. Never set ADD_ITEM for an [OUT OF STOCK - DO NOT SELL] item.
+- VIEW_CART: Customer asks to see or check their cart (e.g., "patingin ng cart", "ano laman ng cart ko", "view cart"). Never classify cart queries as SEND_PICTURE.
+- RECOMMEND_ITEM: Customer asks for recommendations or bestsellers (e.g., "anong mare-recommend mo na drinks", "ano masarap"). NEVER trigger VIEW_MENU for recommendations—put 2 to 3 specific [AVAILABLE] items with brief descriptions & prices directly inside reply_message.
+- VIEW_MENU: Customer explicitly asks to see the full menu, food list, or drink list.
+- SEND_PICTURE: Customer asks to see a photo/picture of a specific menu dish or drink (NOT "cart" and NOT "menu"). Put the matched menu item name in action_payload.item_name.
 - CANCEL_ORDER: Customer explicitly asks to cancel their order.
 - CHECK_STATUS: Customer asks about their order status, delivery progress, or tracking.
-- PROCEED_CHECKOUT: Customer confirms they are ready to check out or pay for their cart. Put "Delivery" or "Pick-up" in action_payload.dining_mode if stated.`;
+- PROCEED_CHECKOUT: Customer confirms they are ready to check out or pay for their cart.`;
 }
 
 /**
@@ -367,12 +391,41 @@ function parseAssistantJson(rawText) {
     ? parsed.action_payload
     : {};
 
-  const itemName = rawPayload.item_name ? String(rawPayload.item_name).trim() : null;
+  let normalizedItems = [];
+  if (Array.isArray(rawPayload.items)) {
+    for (const entry of rawPayload.items) {
+      if (!entry || typeof entry !== 'object') continue;
+      const eName = entry.item_name ? String(entry.item_name).trim() : '';
+      if (!eName) continue;
+      const eQtyRaw = entry.quantity !== null && entry.quantity !== undefined ? parseInt(entry.quantity, 10) : 1;
+      const eQty = Number.isFinite(eQtyRaw) && eQtyRaw > 0 ? eQtyRaw : 1;
+      const eAddon = entry.addon ? String(entry.addon).trim() : null;
+      normalizedItems.push({
+        item_name: eName,
+        quantity: eQty,
+        addon: eAddon
+      });
+    }
+  }
+
+  const singleItemName = rawPayload.item_name ? String(rawPayload.item_name).trim() : null;
   const parsedQty = rawPayload.quantity !== null && rawPayload.quantity !== undefined
     ? parseInt(rawPayload.quantity, 10)
     : null;
-  const quantity = Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : null;
-  const addon = rawPayload.addon ? String(rawPayload.addon).trim() : null;
+  const singleQuantity = Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : null;
+  const singleAddon = rawPayload.addon ? String(rawPayload.addon).trim() : null;
+
+  if (normalizedItems.length === 0 && singleItemName) {
+    normalizedItems.push({
+      item_name: singleItemName,
+      quantity: singleQuantity || 1,
+      addon: singleAddon
+    });
+  }
+
+  const itemName = singleItemName || (normalizedItems[0] ? normalizedItems[0].item_name : null);
+  const quantity = singleQuantity || (normalizedItems[0] ? normalizedItems[0].quantity : null);
+  const addon = singleAddon || (normalizedItems[0] ? normalizedItems[0].addon : null);
 
   let diningMode = null;
   if (rawPayload.dining_mode) {
@@ -385,6 +438,7 @@ function parseAssistantJson(rawText) {
     reply_message: replyMessage,
     detected_action: detectedAction,
     action_payload: {
+      items: normalizedItems,
       item_name: itemName,
       quantity,
       addon,
@@ -394,7 +448,7 @@ function parseAssistantJson(rawText) {
 }
 
 /**
- * Format user message together with the rolling 6-8 turn conversation buffer.
+ * Format user message together with the rolling 8-turn (role: 'user' | 'model') conversation buffer.
  */
 function buildInputWithHistory(messageText, history = []) {
   if (!Array.isArray(history) || history.length === 0) {
@@ -402,9 +456,9 @@ function buildInputWithHistory(messageText, history = []) {
   }
   const transcript = history
     .slice(-MAX_CONVERSATION_MESSAGES)
-    .map(m => `${m.role === 'model' ? 'Assistant' : 'Customer'}: ${m.text}`)
+    .map(m => `${m.role === 'model' ? 'Assistant (model)' : 'Customer (user)'}: ${m.text}`)
     .join('\n');
-  return `Recent conversation history:\n${transcript}\n\nCustomer: ${messageText}`;
+  return `Recent conversation history (${Math.min(history.length, MAX_CONVERSATION_MESSAGES)} turns):\n${transcript}\n\nCustomer (user): ${messageText}`;
 }
 
 /**
@@ -513,3 +567,4 @@ module.exports = {
   buildInputWithHistory,
   generateAssistantResponse
 };
+

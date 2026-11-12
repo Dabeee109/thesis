@@ -230,6 +230,7 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
   const effectiveDiningMode = orderData.dining_mode || orderData.diningMode || (orderType === 'pickup' ? 'Pick-up' : 'Delivery');
   const effectiveArrivingTime = orderData.arriving_time || orderData.arrivingTime || orderData.eta || null;
   const effectiveNotes = customerNotes || orderData.customerNotes || orderData.customer_notes || orderData.note || orderData.notes || null;
+  const initialOrderStatus = orderData.status || 'pending';
 
   for (let attempt = 0; attempt < 5; attempt++) {
     orderNumber = generateOrderNumber();
@@ -237,8 +238,8 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
       const [res] = await db.query(
         `INSERT INTO orders 
          (order_number, customer_id, order_type, dining_mode, status, subtotal, delivery_fee, total_amount, delivery_address, landmark, arriving_time, customer_phone, distance_km, customer_notes, note, payment_status, payment_ref_number, payment_proof_image, customer_lat, customer_lng, is_preorder)
-         VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [orderNumber, customerId, orderType, effectiveDiningMode, subtotal, deliveryFee, totalAmount, effectiveDeliveryAddress, effectiveLandmark, effectiveArrivingTime, phone || null, effectiveDistanceKm, effectiveNotes, effectiveNotes, initialPaymentStatus, initialPaymentRef, initialPaymentProof, customerLat, customerLng, isPreorder]
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [orderNumber, customerId, orderType, effectiveDiningMode, initialOrderStatus, subtotal, deliveryFee, totalAmount, effectiveDeliveryAddress, effectiveLandmark, effectiveArrivingTime, phone || null, effectiveDistanceKm, effectiveNotes, effectiveNotes, initialPaymentStatus, initialPaymentRef, initialPaymentProof, customerLat, customerLng, isPreorder]
       );
       orderResult = res;
       break;
@@ -247,8 +248,8 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
         const [resFallback] = await db.query(
           `INSERT INTO orders 
            (order_number, customer_id, order_type, status, subtotal, delivery_fee, total_amount, delivery_address, customer_phone, distance_km, customer_notes, payment_status, payment_ref_number, payment_proof_image, customer_lat, customer_lng)
-           VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [orderNumber, customerId, orderType, subtotal, deliveryFee, totalAmount, effectiveDeliveryAddress, phone || null, effectiveDistanceKm, effectiveNotes, initialPaymentStatus, initialPaymentRef, initialPaymentProof, customerLat, customerLng]
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [orderNumber, customerId, orderType, initialOrderStatus, subtotal, deliveryFee, totalAmount, effectiveDeliveryAddress, phone || null, effectiveDistanceKm, effectiveNotes, initialPaymentStatus, initialPaymentRef, initialPaymentProof, customerLat, customerLng]
         );
         orderResult = resFallback;
         break;

@@ -111,7 +111,7 @@ function initSqliteFallback() {
         order_number TEXT UNIQUE NOT NULL,
         customer_id INTEGER NOT NULL REFERENCES customers(id),
         order_type TEXT CHECK(order_type IN ('delivery', 'pickup')) NOT NULL DEFAULT 'delivery',
-        status TEXT CHECK(status IN ('pending', 'preparing', 'dispatched', 'delivered', 'cancelled', 'PAID', 'FOR_CONFIRMATION', 'paid', 'for_confirmation')) NOT NULL DEFAULT 'pending',
+        status TEXT CHECK(status IN ('pending', 'preparing', 'dispatched', 'delivered', 'cancelled', 'voided', 'VOIDED', 'CANCELLED', 'PAID', 'FOR_CONFIRMATION', 'paid', 'for_confirmation', 'PENDING_ADMIN_QUOTE', 'pending_admin_quote')) NOT NULL DEFAULT 'pending',
         subtotal REAL NOT NULL DEFAULT 0.00,
         delivery_fee REAL NOT NULL DEFAULT 0.00,
         total_amount REAL NOT NULL DEFAULT 0.00,
@@ -429,6 +429,72 @@ function initSqliteFallback() {
     try { sqliteDb.exec(`ALTER TABLE system_settings ADD COLUMN fare_maintenance REAL DEFAULT 7.50;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE ingredients ADD COLUMN category TEXT NOT NULL DEFAULT 'Produce & Pantry';`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE ingredient_logs ADD COLUMN notes TEXT DEFAULT NULL;`); } catch (e) { }
+
+    // Migrate legacy SQLite orders CHECK constraint if PENDING_ADMIN_QUOTE is missing
+    try {
+      const ordTbl = sqliteDb.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'orders'`).get();
+      if (ordTbl && ordTbl.sql && !ordTbl.sql.includes('PENDING_ADMIN_QUOTE')) {
+        sqliteDb.pragma('foreign_keys = OFF');
+        sqliteDb.exec(`
+          BEGIN TRANSACTION;
+          CREATE TABLE orders_migrated (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_number TEXT UNIQUE NOT NULL,
+            customer_id INTEGER NOT NULL REFERENCES customers(id),
+            order_type TEXT CHECK(order_type IN ('delivery', 'pickup')) NOT NULL DEFAULT 'delivery',
+            status TEXT NOT NULL DEFAULT 'pending',
+            subtotal REAL NOT NULL DEFAULT 0.00,
+            delivery_fee REAL NOT NULL DEFAULT 0.00,
+            total_amount REAL NOT NULL DEFAULT 0.00,
+            delivery_address TEXT,
+            customer_phone TEXT DEFAULT NULL,
+            payment_proof_image TEXT DEFAULT NULL,
+            payment_ref_number TEXT DEFAULT NULL,
+            payment_status TEXT DEFAULT 'Pending',
+            distance_km REAL DEFAULT 1.00,
+            customer_notes TEXT,
+            cancellation_reason TEXT,
+            feedback_requested_at DATETIME DEFAULT NULL,
+            gcash_ref TEXT DEFAULT NULL,
+            receipt_url TEXT DEFAULT NULL,
+            void_status TEXT DEFAULT NULL,
+            void_requested_by TEXT DEFAULT NULL,
+            void_reason TEXT DEFAULT NULL,
+            void_requested_at DATETIME DEFAULT NULL,
+            customer_lat REAL DEFAULT NULL,
+            customer_lng REAL DEFAULT NULL,
+            is_preorder INTEGER DEFAULT 0,
+            landmark TEXT DEFAULT NULL,
+            dining_mode TEXT DEFAULT 'Delivery',
+            arriving_time TEXT DEFAULT NULL,
+            note TEXT DEFAULT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
+          INSERT INTO orders_migrated (
+            id, order_number, customer_id, order_type, status, subtotal, delivery_fee, total_amount,
+            delivery_address, customer_phone, payment_proof_image, payment_ref_number, payment_status,
+            distance_km, customer_notes, cancellation_reason, feedback_requested_at, gcash_ref, receipt_url,
+            void_status, void_requested_by, void_reason, void_requested_at, customer_lat, customer_lng,
+            is_preorder, landmark, dining_mode, arriving_time, note, created_at, updated_at
+          )
+          SELECT
+            id, order_number, customer_id, order_type, status, subtotal, delivery_fee, total_amount,
+            delivery_address, customer_phone, payment_proof_image, payment_ref_number, payment_status,
+            distance_km, customer_notes, cancellation_reason, feedback_requested_at, gcash_ref, receipt_url,
+            void_status, void_requested_by, void_reason, void_requested_at, customer_lat, customer_lng,
+            COALESCE(is_preorder, 0), landmark, COALESCE(dining_mode, 'Delivery'), arriving_time, note, created_at, updated_at
+          FROM orders;
+          DROP TABLE orders;
+          ALTER TABLE orders_migrated RENAME TO orders;
+          COMMIT;
+        `);
+        sqliteDb.pragma('foreign_keys = ON');
+      }
+    } catch (migOrdErr) {
+      try { sqliteDb.exec('ROLLBACK;'); } catch (_) {}
+      try { sqliteDb.pragma('foreign_keys = ON'); } catch (_) {}
+    }
 
     try {
       sqliteDb.exec(`
@@ -999,6 +1065,11 @@ async function initDatabase() {
       await conn.query(`
         ALTER TABLE ingredient_logs
         ADD COLUMN IF NOT EXISTS notes VARCHAR(255) NULL AFTER reference_order_id;
+      `).catch(() => {});
+
+      await conn.query(`
+        ALTER TABLE orders
+        MODIFY COLUMN status ENUM('pending', 'preparing', 'dispatched', 'delivered', 'cancelled', 'voided', 'PAID', 'FOR_CONFIRMATION', 'PENDING_ADMIN_QUOTE') NOT NULL DEFAULT 'pending';
       `).catch(() => {});
 
       // 3. Seed default admin & staff accounts if table is empty
