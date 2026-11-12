@@ -14,6 +14,7 @@ const settingsController = require('../controllers/settingsController');
 const promotionController = require('../controllers/promotionController');
 const xenditController = require('../controllers/xenditController');
 const webhookController = require('../controllers/webhookController');
+const inventoryRoutes = require('./inventoryRoutes');
 const rateLimit = require('express-rate-limit');
 
 const quoteLimiter = rateLimit({
@@ -100,10 +101,11 @@ router.get('/admin/promotions/recipients-count', authController.authMiddleware, 
 router.post('/admin/promotions/:id/broadcast', authController.authMiddleware, promotionController.broadcastPromotion);
 router.post('/promotions/:id/broadcast', authController.authMiddleware, promotionController.broadcastPromotion);
 
-// Background Inventory Routes (Preserved for stock calculation and POS order pipelines)
+// Background Inventory & BOM Recipe Management Routes
 router.get('/inventory', authController.authMiddleware, inventoryController.getInventory);
 router.post('/inventory/restock', authController.authMiddleware, inventoryController.restock);
 router.get('/inventory/logs', authController.authMiddleware, inventoryController.getInventoryLogs);
+router.use('/inventory', inventoryRoutes);
 
 // 6. Feedback & Ratings Routes (FR11)
 router.get('/feedback', authController.authMiddleware, feedbackController.getFeedback);

@@ -8,7 +8,7 @@ const db = require('../../database/db');
 const jwt = require('jsonwebtoken');
 const config = require('../config/config');
 const { calculateDeliveryFare } = require('./fareCalculator');
-const { verifyStockAvailability, deductStockForOrder } = require('./inventoryService');
+const { verifyStockAvailability, deductStockForOrder, deductIngredientsForOrder } = require('./inventoryService');
 const { processPayment } = require('./paymentService');
 const { broadcastSSE, sendNotification } = require('./notificationService');
 const { verifyQuote } = require('./geoService');
@@ -371,6 +371,12 @@ async function updateOrderStatus(orderId, newStatus, extraData = {}) {
 
   const order = orderRows[0];
   const prevStatus = order.status;
+  const targetLower = String(newStatus || '').toLowerCase();
+
+  // Atomically deduct raw ingredients via BOM when order transitions to confirmed / preparing
+  if (['confirmed', 'preparing', 'in_preparation'].includes(targetLower)) {
+    await deductIngredientsForOrder(orderId);
+  }
 
   await db.query(
     `UPDATE orders SET status = ?, cancellation_reason = COALESCE(?, cancellation_reason), updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
@@ -857,6 +863,10 @@ async function verifyOrderPayment(orderId, actor = null) {
   const isPending = !order.status || 
     ['pending', 'pending_approval', 'unpaid', 'new', 'for_confirmation', 'paid'].includes(order.status.toLowerCase());
   const newStatus = isPending ? 'preparing' : order.status;
+
+  if (String(newStatus || '').toLowerCase() === 'preparing') {
+    await deductIngredientsForOrder(orderId);
+  }
 
   await db.query(
     `UPDATE orders 

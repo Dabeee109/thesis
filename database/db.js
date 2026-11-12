@@ -255,6 +255,33 @@ function initSqliteFallback() {
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS ingredients (
+        ingredient_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL,
+        unit TEXT NOT NULL,
+        stock_quantity REAL NOT NULL DEFAULT 0.00,
+        reorder_level REAL NOT NULL DEFAULT 0.00,
+        cost_per_unit REAL NOT NULL DEFAULT 0.00,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS recipe_items (
+        recipe_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        menu_id INTEGER NOT NULL REFERENCES menu_items(id) ON DELETE CASCADE,
+        ingredient_id INTEGER NOT NULL REFERENCES ingredients(ingredient_id) ON DELETE CASCADE,
+        quantity_required REAL NOT NULL,
+        UNIQUE(menu_id, ingredient_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS ingredient_logs (
+        log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ingredient_id INTEGER NOT NULL REFERENCES ingredients(ingredient_id) ON DELETE CASCADE,
+        change_amount REAL NOT NULL,
+        change_type TEXT CHECK(change_type IN ('order_deduction', 'restock', 'spoilage_waste', 'adjustment')) NOT NULL,
+        reference_order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
       CREATE TABLE IF NOT EXISTS store_settings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         gcash_account_name TEXT NOT NULL DEFAULT "Diner's Cafe",
@@ -655,6 +682,96 @@ function seedSqliteData() {
   console.log('[Database] SQLite seed data successfully inserted.');
 }
 
+let bomSeedPromise = null;
+
+/**
+ * Seed initial raw ingredients and sample recipes for 3 menu items idempotently
+ * (Caramel Macchiato, Brown Sugar Milktea, Meaty Dog) after menu_items population.
+ */
+async function seedBomDefaults() {
+  if (bomSeedPromise) return bomSeedPromise;
+  bomSeedPromise = (async () => {
+    try {
+      const [ingCountRows] = await query(`SELECT COUNT(*) AS cnt FROM ingredients`);
+      const ingCount = Number(ingCountRows?.[0]?.cnt || ingCountRows?.[0]?.['COUNT(*)'] || 0);
+      if (ingCount === 0) {
+        const defaultIngredients = [
+          ['Espresso Beans', 'g', 5000.00, 500.00, 1.80],
+          ['Full Cream Milk', 'ml', 10000.00, 1500.00, 0.12],
+          ['Caramel Syrup', 'ml', 3000.00, 300.00, 0.45],
+          ['16oz Cup', 'pcs', 500.00, 50.00, 3.50],
+          ['Black Tea Concentrate', 'ml', 6000.00, 1000.00, 0.08],
+          ['Brown Sugar Syrup', 'ml', 3000.00, 300.00, 0.38],
+          ['Tapioca Pearls', 'g', 4000.00, 500.00, 0.18],
+          ['Hotdog Bun', 'pcs', 200.00, 30.00, 10.00],
+          ['Jumbo Sausage', 'pcs', 200.00, 30.00, 28.00],
+          ['Beef Chili Sauce', 'g', 5000.00, 600.00, 0.35],
+          ['Grated Cheese', 'g', 3000.00, 400.00, 0.55]
+        ];
+        for (const row of defaultIngredients) {
+          await query(
+            `INSERT INTO ingredients (name, unit, stock_quantity, reorder_level, cost_per_unit) VALUES (?, ?, ?, ?, ?)`,
+            row
+          ).catch(() => {});
+        }
+      }
+
+      const [recipeCountRows] = await query(`SELECT COUNT(*) AS cnt FROM recipe_items`);
+      const recipeCount = Number(recipeCountRows?.[0]?.cnt || recipeCountRows?.[0]?.['COUNT(*)'] || 0);
+      if (recipeCount === 0) {
+        const sampleRecipes = [
+          {
+            menuName: 'caramel macchiato',
+            ingredients: [
+              ['Espresso Beans', 18.00],
+              ['Full Cream Milk', 200.00],
+              ['Caramel Syrup', 30.00],
+              ['16oz Cup', 1.00]
+            ]
+          },
+          {
+            menuName: 'brown sugar milktea',
+            ingredients: [
+              ['Black Tea Concentrate', 150.00],
+              ['Full Cream Milk', 120.00],
+              ['Brown Sugar Syrup', 35.00],
+              ['Tapioca Pearls', 50.00],
+              ['16oz Cup', 1.00]
+            ]
+          },
+          {
+            menuName: 'meaty dog',
+            ingredients: [
+              ['Hotdog Bun', 1.00],
+              ['Jumbo Sausage', 1.00],
+              ['Beef Chili Sauce', 60.00],
+              ['Grated Cheese', 25.00]
+            ]
+          }
+        ];
+
+        for (const recipe of sampleRecipes) {
+          const [mRows] = await query(`SELECT id FROM menu_items WHERE LOWER(name) = ? LIMIT 1`, [recipe.menuName]);
+          if (!mRows || mRows.length === 0) continue;
+          const menuId = mRows[0].id;
+
+          for (const [ingName, qtyReq] of recipe.ingredients) {
+            const [iRows] = await query(`SELECT ingredient_id FROM ingredients WHERE name = ? LIMIT 1`, [ingName]);
+            if (!iRows || iRows.length === 0) continue;
+            await query(
+              `INSERT INTO recipe_items (menu_id, ingredient_id, quantity_required) VALUES (?, ?, ?)`,
+              [menuId, iRows[0].ingredient_id, qtyReq]
+            ).catch(() => {});
+          }
+        }
+      }
+    } catch (bomErr) {
+      console.warn('[Database] BOM seed warning:', bomErr.message);
+    }
+  })();
+  return bomSeedPromise;
+}
+
 // Initialize MySQL pool
 async function initDatabase() {
   if (process.env.DB_FORCE_SQLITE === '1') {
@@ -664,6 +781,7 @@ async function initDatabase() {
     if (menuRefreshPromise) {
       await menuRefreshPromise;
     }
+    await seedBomDefaults();
     return ok;
   }
 
@@ -846,6 +964,49 @@ async function initDatabase() {
         ON DUPLICATE KEY UPDATE id=id;
       `).catch(() => {});
 
+      await conn.query(`
+        CREATE TABLE IF NOT EXISTS ingredients (
+          ingredient_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          name VARCHAR(100) NOT NULL UNIQUE,
+          unit VARCHAR(20) NOT NULL,
+          stock_quantity DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+          reorder_level DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+          cost_per_unit DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_ingredient_name (name)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+
+      await conn.query(`
+        CREATE TABLE IF NOT EXISTS recipe_items (
+          recipe_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          menu_id INT UNSIGNED NOT NULL,
+          ingredient_id INT UNSIGNED NOT NULL,
+          quantity_required DECIMAL(10, 2) NOT NULL,
+          UNIQUE KEY uq_menu_ingredient (menu_id, ingredient_id),
+          FOREIGN KEY (menu_id) REFERENCES menu_items(id) ON DELETE CASCADE,
+          FOREIGN KEY (ingredient_id) REFERENCES ingredients(ingredient_id) ON DELETE CASCADE,
+          INDEX idx_recipe_menu_id (menu_id),
+          INDEX idx_recipe_ingredient_id (ingredient_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+
+      await conn.query(`
+        CREATE TABLE IF NOT EXISTS ingredient_logs (
+          log_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          ingredient_id INT UNSIGNED NOT NULL,
+          change_amount DECIMAL(10, 2) NOT NULL,
+          change_type ENUM('order_deduction', 'restock', 'spoilage_waste', 'adjustment') NOT NULL,
+          reference_order_id INT UNSIGNED DEFAULT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (ingredient_id) REFERENCES ingredients(ingredient_id) ON DELETE CASCADE,
+          FOREIGN KEY (reference_order_id) REFERENCES orders(id) ON DELETE SET NULL,
+          INDEX idx_ingredient_log_ing (ingredient_id),
+          INDEX idx_ingredient_log_order (reference_order_id),
+          INDEX idx_ingredient_log_type (change_type)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+
       // 3. Seed default admin & staff accounts if table is empty
       try {
         const [uRows] = await conn.query(`SELECT COUNT(*) as count FROM admins_staff`);
@@ -880,6 +1041,7 @@ async function initDatabase() {
     conn.release();
     console.log(`[Database] Successfully connected to MySQL at ${config.db.host}:${config.db.port}/${config.db.database}`);
     useFallback = false;
+    await seedBomDefaults();
     return true;
   } catch (err) {
     console.warn(`[Database] MySQL unavailable (${err.message}). Activating SQLite local fallback engine...`);
@@ -888,6 +1050,7 @@ async function initDatabase() {
     if (menuRefreshPromise) {
       await menuRefreshPromise;
     }
+    await seedBomDefaults();
     return ok;
   }
 }
@@ -903,17 +1066,22 @@ async function query(sql, params = []) {
     }
   }
 
+  return executeSqliteQuery(sql, params);
+}
+
+function executeSqliteQuery(sql, params = []) {
   // SQLite Fallback execution
   if (!sqliteDb) {
     initSqliteFallback();
   }
 
   // Normalize MySQL SQL dialects to SQLite if needed
-  let normalizedSql = sql
+  const normalizedSql = sql
     .replace(/NOW\(\)/gi, "datetime('now')")
     .replace(/DATE_SUB\(NOW\(\),\s*INTERVAL\s+(\d+)\s+MINUTE\)/gi, "datetime('now', '-$1 minutes')")
     .replace(/IFNULL/gi, "COALESCE")
-    .replace(/JSON_EXTRACT/gi, "json_extract");
+    .replace(/JSON_EXTRACT/gi, "json_extract")
+    .replace(/\bFOR\s+UPDATE\b/gi, '');
 
   const trimmed = normalizedSql.trim();
   const isSelect = /^SELECT|^PRAGMA|^SHOW|^DESCRIBE/i.test(trimmed);
@@ -938,8 +1106,72 @@ async function query(sql, params = []) {
   }
 }
 
+let sqliteTxDepth = 0;
+
+/**
+ * Execute an atomic transaction across either MySQL 8.0 pool or SQLite fallback.
+ * Passes a dbConnection (`{ query }`) to the callback and commits/rolls back automatically.
+ */
+async function withTransaction(callback) {
+  if (!useFallback && pool) {
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const result = await callback(conn);
+      await conn.commit();
+      return result;
+    } catch (err) {
+      await conn.rollback().catch(() => {});
+      throw err;
+    } finally {
+      conn.release();
+    }
+  }
+
+  if (!sqliteDb) {
+    initSqliteFallback();
+  }
+
+  const isOuter = sqliteTxDepth === 0;
+  const savepointName = `sp_bom_${sqliteTxDepth}`;
+  if (isOuter) {
+    sqliteDb.exec('BEGIN IMMEDIATE');
+  } else {
+    sqliteDb.exec(`SAVEPOINT ${savepointName}`);
+  }
+  sqliteTxDepth += 1;
+
+  const sqliteConn = {
+    isSqlite: true,
+    query: async (sql, params = []) => executeSqliteQuery(sql, params)
+  };
+
+  try {
+    const result = await callback(sqliteConn);
+    if (isOuter) {
+      sqliteDb.exec('COMMIT');
+    } else {
+      sqliteDb.exec(`RELEASE SAVEPOINT ${savepointName}`);
+    }
+    return result;
+  } catch (err) {
+    try {
+      if (isOuter) {
+        sqliteDb.exec('ROLLBACK');
+      } else {
+        sqliteDb.exec(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+      }
+    } catch (_) {}
+    throw err;
+  } finally {
+    sqliteTxDepth = Math.max(0, sqliteTxDepth - 1);
+  }
+}
+
 module.exports = {
   initDatabase,
   query,
+  withTransaction,
+  getPool: () => pool,
   isUsingFallback: () => useFallback
 };

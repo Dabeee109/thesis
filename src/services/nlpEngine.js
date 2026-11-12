@@ -3718,6 +3718,20 @@ async function handleQuantitySelection(psid, session, qty) {
   const quantity = Math.max(1, qty || 1);
   const item = session.pendingItem;
 
+  const { checkMenuAvailability } = require('./inventoryService');
+  const bomCheck = await checkMenuAvailability(item.id || item.menuItemId, quantity);
+  if (!bomCheck.available) {
+    session.pendingItem = null;
+    session.state = 'BROWSING';
+    await saveSession(session);
+    const missingNames = (bomCheck.missingIngredients || []).map(m => m.name).join(', ');
+    const oosMsg = missingNames
+      ? `Paumanhin po, out of stock na po ang ${item.name} dahil kulang na ang raw ingredients (${missingNames}). Pili na lang po tayo ng iba!`
+      : `Paumanhin po, sold out / out of stock na po ang ${item.name} sa ngayon.`;
+    await sendQuickReplies(psid, oosMsg, [{ title: '☕ Menu', payload: 'MENU_HOME' }]);
+    return;
+  }
+
   // If item is a drink or milk tea, ask if they want add-ons
   if (isDrinkOrMilktea(item)) {
     await promptDrinkAddons(psid, session, item, quantity);
@@ -3798,6 +3812,17 @@ async function handleOrderItemText(psid, session, rawText, nlu) {
     }
 
     const qty = nlu.quantity || parseQuantity(rawText) || 1;
+
+    const { checkMenuAvailability } = require('./inventoryService');
+    const bomCheck = await checkMenuAvailability(matchedItem.id, qty);
+    if (!bomCheck.available) {
+      const missingNames = (bomCheck.missingIngredients || []).map(m => m.name).join(', ');
+      const soldOutMsg = missingNames
+        ? `Paumanhin po, out of stock na po ang ${matchedItem.name} sa ngayon (kulang sa ingredients: ${missingNames}).`
+        : `Paumanhin po, sold out na po ang item na ito. (${matchedItem.name} is currently unavailable)`;
+      await sendQuickReplies(psid, soldOutMsg, [{ title: '☕ Menu', payload: 'MENU_HOME' }]);
+      return { intent: 'ORDER_ITEM_OUT_OF_STOCK', confidence: 1.0, handled: true };
+    }
 
     if (qty !== null && qty > 0) {
       if (isDrinkOrMilktea(matchedItem)) {
@@ -4894,8 +4919,13 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
           if (dbItem) {
             const stock = Number(dbItem.stock_quantity ?? 0);
             const isAvail = dbItem.is_available === 1 || dbItem.is_available === true;
-            if (!isAvail || stock <= 0) {
-              const oosMsg = `Paumanhin po, sold out / out of stock na po ang ${dbItem.name} sa ngayon. Pili na lang po tayo ng ibang available sa menu!`;
+            const { checkMenuAvailability } = require('./inventoryService');
+            const bomCheck = await checkMenuAvailability(dbItem.id, qty);
+            if (!isAvail || stock <= 0 || !bomCheck.available) {
+              const missingList = (bomCheck.missingIngredients || []).map(m => m.name).join(', ');
+              const oosMsg = missingList
+                ? `Paumanhin po, out of stock na po ang ${dbItem.name} sa ngayon (kulang sa ingredients: ${missingList}). Pili na lang po tayo ng ibang available sa menu!`
+                : `Paumanhin po, sold out / out of stock na po ang ${dbItem.name} sa ngayon. Pili na lang po tayo ng ibang available sa menu!`;
               await sendQuickReplies(psid, oosMsg, [
                 { title: '☕ Menu', payload: 'MENU_HOME' },
                 { title: '🛒 Cart', payload: 'VIEW_CART' }

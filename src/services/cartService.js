@@ -199,6 +199,20 @@ async function priceCart(cart) {
       continue;
     }
 
+    const { checkMenuAvailability } = require('./inventoryService');
+    const bomAvail = await checkMenuAvailability(c.menuItemId, qty);
+    if (!bomAvail.available) {
+      unavailable.push({
+        menuItemId: c.menuItemId,
+        name: dbItem.name,
+        available: false,
+        stock: 0,
+        requested: qty,
+        missingIngredients: bomAvail.missingIngredients
+      });
+      continue;
+    }
+
     const unitPrice = parseFloat(dbItem.price);
     const lineTotal = unitPrice * qty;
     subtotal += lineTotal;
