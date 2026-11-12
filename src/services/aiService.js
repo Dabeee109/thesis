@@ -257,16 +257,60 @@ async function loadOperationalContext(psid, session = null) {
         m.description,
         m.image_url,
         m.is_available,
-        COALESCE(i.stock_quantity, m.stock_quantity, 0) AS stock,
         COALESCE(c.name, 'Cafe') AS category
       FROM menu_items m
       LEFT JOIN categories c ON c.id = m.category_id
-      LEFT JOIN inventory i ON i.menu_item_id = m.id
       WHERE COALESCE(m.is_deleted, 0) = 0
         AND (c.id IS NULL OR c.is_active = 1)
       ORDER BY COALESCE(c.display_order, 999) ASC, m.name ASC
     `);
-    menuItems = Array.isArray(rows) ? rows : [];
+
+    // Live Recipe-Driven Servings Calculation (BOM)
+    let recipes = [];
+    try {
+      const [recipeRows] = await db.query(`
+        SELECT 
+          r.menu_id,
+          r.quantity_required,
+          i.stock_quantity AS ingredient_stock
+        FROM recipe_items r
+        JOIN ingredients i ON i.ingredient_id = r.ingredient_id
+      `);
+      recipes = Array.isArray(recipeRows) ? recipeRows : [];
+    } catch (_) {}
+
+    const recipesByMenu = new Map();
+    for (const r of recipes) {
+      if (!recipesByMenu.has(r.menu_id)) {
+        recipesByMenu.set(r.menu_id, []);
+      }
+      recipesByMenu.get(r.menu_id).push(r);
+    }
+
+    menuItems = (Array.isArray(rows) ? rows : []).map(item => {
+      const reqs = recipesByMenu.get(item.id);
+      let maxServings;
+      const hasRecipe = Boolean(reqs && reqs.length > 0);
+
+      if (hasRecipe) {
+        const servings = reqs.map(r => {
+          const q = Number(r.quantity_required) || 0;
+          const s = Number(r.ingredient_stock) || 0;
+          return q > 0 ? Math.floor(s / q) : 9999;
+        });
+        maxServings = Math.max(0, Math.min(...servings));
+      } else {
+        // Fallback rule: default to AVAILABLE (50 servings) if visible
+        maxServings = (item.is_available === 1 || item.is_available === true) ? 50 : 0;
+      }
+
+      return {
+        ...item,
+        stock: maxServings,
+        max_servings: maxServings,
+        has_recipe: hasRecipe
+      };
+    });
   } catch (err) {
     console.warn('[aiService] Failed to query menu_items for RAG context:', err.message);
   }
@@ -346,9 +390,15 @@ function buildAssistantSystemInstruction(context = {}) {
 
   const menuCatalogBlock = menuItems.length > 0
     ? menuItems.map(item => {
-        const stock = Number(item.stock ?? item.stock_quantity ?? 0);
-        const available = (item.is_available === 1 || item.is_available === true) && stock > 0;
-        const flag = available ? `[AVAILABLE | Stock: ${stock}]` : '[OUT OF STOCK - DO NOT SELL]';
+        const maxServings = Number(item.max_servings ?? item.stock ?? 0);
+        const isVisible = (item.is_available === 1 || item.is_available === true);
+        const isOrderable = isVisible && maxServings > 0;
+        let flag = '[OUT OF STOCK - DO NOT SELL]';
+        if (isOrderable) {
+          flag = maxServings < 15
+            ? `[LOW ON STOCK | Servings: ${maxServings}]`
+            : `[AVAILABLE | Servings: ${maxServings}]`;
+        }
         const price = Number(item.price || 0).toFixed(2);
         return `- ${item.name} | ₱${price} | Category: ${item.category || 'Cafe'} | ${flag} | ${item.description || 'Freshly prepared cafe specialty'}`;
       }).join('\n')
@@ -380,7 +430,7 @@ function buildAssistantSystemInstruction(context = {}) {
 - Seamlessly understand typos (e.g., "chesecake" -> "Biscoff Cheesecake", "spansh late" -> "Spanish Latte"), text shortcuts ("pde ba mgpa-dlvr"), Taglish code-switching, and local Filipino terms.
 - OPEN-DOMAIN BANTER & SMOOTH PIVOT: If the customer talks about their day, cracks a joke, or asks for life advice, respond empathetically and engagingly FIRST, then smoothly segue back to cafe favorites.
 - NON-EXISTENT ITEM GUARD: If the customer asks for an item NOT in the LIVE MENU CATALOG below (e.g. sushi, spaghetti, ramen, tacos), NEVER hallucinate or add it! Explicitly and politely inform them that Diner's Cafe does not serve it, and suggest 1-2 available menu items. Set detected_action = "NONE".
-- OUT-OF-STOCK GUARD: NEVER sell, recommend, or add [OUT OF STOCK - DO NOT SELL] items. Politely inform the customer that it is sold out and recommend available alternatives.
+- OUT-OF-STOCK & QUANTITY LIMIT GUARD: Menu item availability is 100% recipe-driven based on raw ingredients. NEVER sell, recommend, or add [OUT OF STOCK - DO NOT SELL] items. Politely inform the customer that it is sold out and recommend available alternatives. If a customer orders more servings than currently available (e.g., ordering 4 when only 2 servings remain), politely inform them of the maximum servings available and offer to prepare up to the remaining amount.
 - DRINK-ONLY ADD-ON UPSELL: Drink sinkers/add-ons (+₱20: Pearls, Nata de Coco, Cream Cheese, Coffee Jelly, Egg Pudding) can ONLY be attached to "Drinks & Milktea". NEVER attach them to food/meals/silog/pizza/pasta.
 - "IKAW NA BAHALA" / DEALER'S CHOICE COMBOS: If the customer asks you to pick for them, select AT LEAST 1 [AVAILABLE] food item AND AT LEAST 1 [AVAILABLE] drink item from the live catalog, set detected_action = "ADD_ITEM", put both in extracted_data.items, and tell them what you picked.
 - RECOMMENDATION SWAP: If customer changes their mind or asks for different recommendations (e.g. 'iba na lang', 'ayaw ko ng pare-pareho'), replace previously suggested items rather than stacking duplicates in cart.

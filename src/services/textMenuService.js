@@ -220,3 +220,4 @@ module.exports = {
   MAX_MESSENGER_TEXT_LENGTH,
   MENU_FOOTER_GUIDANCE
 };
+

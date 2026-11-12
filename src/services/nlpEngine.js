@@ -637,6 +637,10 @@ async function finalizeOrderSummaryAndPayment(psid, session) {
         deliveryFee,
         totalAmount: grandTotal,
         discountAmount,
+        discountType: (session.discount?.applied || discountAmount > 0) ? (session.discount?.type || 'SENIOR_CITIZEN') : 'NONE',
+        discountIdNumber: session.discount?.idNumber || session.discount?.id_number || null,
+        discountIdName: session.discount?.name || session.discount?.extracted_name || null,
+        discountIdImageUrl: session.discount?.imageUrl || session.discount?.image_url || null,
         is_preorder: Boolean(session.is_preorder)
       });
 
@@ -686,6 +690,10 @@ async function finalizeOrderSummaryAndPayment(psid, session) {
         deliveryFee,
         totalAmount: grandTotal,
         discountAmount,
+        discountType: (session.discount?.applied || discountAmount > 0) ? (session.discount?.type || 'SENIOR_CITIZEN') : 'NONE',
+        discountIdNumber: session.discount?.idNumber || session.discount?.id_number || null,
+        discountIdName: session.discount?.name || session.discount?.extracted_name || null,
+        discountIdImageUrl: session.discount?.imageUrl || session.discount?.image_url || null,
         is_preorder: Boolean(session.is_preorder),
         paymentStatus: 'Pending'
       });
@@ -5509,6 +5517,11 @@ async function handleStage5Confirmation(psid, session, options = {}) {
     items,
     deliveryFee: session.delivery_fee || 0,
     totalAmount,
+    discountAmount: session.discount_amount || session.discount?.amount || 0,
+    discountType: (session.discount?.applied || session.discount_amount > 0) ? (session.discount?.type || 'SENIOR_CITIZEN') : 'NONE',
+    discountIdNumber: session.discount?.idNumber || session.discount?.id_number || null,
+    discountIdName: session.discount?.name || session.discount?.extracted_name || null,
+    discountIdImageUrl: session.discount?.imageUrl || session.discount?.image_url || null,
     customerNotes: 'Stage 5 Order Placed',
     quoteToken
   });

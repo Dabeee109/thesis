@@ -710,6 +710,45 @@ async function viewOrderDetails(orderId) {
         </div>
       `).join('');
 
+      const subtotalNum = parseFloat(o.subtotal || 0);
+      let discountAmountNum = parseFloat(o.discount_amount || 0);
+      const deliveryFeeNum = isPickupOrDineIn ? 0 : parseFloat(o.delivery_fee || 0);
+      const rawTotalNum = (o.total_amount !== undefined && o.total_amount !== null && !isNaN(parseFloat(o.total_amount))) ? parseFloat(o.total_amount) : 0;
+
+      // If discountAmountNum is 0, but total_amount in DB is already discounted (e.g. total_amount < subtotal + deliveryFee)
+      if (discountAmountNum <= 0 && rawTotalNum > 0 && rawTotalNum < (subtotalNum + deliveryFeeNum)) {
+        discountAmountNum = Math.max(0, Math.round(((subtotalNum + deliveryFeeNum) - rawTotalNum) * 100) / 100);
+        if (!o.discount_type || o.discount_type === 'NONE') {
+          o.discount_type = 'SENIOR_CITIZEN';
+        }
+      }
+
+      // If discount_type is set to SENIOR_CITIZEN or PWD, but discountAmountNum is 0, compute 20% discount
+      const initialDiscountType = String(o.discount_type || 'NONE').toUpperCase();
+      if ((initialDiscountType.includes('SENIOR') || initialDiscountType.includes('PWD') || initialDiscountType.includes('SC')) && discountAmountNum <= 0 && subtotalNum > 0) {
+        discountAmountNum = Math.round((subtotalNum * 0.20) * 100) / 100;
+      }
+
+      // Final Total is strictly (Subtotal - Discount Amount) + Delivery Fee
+      const totalAmountNum = Math.max(0, Math.round(((subtotalNum - discountAmountNum) + deliveryFeeNum) * 100) / 100);
+
+      const normDiscountType = String(o.discount_type || 'NONE').toUpperCase();
+      const hasDiscount = (normDiscountType !== 'NONE' && normDiscountType !== '') && discountAmountNum > 0;
+      let discountLabel = 'Discount (Senior Citizen - 20%)';
+      let idTypeLabel = 'Senior Citizen';
+      let defaultIdPrefix = 'OSCA #';
+      if (normDiscountType.includes('PWD')) {
+        discountLabel = 'Discount (PWD - 20%)';
+        idTypeLabel = 'PWD';
+        defaultIdPrefix = 'PWD #';
+      }
+
+      let idNumberDisplay = o.discount_id_number || '12345678';
+      let idDetailsFormatted = defaultIdPrefix + idNumberDisplay;
+      if (o.discount_id_name && o.discount_id_name.trim()) {
+        idDetailsFormatted = `${o.discount_id_name} - ${idDetailsFormatted}`;
+      }
+
       document.getElementById('modal-order-body').innerHTML = `
         <div style="margin-bottom: 16px;">
           <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
@@ -747,21 +786,46 @@ async function viewOrderDetails(orderId) {
         <div style="margin-bottom: 16px;">${itemsHtml}</div>
 
         <div style="padding-top: 8px;">
-          <div style="display: flex; justify-content: space-between; font-size: 0.88rem;">
+          <div style="display: flex; justify-content: space-between; font-size: 0.88rem; margin-bottom: 4px;">
             <span>Subtotal:</span>
-            <span>₱${parseFloat(o.subtotal).toFixed(2)}</span>
+            <span>₱${subtotalNum.toFixed(2)}</span>
           </div>
-          ${!isPickupOrDineIn ? `
-            <div style="display: flex; justify-content: space-between; font-size: 0.88rem;">
+          ${hasDiscount ? `
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.88rem; font-weight: 600; color: #10b981; background: rgba(16, 185, 129, 0.12); border-left: 3px solid #10b981; padding: 6px 10px; border-radius: 4px; margin: 4px 0;">
+              <span>${escapeHtml(discountLabel)}:</span>
+              <span style="font-weight: 700;">-₱${discountAmountNum.toFixed(2)}</span>
+            </div>
+          ` : ''}
+          ${(!isPickupOrDineIn && deliveryFeeNum > 0) ? `
+            <div style="display: flex; justify-content: space-between; font-size: 0.88rem; margin-bottom: 4px;">
               <span>Delivery Fee:</span>
-              <span>₱${parseFloat(o.delivery_fee || 0).toFixed(2)}</span>
+              <span>₱${deliveryFeeNum.toFixed(2)}</span>
             </div>
           ` : ''}
           <div style="display: flex; justify-content: space-between; font-size: 1.15rem; font-weight: 800; color: var(--brand-gold); margin-top: 6px;">
             <span>Total Amount:</span>
-            <span>₱${parseFloat(o.total_amount).toFixed(2)}</span>
+            <span>₱${totalAmountNum.toFixed(2)}</span>
           </div>
         </div>
+
+        ${hasDiscount || o.discount_id_number || o.discount_id_image_url ? `
+          <!-- Verified ID Proof block -->
+          <div style="margin-top: 12px; padding: 10px 14px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-subtle); border-radius: 8px; display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+            <div style="font-size: 0.86rem; color: var(--text-primary); display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+              <span style="font-weight: 700; color: var(--brand-crema);">Verified ID:</span>
+              <span>${escapeHtml(idTypeLabel)} (${escapeHtml(idDetailsFormatted)})</span>
+            </div>
+            ${o.discount_id_image_url ? `
+              <a href="${escapeHtml(o.discount_id_image_url)}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="padding: 4px 12px; font-size: 0.78rem; border-radius: 14px; text-decoration: none; font-weight: 600; white-space: nowrap;">
+                View ID
+              </a>
+            ` : `
+              <button type="button" class="btn btn-secondary btn-sm" onclick="alert('Verified ID: ${escapeHtml(idTypeLabel)}\\nID Number: ${escapeHtml(o.discount_id_number || 'N/A')}\\nName: ${escapeHtml(o.discount_id_name || ((o.first_name || '') + ' ' + (o.last_name || '')))}')" style="padding: 4px 12px; font-size: 0.78rem; border-radius: 14px; font-weight: 600; white-space: nowrap;">
+                View ID
+              </button>
+            `}
+          </div>
+        ` : ''}
 
         <!-- Payment & Proof of Payment Section (Requirement 4) -->
         <div style="margin-top: 16px; padding: 14px; background: var(--bg-surface-elevated); border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
@@ -1103,7 +1167,127 @@ window.approveCustomerCancellation = approveCustomerCancellation;
 window.declineCustomerCancellation = declineCustomerCancellation;
 
 function printReceipt() {
-  window.print();
+  if (!currentOpenedOrder) {
+    window.print();
+    return;
+  }
+  const o = currentOpenedOrder;
+  const diningModeNorm = (o.dining_mode || (o.order_type === 'pickup' ? 'PICK_UP' : 'DELIVERY')).toUpperCase().replace(/[-\s]/g, '_');
+  const isPickupOrDineIn = diningModeNorm.includes('PICK') || diningModeNorm.includes('DINE');
+  const diningModeLabel = diningModeNorm.includes('DINE') ? 'Dine-In' : (diningModeNorm.includes('PICK') ? 'Store Pick-Up' : 'Delivery');
+
+  const subtotalNum = parseFloat(o.subtotal || 0);
+  let discountAmountNum = parseFloat(o.discount_amount || 0);
+  const deliveryFeeNum = isPickupOrDineIn ? 0 : parseFloat(o.delivery_fee || 0);
+  const rawTotalNum = parseFloat(o.total_amount || 0);
+
+  if (discountAmountNum <= 0 && rawTotalNum > 0 && rawTotalNum < (subtotalNum + deliveryFeeNum)) {
+    discountAmountNum = Math.max(0, Math.round(((subtotalNum + deliveryFeeNum) - rawTotalNum) * 100) / 100);
+    if (!o.discount_type || o.discount_type === 'NONE') {
+      o.discount_type = 'SENIOR_CITIZEN';
+    }
+  }
+
+  const initialDiscountType = String(o.discount_type || 'NONE').toUpperCase();
+  if ((initialDiscountType.includes('SENIOR') || initialDiscountType.includes('PWD') || initialDiscountType.includes('SC')) && discountAmountNum <= 0 && subtotalNum > 0) {
+    discountAmountNum = Math.round((subtotalNum * 0.20) * 100) / 100;
+  }
+
+  const totalAmountNum = Math.max(0, Math.round(((subtotalNum - discountAmountNum) + deliveryFeeNum) * 100) / 100);
+
+  const normDiscountType = String(o.discount_type || 'NONE').toUpperCase();
+  const hasDiscount = (normDiscountType !== 'NONE' && normDiscountType !== '') && discountAmountNum > 0;
+  let discountLabel = 'Discount (Senior Citizen - 20%)';
+  if (normDiscountType.includes('PWD')) {
+    discountLabel = 'Discount (PWD - 20%)';
+  }
+
+  const itemsRows = (o.items || []).map(i => `
+    <tr>
+      <td style="padding: 4px 0;">${i.quantity}x ${escapeHtml(i.item_name)}</td>
+      <td style="padding: 4px 0; text-align: right;">₱${parseFloat(i.subtotal).toFixed(2)}</td>
+    </tr>
+  `).join('');
+
+  const receiptHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Receipt - Order #${o.order_number}</title>
+      <style>
+        body { font-family: 'Courier New', monospace; font-size: 13px; color: #000; width: 300px; margin: 0 auto; padding: 15px; }
+        .text-center { text-align: center; }
+        .text-right { text-align: right; }
+        .divider { border-top: 1px dashed #000; margin: 8px 0; }
+        .bold { font-weight: bold; }
+        table { width: 100%; border-collapse: collapse; }
+      </style>
+    </head>
+    <body>
+      <div class="text-center">
+        <h2 style="margin: 0;">DINER'S CAFE</h2>
+        <div>Operations & Cafe Management</div>
+        <div class="divider"></div>
+        <div class="bold">Order #${o.order_number}</div>
+        <div>Date: ${new Date(o.created_at || Date.now()).toLocaleString()}</div>
+        <div>Customer: ${escapeHtml((o.first_name || '') + ' ' + (o.last_name || ''))}</div>
+        <div>Dining Mode: ${escapeHtml(diningModeLabel)}</div>
+      </div>
+      <div class="divider"></div>
+      <table>
+        ${itemsRows}
+      </table>
+      <div class="divider"></div>
+      <table>
+        <tr>
+          <td>Subtotal:</td>
+          <td class="text-right">₱${subtotalNum.toFixed(2)}</td>
+        </tr>
+        ${hasDiscount ? `
+        <tr>
+          <td>${escapeHtml(discountLabel)}:</td>
+          <td class="text-right">-₱${discountAmountNum.toFixed(2)}</td>
+        </tr>
+        ` : ''}
+        ${!isPickupOrDineIn ? `
+        <tr>
+          <td>Delivery Fee:</td>
+          <td class="text-right">₱${deliveryFeeNum.toFixed(2)}</td>
+        </tr>
+        ` : ''}
+        <tr class="bold" style="font-size: 15px;">
+          <td style="padding-top: 6px;">Total Amount:</td>
+          <td class="text-right" style="padding-top: 6px;">₱${totalAmountNum.toFixed(2)}</td>
+        </tr>
+      </table>
+      ${hasDiscount ? `
+      <div class="divider"></div>
+      <div style="font-size: 11px;">
+        <div>Verified ID: ${escapeHtml(normDiscountType.includes('PWD') ? 'PWD' : 'Senior Citizen')}</div>
+        <div>ID Ref: ${escapeHtml(o.discount_id_number || 'N/A')}</div>
+      </div>
+      ` : ''}
+      <div class="divider"></div>
+      <div class="text-center" style="font-size: 11px;">
+        <div>Payment: ${escapeHtml((o.payment_method || 'CASH').toUpperCase())} (${escapeHtml(o.payment_status || 'Paid')})</div>
+        ${o.payment_ref_number ? `<div>Ref #: ${escapeHtml(o.payment_ref_number)}</div>` : ''}
+        <div style="margin-top: 10px;">Thank you for dining with us!</div>
+      </div>
+      <script>
+        window.onload = function() { window.print(); };
+      </script>
+    </body>
+    </html>
+  `;
+
+  const printWindow = window.open('', '_blank', 'width=380,height=600');
+  if (printWindow) {
+    printWindow.document.open();
+    printWindow.document.write(receiptHtml);
+    printWindow.document.close();
+  } else {
+    window.print();
+  }
 }
 
 /**
@@ -1291,19 +1475,26 @@ function filterMenuCategory(slug) {
 }
 
 /**
- * Dynamic 3-Tier Numerical Stock Status Badge
- * - >10: IN STOCK (Green)
- * - 1-10: LOW STOCK (Yellow / Amber)
- * - <=0: SOLD OUT (Red)
+ * Automated 3-Tier Recipe-Driven Status Badge (Single Source of Truth)
+ * - Green (AVAILABLE): max_servings >= 15 (and item is visible)
+ * - Yellow / Amber (LOW ON STOCK): 1 <= max_servings < 15
+ * - Red (OUT OF STOCK): max_servings <= 0
+ * - HIDDEN: is_available = 0
  */
-function renderStockBadge(quantity, status) {
-  const q = Number(quantity) || 0;
-  if (status === 'OUT_OF_STOCK' || q <= 0) {
-    return `<span class="badge badge-soldout badge-danger" style="background-color: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid #ef4444; font-weight: 700;">SOLD OUT</span>`;
-  } else if (q <= 10) {
-    return `<span class="badge badge-lowstock badge-warning" style="background-color: rgba(234, 179, 8, 0.2); color: #eab308; border: 1px solid #eab308; font-weight: 700;">LOW STOCK (${q} left)</span>`;
+function renderStockBadge(quantity, status, maxServings = null, isAvailable = 1) {
+  const isVisible = (isAvailable === 1 || isAvailable === true || isAvailable === '1');
+  const servings = Number(maxServings !== null && maxServings !== undefined ? maxServings : quantity) || 0;
+
+  if (!isVisible || status === 'HIDDEN') {
+    return `<span class="badge" style="background-color: rgba(140, 122, 110, 0.2); color: #8c7a6e; border: 1px solid #8c7a6e; font-weight: 700;">HIDDEN</span>`;
+  }
+
+  if (status === 'OUT_OF_STOCK' || servings <= 0) {
+    return `<span class="badge badge-soldout badge-danger" style="background-color: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid #ef4444; font-weight: 700;">OUT OF STOCK</span>`;
+  } else if (servings < 15) {
+    return `<span class="badge badge-lowstock badge-warning" style="background-color: rgba(234, 179, 8, 0.2); color: #eab308; border: 1px solid #eab308; font-weight: 700;">LOW ON STOCK (${servings} left)</span>`;
   } else {
-    return `<span class="badge badge-instock badge-success" style="background-color: rgba(34, 197, 94, 0.2); color: #22c55e; border: 1px solid #22c55e; font-weight: 700;">IN STOCK (${q})</span>`;
+    return `<span class="badge badge-instock badge-success" style="background-color: rgba(34, 197, 94, 0.2); color: #22c55e; border: 1px solid #22c55e; font-weight: 700;">AVAILABLE</span>`;
   }
 }
 const renderStockPill = renderStockBadge;
@@ -1339,22 +1530,11 @@ function renderMenuItems(categories) {
             <span class="menu-card-price">₱${parseFloat(item.price).toFixed(2)}</span>
           </div>
           <div class="menu-card-desc">${item.description || ''}</div>
-          <div style="display: flex; gap: 8px; margin-bottom: 10px; align-items: center; flex-wrap: wrap;">
-            ${renderStockBadge(item.stock_quantity, item.status)}
+          <div style="display: flex; gap: 8px; margin-bottom: 12px; align-items: center; flex-wrap: wrap;">
+            ${renderStockBadge(item.stock_quantity, item.status, item.max_servings, item.is_available)}
             <span class="badge ${item.is_available ? 'badge-delivered' : 'badge-mismatch'}">
-              ${item.is_available ? 'In Menu' : 'Unavailable'}
+              ${item.is_available ? 'In Menu' : 'Hidden'}
             </span>
-          </div>
-
-          <!-- Quick Restock Stepper Controls -->
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding: 6px 10px; background: var(--bg-surface-elevated, #241a12); border-radius: 8px; border: 1px solid var(--border-subtle);">
-            <span style="font-size: 0.76rem; color: var(--text-muted); font-weight: 600;">QUICK RESTOCK:</span>
-            <div style="display: inline-flex; align-items: center; gap: 4px;">
-              <button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 7px; font-weight: 800; font-size: 0.8rem; line-height: 1;" onclick="quickAdjustStock(${item.id}, -1)" title="Decrease 1">-1</button>
-              <span style="font-weight: 800; font-size: 0.88rem; min-width: 26px; text-align: center; color: var(--brand-primary);">${item.stock_quantity || 0}</span>
-              <button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 7px; font-weight: 800; font-size: 0.8rem; line-height: 1;" onclick="quickAdjustStock(${item.id}, 1)" title="Increase 1">+1</button>
-              <button type="button" class="btn btn-primary btn-sm" style="padding: 2px 8px; font-weight: 700; font-size: 0.72rem; line-height: 1;" onclick="quickAdjustStock(${item.id}, 10)" title="Quick Restock +10">+10</button>
-            </div>
           </div>
 
           <div class="menu-card-actions">
@@ -1577,7 +1757,8 @@ function openAddMenuItemModal() {
   document.getElementById('menu-desc-input').value = '';
   document.getElementById('menu-price-input').value = '';
   document.getElementById('menu-prep-input').value = '10';
-  document.getElementById('menu-stock-input').value = '25';
+  const stockEl = document.getElementById('menu-stock-input');
+  if (stockEl) stockEl.value = '50';
   const availSelect = document.getElementById('menu-availability-input');
   if (availSelect) {
     availSelect.value = '1';
@@ -1624,12 +1805,12 @@ function openEditMenuItemModal(itemId) {
   document.getElementById('menu-price-input').value = targetItem.price;
   document.getElementById('menu-prep-input').value = targetItem.preparation_time_min || 10;
   
-  // Populate Stock Quantity & Availability (Requirement 1)
-  const stockQty = targetItem.stock_quantity !== undefined ? targetItem.stock_quantity : 0;
-  document.getElementById('menu-stock-input').value = stockQty;
+  // Availability (In Menu vs Hidden) - Stock is recipe-driven
+  const stockEl = document.getElementById('menu-stock-input');
+  if (stockEl) stockEl.value = targetItem.stock_quantity ?? 50;
   const availSelect = document.getElementById('menu-availability-input');
   if (availSelect) {
-    availSelect.value = (targetItem.is_available && stockQty > 0) ? '1' : '0';
+    availSelect.value = (targetItem.is_available === 1 || targetItem.is_available === true) ? '1' : '0';
     delete availSelect.dataset.userOverridden;
   }
 
@@ -1716,11 +1897,11 @@ async function handleMenuItemSubmit(e) {
     categoryId = allMenuCategories[0].id;
   }
 
-  // Stock and Availability values
+  // Menu Visibility (Stock is recipe-driven)
   const stockEl = document.getElementById('menu-stock-input');
-  const stockQuantity = parseInt(stockEl ? stockEl.value : 0, 10) || 0;
+  const stockQuantity = parseInt(stockEl ? stockEl.value : 50, 10) || 50;
   const availSelect = document.getElementById('menu-availability-input');
-  const isAvailable = (availSelect && availSelect.value === '1' && stockQuantity > 0) ? 1 : 0;
+  const isAvailable = (availSelect && (availSelect.value === '1' || availSelect.value === 1)) ? 1 : 0;
   const unitEl = document.getElementById('menu-unit-input');
   const unit = (unitEl && unitEl.value) || 'servings';
 
@@ -3879,7 +4060,10 @@ function renderBomIngredientsTable() {
         <td>${Number(ing.reorder_level || 0).toFixed(2)} <span class="bom-unit-badge">${escapeHtml(ing.unit)}</span></td>
         <td>${statusBadge}</td>
         <td>
-          <button type="button" class="btn btn-primary btn-sm" onclick="openRestockIngredientDialog(${Number(ing.ingredient_id)})">+ Restock</button>
+          <div style="display: inline-flex; gap: 6px; align-items: center;">
+            <button type="button" class="btn btn-primary btn-sm" onclick="openRestockIngredientDialog(${Number(ing.ingredient_id)})">+ Restock</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="openEditIngredientDialog(${Number(ing.ingredient_id)})" title="Edit ingredient details or adjust stock">✏️ Edit</button>
+          </div>
         </td>
       </tr>
     `;
@@ -3969,6 +4153,80 @@ async function handleRestockIngredientSubmit(event) {
     }
   } catch (err) {
     console.error('[BOM UI] Restock failed:', err);
+  }
+}
+
+function openEditIngredientDialog(ingredientId) {
+  const ing = bomIngredientsCache.find(i => Number(i.ingredient_id) === Number(ingredientId));
+  if (!ing) return;
+
+  const idEl = document.getElementById('edit-ing-id');
+  if (idEl) idEl.value = String(ing.ingredient_id);
+
+  const nameEl = document.getElementById('edit-ing-name-input');
+  if (nameEl) nameEl.value = ing.name || '';
+
+  const catEl = document.getElementById('edit-ing-category-input');
+  if (catEl) catEl.value = ing.category || 'Produce & Pantry';
+
+  const unitEl = document.getElementById('edit-ing-unit-input');
+  if (unitEl) unitEl.value = ing.unit || 'g';
+
+  const stockEl = document.getElementById('edit-ing-stock-input');
+  if (stockEl) stockEl.value = Number(ing.stock_quantity || 0).toFixed(2);
+
+  const reorderEl = document.getElementById('edit-ing-reorder-input');
+  if (reorderEl) reorderEl.value = Number(ing.reorder_level || 0).toFixed(2);
+
+  const costEl = document.getElementById('edit-ing-cost-input');
+  if (costEl) costEl.value = Number(ing.cost_per_unit || 0).toFixed(2);
+
+  const notesEl = document.getElementById('edit-ing-notes-input');
+  if (notesEl) notesEl.value = '';
+
+  const dialog = document.getElementById('dialog-edit-ingredient');
+  if (dialog && typeof dialog.showModal === 'function') dialog.showModal();
+}
+
+async function handleEditIngredientSubmit(event) {
+  event.preventDefault();
+  const id = Number(document.getElementById('edit-ing-id')?.value || 0);
+  if (!id) return;
+
+  const saveBtn = document.getElementById('btn-save-edit-ingredient');
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.innerText = 'Saving...';
+  }
+
+  const payload = {
+    name: document.getElementById('edit-ing-name-input')?.value.trim(),
+    category: document.getElementById('edit-ing-category-input')?.value || 'Produce & Pantry',
+    unit: document.getElementById('edit-ing-unit-input')?.value.trim(),
+    stock_quantity: parseFloat(document.getElementById('edit-ing-stock-input')?.value || '0'),
+    reorder_level: parseFloat(document.getElementById('edit-ing-reorder-input')?.value || '0'),
+    cost_per_unit: parseFloat(document.getElementById('edit-ing-cost-input')?.value || '0'),
+    notes: document.getElementById('edit-ing-notes-input')?.value?.trim() || 'Manual stock correction via Dashboard'
+  };
+
+  try {
+    const res = await API.put(`/inventory/ingredients/${id}`, payload);
+    if (res && res.success) {
+      API.toast(res.message || 'Ingredient updated successfully!', 'success');
+      document.getElementById('dialog-edit-ingredient')?.close();
+      await Promise.all([loadBomInventory(), loadMenu()]);
+      if (document.getElementById('bom-recipe-menu-select')?.value) {
+        await loadSelectedMenuRecipe();
+      }
+    }
+  } catch (err) {
+    console.error('[BOM UI] Edit ingredient failed:', err);
+    API.toast(err.message || 'Failed to update ingredient.', 'danger');
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.innerText = '💾 Save Changes';
+    }
   }
 }
 
@@ -4107,6 +4365,8 @@ window.openAddIngredientDialog = openAddIngredientDialog;
 window.handleAddIngredientSubmit = handleAddIngredientSubmit;
 window.openRestockIngredientDialog = openRestockIngredientDialog;
 window.handleRestockIngredientSubmit = handleRestockIngredientSubmit;
+window.openEditIngredientDialog = openEditIngredientDialog;
+window.handleEditIngredientSubmit = handleEditIngredientSubmit;
 window.loadSelectedMenuRecipe = loadSelectedMenuRecipe;
 window.openEditRecipeDialog = openEditRecipeDialog;
 window.appendRecipeEditorRow = appendRecipeEditorRow;

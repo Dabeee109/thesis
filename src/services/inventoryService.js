@@ -449,6 +449,185 @@ async function deductIngredientsForOrder(orderId, dbConnection = null) {
 }
 
 /**
+ * Atomically restore raw ingredients for a cancelled or voided order based on recipe_items (BOM).
+ * Reverses previous deductions from `ingredient_logs` (or order_items join recipe_items),
+ * adds back to `ingredients.stock_quantity`, records positive audit logs, and synchronizes menu availability.
+ * Idempotent per order_id.
+ *
+ * @param {number} orderId - Order ID in `orders`
+ * @param {Object|null} [dbConnection=null] - Optional transaction handle
+ * @returns {Promise<{ alreadyRestored?: boolean, orderId: number, restored: Array, syncResult?: Object }>}
+ */
+async function restoreIngredientsForOrder(orderId, dbConnection = null) {
+  if (!orderId) {
+    throw new Error('orderId is required for ingredient restoration.');
+  }
+
+  const result = await runInBomTransaction(dbConnection, async (tx) => {
+    // 1. Idempotency check: verify if cancellation restoration was already logged
+    const [alreadyLogs] = await tx.query(
+      `SELECT log_id FROM ingredient_logs
+       WHERE reference_order_id = ? AND notes LIKE '%cancellation restoration%'
+       LIMIT 1`,
+      [orderId]
+    );
+    if (alreadyLogs && alreadyLogs.length > 0) {
+      return { alreadyRestored: true, orderId, restored: [] };
+    }
+
+    // 2. Find deductions previously made for this order
+    const [deductionLogs] = await tx.query(
+      `SELECT ingredient_id, ABS(change_amount) AS amount
+       FROM ingredient_logs
+       WHERE reference_order_id = ? AND change_type = 'order_deduction'`,
+      [orderId]
+    );
+
+    let itemsToRestore = [];
+    if (deductionLogs && deductionLogs.length > 0) {
+      itemsToRestore = deductionLogs.map(l => ({
+        ingredient_id: l.ingredient_id,
+        amount: Number(l.amount || 0)
+      }));
+    } else {
+      // Fallback: If no deduction log was created, inspect order_items joined with recipe_items
+      const [reqRows] = await tx.query(
+        `SELECT r.ingredient_id,
+                ROUND(SUM(r.quantity_required * COALESCE(oi.quantity, 1)), 2) AS total_deduction
+         FROM order_items oi
+         JOIN recipe_items r ON r.menu_id = oi.menu_item_id
+         WHERE oi.order_id = ?
+         GROUP BY r.ingredient_id`,
+        [orderId]
+      );
+      if (reqRows && reqRows.length > 0) {
+        itemsToRestore = reqRows.map(r => ({
+          ingredient_id: r.ingredient_id,
+          amount: Number(r.total_deduction || 0)
+        }));
+      }
+    }
+
+    if (itemsToRestore.length === 0) {
+      return { alreadyRestored: false, orderId, restored: [] };
+    }
+
+    const restored = [];
+    for (const item of itemsToRestore) {
+      const restoreQty = Math.round(Number(item.amount || 0) * 100) / 100;
+      if (restoreQty <= 0) continue;
+
+      await tx.query(
+        `UPDATE ingredients 
+         SET stock_quantity = ROUND(stock_quantity + ?, 2), updated_at = CURRENT_TIMESTAMP 
+         WHERE ingredient_id = ?`,
+        [restoreQty, item.ingredient_id]
+      );
+
+      await tx.query(
+        `INSERT INTO ingredient_logs (ingredient_id, change_amount, change_type, reference_order_id, notes)
+         VALUES (?, ?, 'restock', ?, ?)`,
+        [item.ingredient_id, restoreQty, orderId, `Order #${orderId} cancellation restoration`]
+      );
+
+      restored.push({
+        ingredient_id: item.ingredient_id,
+        restored: restoreQty
+      });
+    }
+
+    const syncResult = await syncMenuAvailability(tx);
+    return { alreadyRestored: false, orderId, restored, syncResult };
+  });
+
+  if (result.restored && result.restored.length > 0) {
+    broadcastSSE('INVENTORY_UPDATED', {
+      orderId,
+      reason: 'Cancelled order ingredient restoration',
+      restored: result.restored,
+      enabledMenus: result.syncResult?.enabledMenus || []
+    });
+    broadcastSSE('MENU_UPDATED', {
+      action: 'STOCK_RESTORED_ON_CANCELLATION',
+      orderId
+    });
+  }
+
+  return result;
+}
+
+/**
+ * Edit an existing raw ingredient.
+ * Allows correcting stock_quantity, reorder_level, cost_per_unit, unit, category, name.
+ * Logs an 'adjustment' entry in `ingredient_logs` if stock_quantity changed, and synchronizes menu availability.
+ *
+ * @param {number} ingredientId
+ * @param {Object} fields
+ * @returns {Promise<Object>}
+ */
+async function editIngredient(ingredientId, fields = {}) {
+  const numericId = parseInt(ingredientId, 10);
+  if (!numericId) throw new Error('Valid ingredientId is required.');
+
+  const [existing] = await db.query(
+    `SELECT * FROM ingredients WHERE ingredient_id = ? LIMIT 1`,
+    [numericId]
+  );
+  if (!existing || existing.length === 0) {
+    throw new Error(`Ingredient #${numericId} not found.`);
+  }
+
+  const current = existing[0];
+  const newName = fields.name !== undefined ? String(fields.name).trim() : current.name;
+  const newCategory = fields.category !== undefined ? String(fields.category).trim() : current.category;
+  const newUnit = fields.unit !== undefined ? String(fields.unit).trim() : current.unit;
+
+  const currentStock = Number(current.stock_quantity || 0);
+  const newStock = (fields.stock_quantity !== undefined && fields.stock_quantity !== null && fields.stock_quantity !== '')
+    ? Math.max(0, parseFloat(fields.stock_quantity))
+    : currentStock;
+
+  const newReorder = (fields.reorder_level !== undefined && fields.reorder_level !== null && fields.reorder_level !== '')
+    ? Math.max(0, parseFloat(fields.reorder_level))
+    : Number(current.reorder_level || 0);
+
+  const newCost = (fields.cost_per_unit !== undefined && fields.cost_per_unit !== null && fields.cost_per_unit !== '')
+    ? Math.max(0, parseFloat(fields.cost_per_unit))
+    : Number(current.cost_per_unit || 0);
+
+  // Update ingredient record
+  await db.query(
+    `UPDATE ingredients 
+     SET name = ?, category = ?, unit = ?, stock_quantity = ?, reorder_level = ?, cost_per_unit = ?, updated_at = CURRENT_TIMESTAMP 
+     WHERE ingredient_id = ?`,
+    [newName, newCategory, newUnit, newStock, newReorder, newCost, numericId]
+  );
+
+  // If stock was adjusted, record audit log and sync menus
+  const stockDiff = Math.round((newStock - currentStock) * 100) / 100;
+  if (Math.abs(stockDiff) > 0.001) {
+    const editNotes = fields.notes ? String(fields.notes).trim() : `Manual stock edit (${currentStock} -> ${newStock} ${newUnit})`;
+    await db.query(
+      `INSERT INTO ingredient_logs (ingredient_id, change_amount, change_type, notes)
+       VALUES (?, ?, 'adjustment', ?)`,
+      [numericId, stockDiff, editNotes]
+    );
+    await syncMenuAvailability();
+  }
+
+  const [updatedRows] = await db.query(
+    `SELECT * FROM ingredients WHERE ingredient_id = ? LIMIT 1`,
+    [numericId]
+  );
+  const updated = updatedRows[0];
+
+  broadcastSSE('INGREDIENTS_UPDATED', { ingredientId: numericId, updated });
+  broadcastSSE('INVENTORY_UPDATED', { ingredientId: numericId, edited: true });
+
+  return updated;
+}
+
+/**
  * Check if a sellable menu item has enough raw ingredients in stock per its BOM recipe.
  *
  * @param {number} menuId - Menu item ID (`menu_items.id`)
@@ -777,12 +956,14 @@ module.exports = {
   deductStockForOrder,
   restockItem,
   deductIngredientsForOrder,
+  restoreIngredientsForOrder,
   syncMenuAvailability,
   checkMenuAvailability,
   restockIngredient,
   listIngredients,
   getIngredientsGrouped,
   createIngredient,
+  editIngredient,
   getRecipeByMenuId,
   upsertRecipeForMenuItem
 };

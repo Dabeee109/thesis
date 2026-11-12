@@ -211,3 +211,4 @@ test('Conversational State Machine and Order Processing Pipeline Suite', async (
     assert.ok(res.reply_message.includes('Magandang araw po'));
   });
 });
+

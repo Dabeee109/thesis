@@ -313,3 +313,4 @@ module.exports = {
   DEFAULT_STORE_LNG,
   DEFAULT_MAX_RADIUS_KM
 };
+

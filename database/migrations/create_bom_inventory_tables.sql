@@ -105,3 +105,4 @@ JOIN (
 ) req
 JOIN `ingredients` i ON i.name = req.ing_name
 WHERE LOWER(m.name) = 'meaty dog';
+

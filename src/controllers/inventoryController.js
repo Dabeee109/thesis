@@ -9,6 +9,7 @@ const {
   listIngredients,
   getIngredientsGrouped,
   createIngredient,
+  editIngredient,
   restockIngredient,
   getRecipeByMenuId,
   upsertRecipeForMenuItem
@@ -220,12 +221,58 @@ async function saveRecipe(req, res) {
   }
 }
 
+/**
+ * PUT /api/inventory/ingredients/:id
+ * Edit raw ingredient details and correct stock quantity if mistaken.
+ */
+async function updateIngredient(req, res) {
+  try {
+    const ingredientId = parseInt(req.params.id, 10);
+    if (!ingredientId) {
+      return res.status(400).json({ success: false, message: 'Valid ingredient id is required.' });
+    }
+
+    const {
+      name,
+      category,
+      unit,
+      stock_quantity,
+      stockQuantity,
+      reorder_level,
+      reorderLevel,
+      cost_per_unit,
+      costPerUnit,
+      notes
+    } = req.body || {};
+
+    const updated = await editIngredient(ingredientId, {
+      name,
+      category,
+      unit,
+      stock_quantity: stock_quantity ?? stockQuantity,
+      reorder_level: reorder_level ?? reorderLevel,
+      cost_per_unit: cost_per_unit ?? costPerUnit,
+      notes
+    });
+
+    return res.json({
+      success: true,
+      message: `Ingredient "${updated.name}" updated successfully.`,
+      ingredient: updated
+    });
+  } catch (err) {
+    const status = /not found/i.test(err.message || '') ? 404 : (/UNIQUE|duplicate/i.test(err.message || '') ? 409 : 400);
+    return res.status(status).json({ success: false, message: err.message || 'Failed to update ingredient.' });
+  }
+}
+
 module.exports = {
   getInventory,
   restock,
   getInventoryLogs,
   getIngredients,
   addIngredient,
+  updateIngredient,
   restockRawIngredient,
   getRecipe,
   saveRecipe

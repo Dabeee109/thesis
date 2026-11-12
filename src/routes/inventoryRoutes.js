@@ -11,6 +11,8 @@ const inventoryController = require('../controllers/inventoryController');
 // Raw Ingredients Management
 router.get('/ingredients', authController.authMiddleware, inventoryController.getIngredients);
 router.post('/ingredients', authController.authMiddleware, inventoryController.addIngredient);
+router.put('/ingredients/:id', authController.authMiddleware, inventoryController.updateIngredient);
+router.patch('/ingredients/:id', authController.authMiddleware, inventoryController.updateIngredient);
 router.patch('/ingredients/:id/restock', authController.authMiddleware, inventoryController.restockRawIngredient);
 
 // Menu Item BOM / Recipe Mapping
@@ -18,3 +20,4 @@ router.get('/recipes/:menuId', authController.authMiddleware, inventoryControlle
 router.post('/recipes', authController.authMiddleware, inventoryController.saveRecipe);
 
 module.exports = router;
+

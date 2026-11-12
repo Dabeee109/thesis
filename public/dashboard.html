@@ -1332,19 +1332,16 @@
           </div>
         </div>
 
-        <!-- Stock Quantity & Availability Management (Requirement 1 & 3) -->
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;" class="form-group" id="menu-stock-row">
-          <div>
-            <label class="form-label" for="menu-stock-input">Stock Quantity (pcs)</label>
-            <input type="number" id="menu-stock-input" class="form-control" min="0" step="1" placeholder="50" value="50" oninput="handleStockQuantityChange(this.value)">
-          </div>
-          <div>
-            <label class="form-label" for="menu-availability-input">Availability Status</label>
-            <select id="menu-availability-input" class="form-control" onchange="handleAvailabilityStatusChange(this.value)">
-              <option value="1">🟢 In Stock</option>
-              <option value="0">🔴 Out of Stock / Sold Out</option>
-            </select>
-          </div>
+        <!-- Menu Visibility Toggle (Item availability is 100% recipe-driven via Inventory & Recipes) -->
+        <div class="form-group" id="menu-visibility-row">
+          <label class="form-label" for="menu-availability-input">Menu Visibility</label>
+          <select id="menu-availability-input" class="form-control">
+            <option value="1">👁️ In Menu (Visible)</option>
+            <option value="0">🚫 Hidden (Unavailable)</option>
+          </select>
+          <small style="color: var(--text-muted, #8c7a6e); font-size: 0.76rem; margin-top: 5px; display: block;">
+            💡 <em>Item availability & servings are 100% automated and recipe-driven from raw ingredients in <strong>Inventory & Recipes</strong>.</em>
+          </small>
         </div>
 
         <div class="form-group">
@@ -1802,6 +1799,67 @@
         <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; border-top: 1px solid var(--border-subtle); padding-top: 14px;">
           <button type="button" class="btn btn-secondary" onclick="document.getElementById('dialog-edit-recipe').close()">Cancel</button>
           <button type="submit" class="btn btn-primary" id="btn-save-recipe">💾 Save Recipe</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- BOM Native Dialog 4: Edit Raw Ingredient & Correct Stock -->
+  <dialog id="dialog-edit-ingredient" class="bom-dialog" closedby="any" aria-labelledby="edit-ingredient-title">
+    <div class="bom-dialog-inner">
+      <div class="bom-dialog-header">
+        <h3 id="edit-ingredient-title" style="margin: 0;">✏️ Edit Raw Ingredient</h3>
+        <button type="button" class="modal-close" aria-label="Close dialog" onclick="document.getElementById('dialog-edit-ingredient').close()">&times;</button>
+      </div>
+      <form id="bom-edit-ingredient-form" onsubmit="handleEditIngredientSubmit(event)">
+        <input type="hidden" id="edit-ing-id">
+        <div class="form-group">
+          <label class="form-label" for="edit-ing-name-input">Ingredient Name <span style="color: var(--status-danger);">*</span></label>
+          <input type="text" id="edit-ing-name-input" class="form-control" required>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;" class="form-group">
+          <div>
+            <label class="form-label" for="edit-ing-category-input">Category</label>
+            <select id="edit-ing-category-input" class="form-control">
+              <option value="Beverage Base & Syrups">Beverage Base & Syrups</option>
+              <option value="Dairy & Toppings">Dairy & Toppings</option>
+              <option value="Meat & Poultry">Meat & Poultry</option>
+              <option value="Bread, Dough & Pasta">Bread, Dough & Pasta</option>
+              <option value="Produce & Pantry">Produce & Pantry</option>
+              <option value="Packaging">Packaging</option>
+            </select>
+          </div>
+          <div>
+            <label class="form-label" for="edit-ing-unit-input">Unit of Measurement <span style="color: var(--status-danger);">*</span></label>
+            <select id="edit-ing-unit-input" class="form-control" required>
+              <option value="g">Grams (g)</option>
+              <option value="ml">Milliliters (ml)</option>
+              <option value="pcs">Pieces (pcs)</option>
+            </select>
+          </div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;" class="form-group">
+          <div>
+            <label class="form-label" for="edit-ing-stock-input">Current Stock <span style="color: var(--brand-primary); font-weight: 700;">*</span></label>
+            <input type="number" id="edit-ing-stock-input" class="form-control" step="0.01" min="0" required style="font-weight: 700; color: var(--brand-primary);">
+            <small style="color: var(--text-muted); font-size: 0.72rem; display: block; margin-top: 3px;">Directly adjust if entered mistakenly</small>
+          </div>
+          <div>
+            <label class="form-label" for="edit-ing-reorder-input">Reorder Level</label>
+            <input type="number" id="edit-ing-reorder-input" class="form-control" step="0.01" min="0" required>
+          </div>
+          <div>
+            <label class="form-label" for="edit-ing-cost-input">Cost / Unit (PHP)</label>
+            <input type="number" id="edit-ing-cost-input" class="form-control" step="0.01" min="0">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="edit-ing-notes-input">Reason for Adjustment / Note</label>
+          <input type="text" id="edit-ing-notes-input" class="form-control" placeholder="e.g. Corrected typo in previous restock">
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px;">
+          <button type="button" class="btn btn-secondary" onclick="document.getElementById('dialog-edit-ingredient').close()">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btn-save-edit-ingredient">💾 Save Changes</button>
         </div>
       </form>
     </div>

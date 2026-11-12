@@ -14,7 +14,7 @@ const { broadcastSSE } = require('../services/notificationService');
  */
 async function getMenu(req, res) {
   try {
-    const { category } = req.query;
+    const { category } = req?.query || {};
 
     let catQuery = `SELECT * FROM categories WHERE is_active = 1`;
     const catParams = [];
@@ -39,7 +39,6 @@ async function getMenu(req, res) {
         m.is_bestseller,
         m.preparation_time_min,
         COALESCE(m.stock_quantity, i.stock_quantity, 0) AS stock_quantity,
-        COALESCE(m.status, CASE WHEN COALESCE(m.stock_quantity, i.stock_quantity, 0) <= 0 THEN 'OUT_OF_STOCK' ELSE 'AVAILABLE' END) AS raw_status,
         COALESCE(i.low_stock_threshold, 10) AS low_stock_threshold,
         COALESCE(i.unit, 'servings') AS unit
       FROM menu_items m
@@ -49,20 +48,70 @@ async function getMenu(req, res) {
       ORDER BY m.is_bestseller DESC, m.name ASC
     `);
 
+    // Fetch all recipe mappings with ingredient current stock to compute dynamic max_servings (BOM)
+    let recipes = [];
+    try {
+      const [recipeRows] = await db.query(`
+        SELECT 
+          r.menu_id,
+          r.ingredient_id,
+          r.quantity_required,
+          i.stock_quantity AS ingredient_stock
+        FROM recipe_items r
+        JOIN ingredients i ON i.ingredient_id = r.ingredient_id
+      `);
+      recipes = Array.isArray(recipeRows) ? recipeRows : [];
+    } catch (_) {}
+
+    const recipesByMenu = new Map();
+    for (const r of recipes) {
+      if (!recipesByMenu.has(r.menu_id)) {
+        recipesByMenu.set(r.menu_id, []);
+      }
+      recipesByMenu.get(r.menu_id).push(r);
+    }
+
     // Group items under categories with 3-tier status computation
     const enrichedItems = items.map(item => {
-      const q = parseInt(item.stock_quantity, 10) || 0;
-      let status = 'IN_STOCK';
-      if (item.raw_status === 'OUT_OF_STOCK' || q <= 0 || item.is_available === 0) {
-        status = 'SOLD_OUT';
-      } else if (q <= 10) {
+      const reqs = recipesByMenu.get(item.id);
+      let maxServings;
+      const hasRecipe = Boolean(reqs && reqs.length > 0);
+
+      if (hasRecipe) {
+        const servingsPerIngredient = reqs.map(r => {
+          const req = Number(r.quantity_required) || 0;
+          const stock = Number(r.ingredient_stock) || 0;
+          return req > 0 ? Math.floor(stock / req) : 9999;
+        });
+        maxServings = Math.max(0, Math.min(...servingsPerIngredient));
+      } else {
+        // Fallback rule: If a menu item has no recipe linked yet, default to AVAILABLE as long as is_available = 1
+        maxServings = (item.is_available === 1 || item.is_available === true) ? 50 : 0;
+      }
+
+      // 3-Tier Status Thresholds:
+      // 1. Green (AVAILABLE): max_servings >= 15 (and is_available = 1)
+      // 2. Yellow / Amber (LOW ON STOCK): 1 <= max_servings < 15 (and is_available = 1)
+      // 3. Red (OUT OF STOCK): max_servings <= 0
+      // Fallback/Hidden: is_available = 0
+      let status = 'AVAILABLE';
+      if (item.is_available === 0 || item.is_available === false) {
+        status = 'HIDDEN';
+      } else if (maxServings <= 0) {
+        status = 'OUT_OF_STOCK';
+      } else if (maxServings < 15) {
         status = 'LOW_STOCK';
+      } else {
+        status = 'AVAILABLE';
       }
 
       return {
         ...item,
-        stock_quantity: q,
-        status
+        stock_quantity: maxServings,
+        max_servings: maxServings,
+        has_recipe: hasRecipe,
+        status,
+        computed_status: status
       };
     });
 
@@ -122,14 +171,10 @@ async function createMenuItem(req, res) {
     }
 
     let finalStock = stock_quantity !== undefined ? parseInt(stock_quantity, 10) : (stockQuantity !== undefined ? parseInt(stockQuantity, 10) : (initialStock !== undefined ? parseInt(initialStock, 10) : 50));
-    if (isNaN(finalStock) || finalStock < 0) finalStock = 0;
+    if (isNaN(finalStock) || finalStock < 0) finalStock = 50;
 
     let finalAvail = is_available !== undefined ? is_available : (isAvailable !== undefined ? isAvailable : 1);
-    if (finalStock <= 0) {
-      finalAvail = 0;
-    } else {
-      finalAvail = (finalAvail === 1 || finalAvail === true || finalAvail === '1' || finalAvail === 'true') ? 1 : 0;
-    }
+    finalAvail = (finalAvail === 1 || finalAvail === true || finalAvail === '1' || finalAvail === 'true') ? 1 : 0;
 
     const finalImage = imageUrl || image_url || '';
     const finalPrep = prepTimeMin !== undefined ? parseInt(prepTimeMin, 10) : (preparation_time_min !== undefined ? parseInt(preparation_time_min, 10) : 15);
@@ -221,18 +266,13 @@ async function updateMenuItem(req, res) {
     const finalPrep = prepTimeMin !== undefined ? parseInt(prepTimeMin, 10) : (preparation_time_min !== undefined ? parseInt(preparation_time_min, 10) : current.preparation_time_min);
     const finalBest = isBestseller !== undefined ? (isBestseller ? 1 : 0) : (is_bestseller !== undefined ? (is_bestseller ? 1 : 0) : current.is_bestseller);
 
-    // Stock quantity handling
-    let finalStock = stock_quantity !== undefined ? parseInt(stock_quantity, 10) : (stockQuantity !== undefined ? parseInt(stockQuantity, 10) : (current.stock_quantity !== undefined ? current.stock_quantity : 0));
-    if (isNaN(finalStock) || finalStock < 0) finalStock = 0;
+    // Stock quantity handling (defaults to current stock if not passed)
+    let finalStock = stock_quantity !== undefined ? parseInt(stock_quantity, 10) : (stockQuantity !== undefined ? parseInt(stockQuantity, 10) : (current.stock_quantity !== undefined ? current.stock_quantity : 50));
+    if (isNaN(finalStock) || finalStock < 0) finalStock = 50;
 
-    // Availability status: If stock_quantity <= 0, automatically set is_available = false / 0
-    let finalAvail;
-    if (finalStock <= 0) {
-      finalAvail = 0;
-    } else {
-      const availInput = is_available !== undefined ? is_available : (isAvailable !== undefined ? isAvailable : current.is_available);
-      finalAvail = (availInput === 1 || availInput === true || availInput === '1' || availInput === 'true') ? 1 : 0;
-    }
+    // Visibility toggle: is_available represents In Menu (1) vs Hidden (0)
+    const availInput = is_available !== undefined ? is_available : (isAvailable !== undefined ? isAvailable : current.is_available);
+    const finalAvail = (availInput === 1 || availInput === true || availInput === '1' || availInput === 'true') ? 1 : 0;
 
     await db.query(
       `UPDATE menu_items 

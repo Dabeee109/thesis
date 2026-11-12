@@ -8,7 +8,7 @@ const db = require('../../database/db');
 const jwt = require('jsonwebtoken');
 const config = require('../config/config');
 const { calculateDeliveryFare } = require('./fareCalculator');
-const { verifyStockAvailability, deductStockForOrder, deductIngredientsForOrder } = require('./inventoryService');
+const { verifyStockAvailability, deductStockForOrder, deductIngredientsForOrder, restoreIngredientsForOrder } = require('./inventoryService');
 const { processPayment } = require('./paymentService');
 const { broadcastSSE, sendNotification } = require('./notificationService');
 const { verifyQuote } = require('./geoService');
@@ -212,8 +212,56 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
     });
   }
 
+  // 3b. Discount calculations (Senior Citizen / PWD)
+  let rawDiscountType = String(orderData.discount_type || orderData.discountType || 'NONE').toUpperCase().trim();
+  let discountType = 'NONE';
+  if (rawDiscountType.includes('SENIOR') || rawDiscountType.includes('SC')) {
+    discountType = 'SENIOR_CITIZEN';
+  } else if (rawDiscountType.includes('PWD')) {
+    discountType = 'PWD';
+  } else if (rawDiscountType !== 'NONE' && rawDiscountType !== '') {
+    discountType = rawDiscountType;
+  }
+
+  let discountAmount = parseFloat(orderData.discount_amount !== undefined ? orderData.discount_amount : (orderData.discountAmount !== undefined ? orderData.discountAmount : 0)) || 0.00;
+
+  // Auto-compute 20% or portion discount if discountType is set but discountAmount is not passed
+  if (discountType !== 'NONE' && discountAmount === 0 && subtotal > 0) {
+    try {
+      const { calculatePortionDiscount } = require('./portionDiscountService');
+      const portionRes = calculatePortionDiscount(enrichedItems);
+      discountAmount = portionRes.discountAmount || Math.round((subtotal * 0.20) * 100) / 100;
+    } catch (_) {
+      discountAmount = Math.round((subtotal * 0.20) * 100) / 100;
+    }
+  }
+
+  // Implied discount check: if passed total is less than (subtotal + deliveryFee)
+  if (discountAmount <= 0) {
+    const passedTotal = (orderData.totalAmount !== undefined && orderData.totalAmount !== null)
+      ? parseFloat(orderData.totalAmount)
+      : (orderData.total_amount !== undefined ? parseFloat(orderData.total_amount) : (orderData.grandTotal !== undefined ? parseFloat(orderData.grandTotal) : null));
+    if (passedTotal !== null && !isNaN(passedTotal) && passedTotal > 0 && passedTotal < (subtotal + deliveryFee)) {
+      discountAmount = Math.max(0, Math.round(((subtotal + deliveryFee) - passedTotal) * 100) / 100);
+      if (discountType === 'NONE') {
+        discountType = 'SENIOR_CITIZEN';
+      }
+    }
+  }
+
+  // Ensure discount is never deducted from delivery fee, and discount <= subtotal
+  discountAmount = Math.max(0, Math.min(subtotal, Math.round(discountAmount * 100) / 100));
+  if (discountAmount <= 0 && discountType === 'NONE') {
+    discountType = 'NONE';
+  }
+
+  const discountIdNumber = orderData.discount_id_number || orderData.discountIdNumber || null;
+  const discountIdName = orderData.discount_id_name || orderData.discountIdName || null;
+  const discountIdImageUrl = orderData.discount_id_image_url || orderData.discountIdImageUrl || null;
+
   // 4. Delivery fare is set from verified quote for delivery orders (or 0 for pickup)
-  const totalAmount = subtotal + deliveryFee;
+  // Total Amount = (Subtotal - Discount Amount) + Delivery Fee
+  const totalAmount = Math.max(0, Math.round(((subtotal - discountAmount) + deliveryFee) * 100) / 100);
 
   // 5. Insert order record with duplicate collision prevention
   const isOnlinePayment = paymentMethod === 'gcash' || paymentMethod === 'xendit';
@@ -237,13 +285,23 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
     try {
       const [res] = await db.query(
         `INSERT INTO orders 
-         (order_number, customer_id, order_type, dining_mode, status, subtotal, delivery_fee, total_amount, delivery_address, landmark, arriving_time, customer_phone, distance_km, customer_notes, note, payment_status, payment_ref_number, payment_proof_image, customer_lat, customer_lng, is_preorder)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [orderNumber, customerId, orderType, effectiveDiningMode, initialOrderStatus, subtotal, deliveryFee, totalAmount, effectiveDeliveryAddress, effectiveLandmark, effectiveArrivingTime, phone || null, effectiveDistanceKm, effectiveNotes, effectiveNotes, initialPaymentStatus, initialPaymentRef, initialPaymentProof, customerLat, customerLng, isPreorder]
+         (order_number, customer_id, order_type, dining_mode, status, subtotal, discount_type, discount_amount, discount_id_number, discount_id_name, discount_id_image_url, delivery_fee, total_amount, delivery_address, landmark, arriving_time, customer_phone, distance_km, customer_notes, note, payment_status, payment_ref_number, payment_proof_image, customer_lat, customer_lng, is_preorder)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [orderNumber, customerId, orderType, effectiveDiningMode, initialOrderStatus, subtotal, discountType, discountAmount, discountIdNumber, discountIdName, discountIdImageUrl, deliveryFee, totalAmount, effectiveDeliveryAddress, effectiveLandmark, effectiveArrivingTime, phone || null, effectiveDistanceKm, effectiveNotes, effectiveNotes, initialPaymentStatus, initialPaymentRef, initialPaymentProof, customerLat, customerLng, isPreorder]
       );
       orderResult = res;
       break;
     } catch (insertErr) {
+      if ((insertErr.message || '').includes('discount_type') || (insertErr.message || '').includes('discount_amount') || (insertErr.message || '').includes('no such column')) {
+        try {
+          await db.query(`ALTER TABLE orders ADD COLUMN discount_type VARCHAR(32) DEFAULT 'NONE'`);
+          await db.query(`ALTER TABLE orders ADD COLUMN discount_amount DECIMAL(10,2) DEFAULT 0.00`);
+          await db.query(`ALTER TABLE orders ADD COLUMN discount_id_number VARCHAR(100) DEFAULT NULL`);
+          await db.query(`ALTER TABLE orders ADD COLUMN discount_id_name VARCHAR(150) DEFAULT NULL`);
+          await db.query(`ALTER TABLE orders ADD COLUMN discount_id_image_url VARCHAR(500) DEFAULT NULL`);
+        } catch (_) {}
+        if (attempt < 4) continue;
+      }
       if ((insertErr.message || '').includes('Unknown column') || (insertErr.message || '').includes('no such column')) {
         const [resFallback] = await db.query(
           `INSERT INTO orders 
@@ -273,6 +331,15 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
 
   // 7. Deduct inventory stock
   await deductStockForOrder(items, orderNumber);
+
+  // 7b. If Manual POS Order or order is immediately preparing / confirmed, deduct recipe ingredients (BOM)
+  const isPosOrder = Boolean(orderData && (orderData.is_pos || orderData.isPos)) || (effectivePsid && effectivePsid.startsWith('POS_MANUAL_'));
+  const isImmediateKitchenOrder = ['preparing', 'confirmed', 'in_preparation'].includes(String(initialOrderStatus).toLowerCase());
+  if (isPosOrder || isImmediateKitchenOrder) {
+    await deductIngredientsForOrder(orderId).catch(err => {
+      console.warn('[orderService] Recipe ingredient deduction warning for POS/immediate order:', err.message);
+    });
+  }
 
   // 8. Process payment (validate GCash/Xendit amount or record cash)
   const paymentResult = await processPayment({
@@ -339,8 +406,15 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
     customerId,
     orderType,
     subtotal,
+    discount_type: discountType,
+    discount_amount: discountAmount,
+    discount_id_number: discountIdNumber,
+    discount_id_name: discountIdName,
+    discount_id_image_url: discountIdImageUrl,
     deliveryFee,
+    delivery_fee: deliveryFee,
     totalAmount,
+    total_amount: totalAmount,
     status: 'pending',
     items: enrichedItems,
     payment: paymentResult,
@@ -386,6 +460,11 @@ async function updateOrderStatus(orderId, newStatus, extraData = {}) {
 
   // Handle stock restoration if order is cancelled
   if (newStatus === 'cancelled' && prevStatus !== 'cancelled') {
+    // 1. Atomically restore raw recipe ingredients (BOM) & recalculate menu availability
+    await restoreIngredientsForOrder(orderId).catch(err => {
+      console.warn('[orderService] Failed to restore recipe ingredients on cancellation:', err.message);
+    });
+
     const [items] = await db.query(
       `SELECT menu_item_id, quantity FROM order_items WHERE order_id = ?`,
       [orderId]
@@ -692,6 +771,11 @@ async function getOrdersList(filters = {}) {
     order.landmark = order.landmark || '';
     order.dining_mode = order.dining_mode || (order.order_type === 'pickup' ? 'Pick-up' : 'Delivery');
     order.arriving_time = order.arriving_time || '';
+    order.discount_type = order.discount_type || 'NONE';
+    order.discount_amount = parseFloat(order.discount_amount || 0);
+    order.discount_id_number = order.discount_id_number || null;
+    order.discount_id_name = order.discount_id_name || null;
+    order.discount_id_image_url = order.discount_id_image_url || null;
   }
 
   return orders;
@@ -748,6 +832,11 @@ async function getOrderDetails(orderIdentifier) {
   order.landmark = order.landmark || '';
   order.dining_mode = order.dining_mode || (order.order_type === 'pickup' ? 'Pick-up' : 'Delivery');
   order.arriving_time = order.arriving_time || '';
+  order.discount_type = order.discount_type || 'NONE';
+  order.discount_amount = parseFloat(order.discount_amount || 0);
+  order.discount_id_number = order.discount_id_number || null;
+  order.discount_id_name = order.discount_id_name || null;
+  order.discount_id_image_url = order.discount_id_image_url || null;
 
   let elapsedSeconds = 0;
   if (order.created_at) {

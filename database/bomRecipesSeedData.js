@@ -445,3 +445,4 @@ module.exports = {
   INGREDIENTS_CATALOG,
   MENU_RECIPES
 };
+

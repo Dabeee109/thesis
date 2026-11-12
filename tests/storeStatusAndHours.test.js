@@ -100,3 +100,4 @@ test('Store Operational Status & Operating Hours Settings', async (t) => {
     assert.ok(dbJs.includes("column: 'store_close_time'"));
   });
 });
+

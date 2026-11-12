@@ -244,3 +244,4 @@ test('Open-Source Delivery Distance & Fare Engine (Nominatim + OSRM)', async (t)
     try { if (fs.existsSync(testDbPath)) fs.unlinkSync(testDbPath); } catch (_) {}
   });
 });
+

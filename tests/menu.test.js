@@ -32,6 +32,11 @@ function clearSent() {
 
 test('Menu - whole menu sent immediately without category selector', async () => {
   await db.initDatabase();
+  const systemSettingsService = require('../src/services/systemSettingsService');
+  await systemSettingsService.updateSystemSettings({
+    store_status: 'OPEN',
+    is_manual_override: 1
+  });
   const psid = 'TEST_MENU_WHOLE_' + Date.now();
   clearSent();
 
@@ -105,6 +110,10 @@ test('Menu - categories are sorted by display_order and card lengths capped at 8
 test('Menu - carousels chunked to at most 10 cards per carousel', async () => {
   const psid = 'TEST_MENU_CHUNKS_' + Date.now();
   clearSent();
+
+  // Clean up any leftover test items first
+  await db.query('DELETE FROM inventory WHERE menu_item_id >= 100').catch(() => {});
+  await db.query('DELETE FROM menu_items WHERE id >= 100').catch(() => {});
 
   // Insert additional test items to exceed 10 items
   for (let i = 100; i <= 112; i++) {
