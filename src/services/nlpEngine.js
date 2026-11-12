@@ -70,6 +70,7 @@ const { applyStrikethrough, buildTextMenuPayload } = require('./textMenuService'
 const {
   isItemPhotoRequest,
   extractPhotoItemQuery,
+  findBestFuzzyMenuMatch,
   lookupMenuItemForPhoto,
   resolvePhotoAttachmentUrl
 } = require('./itemPhotoService');
@@ -83,6 +84,7 @@ const {
 const { recognizeReceipt, parseReceiptText, UNREADABLE_REPLY } = require('./receiptOcrService');
 const { verifyPaymentTransaction, resolveOrderTotal, formatAmount } = require('./paymentVerificationService');
 const { generateGeminiResponse } = require('./geminiService');
+const aiService = require('./aiService');
 const { parseCustomerFeedback, processFeedbackSubmission } = require('./feedbackParser');
 
 const MENU_MAX_ITEMS = parseInt(process.env.MENU_MAX_ITEMS, 10) || 50;
@@ -3083,11 +3085,11 @@ async function handleTextInput(psid, session, rawText) {
     return { intent: 'CANCEL_EMPTY', confidence: 1.0 };
   }
 
-  // 5a. Bilingual / Taglish Conversational Assistant (Google Gemini AI) for inquiries, FAQs, small talk & support
-  if (process.env.NODE_ENV !== 'test' && isConversationalInquiry(rawText, session)) {
-    const geminiTurn = await tryGeminiConversationalTurn(psid, session, rawText);
-    if (geminiTurn) {
-      return geminiTurn;
+  // 5a. Bilingual / Taglish Conversational Assistant (Google Gemini AI + Structured JSON Action Routing)
+  if ((process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured() && isConversationalInquiry(rawText, session)) {
+    const aiTurn = await executeAiAssistantTurn(psid, session, rawText);
+    if (aiTurn) {
+      return aiTurn;
     }
   }
 
@@ -3103,15 +3105,21 @@ async function handleTextInput(psid, session, rawText) {
     if (orderTry && orderTry.intent !== 'FALLBACK') {
       return orderTry;
     }
+    if ((process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured()) {
+      const aiFallbackTurn = await executeAiAssistantTurn(psid, session, rawText);
+      if (aiFallbackTurn) {
+        return aiFallbackTurn;
+      }
+    }
     const fb = botMessages.fallback();
     await sendQuickReplies(psid, fb.text, fb.quickReplies);
     return { intent: 'FALLBACK', confidence: conf };
   }
 
   if (intent === 'OUT_OF_SCOPE') {
-    if (process.env.NODE_ENV !== 'test') {
-      const geminiTurn = await tryGeminiConversationalTurn(psid, session, rawText);
-      if (geminiTurn) return geminiTurn;
+    if ((process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured()) {
+      const aiTurn = await executeAiAssistantTurn(psid, session, rawText);
+      if (aiTurn) return aiTurn;
     }
     const oos = botMessages.outOfScope();
     await sendQuickReplies(psid, oos.text, oos.quickReplies);
@@ -3877,11 +3885,11 @@ async function handleOrderItemText(psid, session, rawText, nlu) {
     return { intent: 'ORDER_ITEM_AMBIGUOUS', confidence: 0.6 };
   }
 
-  // Generative AI Conversational Barista fallback (Google Gemini via @google/genai)
-  if (process.env.NODE_ENV !== 'test') {
-    const geminiTurn = await tryGeminiConversationalTurn(psid, session, rawText);
-    if (geminiTurn) {
-      return geminiTurn;
+  // Generative AI Conversational Assistant fallback (Google Gemini via @google/genai + Structured JSON Routing)
+  if ((process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured()) {
+    const aiTurn = await executeAiAssistantTurn(psid, session, rawText);
+    if (aiTurn) {
+      return aiTurn;
     }
   }
 
@@ -4783,6 +4791,202 @@ async function handleTrackOrder(psid, session) {
 }
 
 /**
+ * Execute a grounded Gemini Conversational AI turn using aiService.generateAssistantResponse()
+ * and route the strict JSON output (NONE | ADD_ITEM | VIEW_MENU | SEND_PICTURE | CANCEL_ORDER | CHECK_STATUS | PROCEED_CHECKOUT).
+ */
+async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
+  try {
+    const aiRes = options.aiResponse || await aiService.generateAssistantResponse(psid, rawText, session, options);
+    if (!aiRes || !aiRes.reply_message) {
+      return null;
+    }
+
+    const { reply_message, detected_action, action_payload = {} } = aiRes;
+
+    // Persist dining_mode if Gemini extracted Delivery or Pick-up
+    if (action_payload.dining_mode === 'Delivery' || action_payload.dining_mode === 'Pick-up') {
+      session.dining_mode = action_payload.dining_mode;
+      session.orderType = action_payload.dining_mode === 'Delivery' ? 'delivery' : 'pickup';
+    }
+
+    switch (detected_action) {
+      case 'VIEW_MENU': {
+        await sendTextMessage(psid, reply_message);
+        await sendFullMenu(psid, session);
+        return {
+          intent: 'AI_VIEW_MENU',
+          confidence: 0.98,
+          replyLog: reply_message,
+          aiAction: 'VIEW_MENU'
+        };
+      }
+
+      case 'SEND_PICTURE': {
+        const targetQuery = action_payload.item_name || rawText;
+        const photoRes = await handleItemPhotoRequest(psid, session, targetQuery);
+        return {
+          ...photoRes,
+          aiAction: 'SEND_PICTURE'
+        };
+      }
+
+      case 'CANCEL_ORDER': {
+        const cancelRes = await handleCancellationRequest(psid, session, rawText);
+        return {
+          ...cancelRes,
+          aiAction: 'CANCEL_ORDER'
+        };
+      }
+
+      case 'CHECK_STATUS': {
+        await handleTrackOrder(psid, session);
+        return {
+          intent: 'AI_CHECK_STATUS',
+          confidence: 0.98,
+          replyLog: reply_message,
+          aiAction: 'CHECK_STATUS'
+        };
+      }
+
+      case 'PROCEED_CHECKOUT': {
+        if (!session.cart || session.cart.length === 0) {
+          await sendQuickReplies(psid, reply_message, [
+            { title: '☕ Menu', payload: 'MENU_HOME' }
+          ]);
+          return {
+            intent: 'AI_PROCEED_CHECKOUT_EMPTY',
+            confidence: 0.95,
+            replyLog: reply_message,
+            aiAction: 'PROCEED_CHECKOUT'
+          };
+        }
+        await sendTextMessage(psid, reply_message);
+        const checkoutRes = await startCheckoutFlow(psid, session);
+        return {
+          ...(checkoutRes || { intent: 'AI_PROCEED_CHECKOUT', confidence: 0.98 }),
+          replyLog: reply_message,
+          aiAction: 'PROCEED_CHECKOUT'
+        };
+      }
+
+      case 'ADD_ITEM': {
+        const requestedName = String(action_payload.item_name || '').trim();
+        const qty = Math.max(1, parseInt(action_payload.quantity, 10) || 1);
+
+        if (requestedName) {
+          const [allMenuRows] = await db.query(`
+            SELECT m.id, m.name, m.price, m.is_available, m.synonyms,
+                   COALESCE(i.stock_quantity, m.stock_quantity, 0) AS stock_quantity,
+                   COALESCE(c.name, 'Cafe') AS category_name
+            FROM menu_items m
+            LEFT JOIN categories c ON c.id = m.category_id
+            LEFT JOIN inventory i ON i.menu_item_id = m.id
+            WHERE COALESCE(m.is_deleted, 0) = 0
+          `);
+
+          const rows = Array.isArray(allMenuRows) ? allMenuRows : [];
+          const lowerReq = requestedName.toLowerCase();
+          let dbItem =
+            rows.find(r => String(r.name || '').toLowerCase() === lowerReq) ||
+            rows.find(r => String(r.name || '').toLowerCase().includes(lowerReq) || lowerReq.includes(String(r.name || '').toLowerCase())) ||
+            findBestFuzzyMenuMatch(requestedName, rows);
+
+          if (dbItem) {
+            const stock = Number(dbItem.stock_quantity ?? 0);
+            const isAvail = dbItem.is_available === 1 || dbItem.is_available === true;
+            if (!isAvail || stock <= 0) {
+              const oosMsg = `Paumanhin po, sold out / out of stock na po ang ${dbItem.name} sa ngayon. Pili na lang po tayo ng ibang available sa menu!`;
+              await sendQuickReplies(psid, oosMsg, [
+                { title: '☕ Menu', payload: 'MENU_HOME' },
+                { title: '🛒 Cart', payload: 'VIEW_CART' }
+              ]);
+              return {
+                intent: 'AI_ADD_ITEM_OUT_OF_STOCK',
+                confidence: 0.98,
+                replyLog: oosMsg,
+                aiAction: 'ADD_ITEM'
+              };
+            }
+
+            if (!session.cart) session.cart = [];
+            const rawAddon = action_payload.addon ? String(action_payload.addon).trim() : null;
+            const resolvedAddon = rawAddon ? (detectAddonInText(rawAddon) || rawAddon) : null;
+
+            // If Drinks & Milktea and no add-on specified, trigger AWAITING_DRINK_ADDON upsell
+            if (isDrinkOrMilktea(dbItem) && !resolvedAddon) {
+              await sendTextMessage(psid, reply_message);
+              await promptDrinkAddons(psid, session, dbItem, qty);
+              return {
+                intent: 'AI_ADD_ITEM_UPSELL',
+                confidence: 0.98,
+                replyLog: reply_message,
+                aiAction: 'ADD_ITEM'
+              };
+            }
+
+            const itemToCart = resolvedAddon
+              ? {
+                  ...dbItem,
+                  name: `${dbItem.name} (w/ ${resolvedAddon})`,
+                  addons: [resolvedAddon],
+                  addOns: [{ name: resolvedAddon, price: 20.0 }]
+                }
+              : dbItem;
+
+            addToCart(session.cart, itemToCart, qty);
+            session.state = 'AWAITING_CHECKOUT_CONFIRM';
+            await saveSession(session);
+
+            const subtotal = calculateCartSubtotal(session.cart);
+            const cartText = `${reply_message}\n\nCart subtotal: ${peso(subtotal)}. Check out?`;
+            await sendQuickReplies(psid, cartText, [
+              { title: 'Yes, checkout', payload: 'CONFIRM_CHECKOUT' },
+              { title: 'Add more', payload: 'KEEP_SHOPPING' },
+              { title: 'View cart', payload: 'VIEW_CART' }
+            ]);
+            return {
+              intent: 'AI_ADD_ITEM',
+              confidence: 0.98,
+              replyLog: cartText,
+              aiAction: 'ADD_ITEM'
+            };
+          }
+        }
+
+        // Grounded item not found in catalog
+        await sendQuickReplies(psid, reply_message, [
+          { title: '☕ Menu', payload: 'MENU_HOME' }
+        ]);
+        return {
+          intent: 'AI_ADD_ITEM_UNMATCHED',
+          confidence: 0.85,
+          replyLog: reply_message,
+          aiAction: 'ADD_ITEM'
+        };
+      }
+
+      case 'NONE':
+      default: {
+        await sendQuickReplies(psid, reply_message, [
+          { title: '☕ Menu', payload: 'MENU_HOME' },
+          { title: '🛒 Cart', payload: 'VIEW_CART' }
+        ]);
+        await saveSession(session);
+        return {
+          intent: 'AI_CONVERSATION',
+          confidence: 0.98,
+          replyLog: reply_message,
+          aiAction: 'NONE'
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('[executeAiAssistantTurn Warning]', err.message);
+    return null;
+  }
+}
+
+/**
  * Invoke Google Gemini Conversational AI for open-ended dialogue, recommendations,
  * menu questions, and natural-language multi-item extraction.
  */
@@ -4966,5 +5170,6 @@ module.exports = {
   isItemPhotoRequest,
   handleItemPhotoRequest,
   dispatchPersonalGcashCheckout,
-  finalizeOrderFromProofSubmission
+  finalizeOrderFromProofSubmission,
+  executeAiAssistantTurn
 };

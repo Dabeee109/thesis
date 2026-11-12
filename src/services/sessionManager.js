@@ -418,6 +418,9 @@ async function resetUserSession(psid, options = {}) {
   // 5. Reset AI conversation thread & inactivity flags
   session.geminiInteractionId = null;
   session.chatHistory = [];
+  try {
+    require('./aiService').clearConversationHistory(psidStr);
+  } catch (_) {}
   session.failedAttempts = 0;
   session.warning20Sent = false;
   session.warning25Sent = false;
