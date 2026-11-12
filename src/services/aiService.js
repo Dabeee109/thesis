@@ -378,11 +378,13 @@ function buildAssistantSystemInstruction(context = {}) {
 - OUT-OF-STOCK GUARD: NEVER sell, recommend, or add [OUT OF STOCK - DO NOT SELL] items. Politely inform the customer that it is sold out and recommend available alternatives.
 - DRINK-ONLY ADD-ON UPSELL: Drink sinkers/add-ons (+₱20: Pearls, Nata de Coco, Cream Cheese, Coffee Jelly, Egg Pudding) can ONLY be attached to "Drinks & Milktea". NEVER attach them to food/meals/silog/pizza/pasta.
 - "IKAW NA BAHALA" / DEALER'S CHOICE COMBOS: If the customer asks you to pick for them, select AT LEAST 1 [AVAILABLE] food item AND AT LEAST 1 [AVAILABLE] drink item from the live catalog, set detected_action = "ADD_ITEM", put both in extracted_data.items, and tell them what you picked.
+- RECOMMENDATION SWAP: If customer changes their mind or asks for different recommendations (e.g. 'iba na lang', 'ayaw ko ng pare-pareho'), replace previously suggested items rather than stacking duplicates in cart.
 - STATE-LOCK ESCAPE HATCH: If the customer changes their mind, asks questions about the menu, or wants to add items while entering checkout info, gracefully handle their request without getting stuck in checkout.
+- STRICT STORE HOURS: Operating hours are strictly 9:00 AM - 9:00 PM Manila Time. NEVER fabricate alternative store hours even if asked.
 
 2. ORDER PROCESSING & LOGISTICS RULES:
 - Dining Modes: "Delivery", "Pick-up", "Dine-in".
-- Required details for Pick-up / Dine-in: Full Name, Phone Number, Arriving Time, Payment Mode (Cash or GCash), Note (optional).
+- Required details for Pick-up / Dine-in: Full Name, Phone Number, Arriving Time, Payment Mode (Cash or GCash), Note (optional). NEVER ask for street address or landmark if dining mode is Dine-in or Pick-up!
 - Required details for Delivery: Full Name, Phone Number, Complete Delivery Address, Landmark, Payment Mode (Cash or GCash), Note (optional).
 - In-house delivery radius is maximum ${Number(store.maxDeliveryRadiusKm || 3.0).toFixed(1)} km. If an address is beyond 3 km, inform them gently that it is outside our direct radius and can be arranged via third-party courier pending admin fee quote.
 - Strict Order Tracking Separation:
@@ -390,7 +392,10 @@ function buildAssistantSystemInstruction(context = {}) {
   - If status is IN_PREPARATION: Order is approved and actively cooking in the kitchen.
   - If status is DISPATCHED: Order is handed to the rider or ready at the counter.
 - Delay Complaint: If customer complains of delay, empathize sincerely with their wait time and provide an honest status update based on their order state without repeating a robotic summary.
-- 5-Minute Cancellation Policy: (1) Unpaid or PENDING orders can be instantly cancelled. (2) Orders already IN_PREPARATION within 5 minutes of placement are forwarded to admin for approval. (3) Orders past 5 minutes in preparation or DISPATCHED cannot be cancelled.
+- Cancellation Policy:
+  - (1) PENDING / PENDING_APPROVAL: Can be cancelled at ANY TIME with NO TIME LIMIT since food is not yet cooking in the kitchen.
+  - (2) IN_PREPARATION: Has a 5-minute grace period from placement (within 5 minutes = forward to admin for verification; past 5 minutes = non-cancellable).
+  - (3) DISPATCHED: Cannot be cancelled.
 
 3. LIVE STORE CONTEXT:
 - Store Name: ${store.name || "Diner's Cafe - Tondo Branch"}

@@ -133,8 +133,14 @@ function isDeliveryDiningMode(diningMode) {
 function parsePaymentModeValue(raw) {
   const s = String(raw || '').trim();
   if (!s) return null;
-  if (/\b(?:xendit|online(?:\s*payment)?|gcash|g-?cash|maya|paymaya|grabpay|e-?wallet|bank|card)\b/i.test(s)) {
+  if (/\b(?:xendit)\b/i.test(s)) {
     return 'Xendit';
+  }
+  if (/\bonline(?:\s*payment)?\b/i.test(s)) {
+    return 'Xendit';
+  }
+  if (/\b(?:gcash|g-?cash|maya|paymaya|grabpay|e-?wallet|bank|card)\b/i.test(s)) {
+    return 'GCash';
   }
   if (/\b(?:cash|cod|kaliwaan)\b/i.test(s)) {
     return 'Cash';
@@ -207,6 +213,27 @@ function parseCustomerInfo(rawText, diningMode) {
     paymentMode = parsePaymentModeValue(clean) || 'Cash';
   }
 
+  // 1b. Conversational natural language matching (e.g. "name ko ay Francis ang number ko naman ay 09281762895 makaka dating ako dyan ng mga 7 pm bayadan ko na gamit ang gcash")
+  if (!contact) {
+    const phoneInline = clean.match(/(?:^|\D)(09\d{9}|\+?639\d{9})(?:\D|$)/);
+    if (phoneInline) contact = phoneInline[1].trim();
+  }
+  if (!name) {
+    const naturalName = clean.match(/(?:name\s+ko\s+(?:ay|is)?|pangalan\s+ko\s+(?:ay|is)?|ako\s+(?:si|ay))\s+([A-Za-z\s]{2,30}?)(?=\s*(?:\bang\s+number\b|\bnumber\b|\bphone\b|\bcontact\b|\bmakaka\s*dating\b|\blanding\b|\bgcash\b|\bcash\b|\.|\n|$))/i);
+    if (naturalName) name = naturalName[1].trim();
+  }
+  if (!arrivingTime) {
+    const naturalTime = clean.match(/(?:(?:makaka\s*)?dating\s*(?:ako\s*)?(?:dyan|diyan|sa\s*store)?\s*(?:ng|sa)?\s*(?:mga)?|mga|around|at)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i);
+    if (naturalTime) arrivingTime = naturalTime[1].trim();
+  }
+  if (paymentMode === 'Cash' && /gcash/i.test(clean)) {
+    paymentMode = 'GCash';
+  }
+  let inferredDiningMode = diningMode;
+  if (/dating\s*(?:ako\s*)?d(?:y|i)an|kakain\s*d(?:y|i)an|dine\s*in|sa\s*loob|table/i.test(clean)) {
+    inferredDiningMode = 'Dine In';
+  }
+
   // 2. Multiline or delimiter-based fallback
   const needsAddress = isDelivery;
   if ((needsAddress && !address) || !name || !contact) {
@@ -277,6 +304,7 @@ function parseCustomerInfo(rawText, diningMode) {
     name: name.trim(),
     contact: contact.trim(),
     paymentMode,
+    diningMode: inferredDiningMode,
     note: note.trim()
   };
 }
@@ -1318,6 +1346,7 @@ function isCancelTriggerWord(norm = '', rawText = '', eventPayload = '') {
   ];
   if (triggerPhrases.some(p => norm === p || norm.includes(p))) return true;
   if (/\b(?:pa[-\s]?cancel|i[-\s]?cancel|kanselahin|ayaw\s+ko\s+na|ayoko\s+na)\b/i.test(rawText)) return true;
+  if (/\b(?:wag\s+na|hayss?\s*wag\s*na)\b.*?\bcancel\b/i.test(rawText)) return true;
   if (/\bcancel\b.*?\b(?:order|food|delivery|kape|drink|ko)\b/i.test(rawText)) return true;
   if (/\b(?:order|food|delivery)\b.*?\bcancel\b/i.test(rawText)) return true;
   return false;
@@ -1327,7 +1356,7 @@ function isCancelTriggerWord(norm = '', rawText = '', eventPayload = '') {
  * Dynamic Order Cancellation Guard (Status-Based Rules - Requirement 1)
  * Evaluates active order status:
  * 1. IN_PREPARATION / DISPATCHED / DELIVERED: Block cancellation with kitchen/dispatch alert
- * 2. PENDING / PENDING_APPROVAL: Allow cancellation, update status, restore stock in menu_items & inventory
+ * 2. PENDING / PENDING_APPROVAL: Allow cancellation with NO TIME LIMIT (since food is not yet cooking in kitchen)
  */
 async function handleCancellationRequest(psid, session, rawText = '') {
   let activeOrder = null;
@@ -1352,6 +1381,22 @@ async function handleCancellationRequest(psid, session, rawText = '') {
     }
   }
 
+  // Prioritize customer's latest active uncompleted order from DB so fresh orders take precedence
+  if (!activeOrder && psid) {
+    const [rows] = await db.query(
+      `SELECT o.id, o.order_number, o.status, o.total_amount, o.created_at, o.payment_status, o.cancel_requested,
+              TIMESTAMPDIFF(SECOND, o.created_at, NOW()) AS elapsed_seconds
+       FROM orders o
+       JOIN customers c ON c.id = o.customer_id
+       WHERE c.psid = ? AND LOWER(o.status) NOT IN ('cancelled', 'voided', 'delivered', 'completed')
+       ORDER BY o.id DESC LIMIT 1`,
+      [psid]
+    );
+    if (rows && rows.length > 0) {
+      activeOrder = rows[0];
+    }
+  }
+
   if (!activeOrder && session.activeOrderNumber) {
     const [rows] = await db.query(
       `SELECT id, order_number, status, total_amount, created_at, payment_status, cancel_requested,
@@ -1361,7 +1406,7 @@ async function handleCancellationRequest(psid, session, rawText = '') {
        LIMIT 1`,
       [session.activeOrderNumber]
     );
-    if (rows && rows.length > 0 && !['cancelled', 'voided'].includes(String(rows[0].status).toLowerCase())) {
+    if (rows && rows.length > 0 && !['cancelled', 'voided', 'delivered', 'completed'].includes(String(rows[0].status).toLowerCase())) {
       activeOrder = rows[0];
     }
   }
@@ -1375,22 +1420,7 @@ async function handleCancellationRequest(psid, session, rawText = '') {
        LIMIT 1`,
       [session.active_order_id]
     );
-    if (rows && rows.length > 0 && !['cancelled', 'voided'].includes(String(rows[0].status).toLowerCase())) {
-      activeOrder = rows[0];
-    }
-  }
-
-  if (!activeOrder && psid) {
-    const [rows] = await db.query(
-      `SELECT o.id, o.order_number, o.status, o.total_amount, o.created_at, o.payment_status, o.cancel_requested,
-              TIMESTAMPDIFF(SECOND, o.created_at, NOW()) AS elapsed_seconds
-       FROM orders o
-       JOIN customers c ON c.id = o.customer_id
-       WHERE c.psid = ? AND LOWER(o.status) NOT IN ('cancelled', 'voided')
-       ORDER BY o.id DESC LIMIT 1`,
-      [psid]
-    );
-    if (rows && rows.length > 0) {
+    if (rows && rows.length > 0 && !['cancelled', 'voided', 'delivered', 'completed'].includes(String(rows[0].status).toLowerCase())) {
       activeOrder = rows[0];
     }
   }
@@ -1467,10 +1497,12 @@ async function handleCancellationRequest(psid, session, rawText = '') {
       return { intent: 'ORDER_CANCEL_BLOCKED', confidence: 1.0, replyLog: reply, orderNumber: orderIdentifier };
     }
 
-    // Rule 1: Instant Self-Service Cancellation (PENDING / PENDING_APPROVAL / Unpaid)
+    // Rule 1: Instant Self-Service Cancellation (PENDING / PENDING_APPROVAL / Unpaid) - NO TIME LIMIT
     await updateOrderStatus(activeOrder.id, 'cancelled', {
-      cancellationReason: 'Cancelled by customer via Messenger (Instant self-service)'
+      cancellationReason: 'Cancelled by customer via Messenger (Pending Approval - Instant self-service, no time limit)'
     });
+    session.activeOrderNumber = null;
+    session.active_order_id = null;
     await resetUserSession(psid);
 
     const reply = `Naiintindihan po namin. Matagumpay na pong nakansela ang inyong Order #${orderIdentifier} dahil hindi pa po ito naipapasa sa kusina. Maaari po kayong mag-order muli anumang oras.`;
@@ -2330,7 +2362,7 @@ function isRecommendationRequest(rawText = '') {
 function isReferentialOrComboOrder(rawText = '') {
   const s = String(rawText || '').trim();
   if (!s) return false;
-  return /\b(?:add\s+(?:to\s+)?cart\s*(?:mo)?\s*(?:na\s*)?(?:yan|yun|ito|nyan)|i-?add\s*(?:mo)?\s*(?:na\s*)?(?:yan|yun)|yan\s+na\s+lang|yun\s+na\s+lang|order\s*(?:ko|natin)\s*(?:yan|yun)|ikaw\s+na\s+bahala|ikaw\s+na\s+pumili|kahit\s+ano\s+basta)\b/i.test(s);
+  return /\b(?:add\s+(?:to\s+)?cart\s*(?:mo)?\s*(?:na\s*)?(?:yan|yun|ito|nyan)|i-?add\s*(?:mo)?\s*(?:na\s*)?(?:yan|yun)|yan\s+na\s+lang|yun\s+na\s+lang|order\s*(?:ko|natin)\s*(?:yan|yun)|ikaw\s+na\s+bahala|ikaw\s+na\s+pumili|kahit\s+ano\s+basta|iba\s+na\s+lang|magkakaiba|mag[\s-]*kakaiba|ayaw\s+ko\s+ng\s+pare[\s-]*pareho|palitan\s+mo|palitan\s+yung|palitan\s+ung|wag\s+yan|huwag\s+yan|ibang\s+meal|ibang\s+ulam)\b/i.test(s);
 }
 
 /**
@@ -2634,6 +2666,64 @@ async function handleTextInput(psid, session, rawText) {
   // Dynamic Order Cancellation Guard (Status-Based Rules)
   if (isCancelTriggerWord(norm, rawText)) {
     return handleCancellationRequest(psid, session, rawText);
+  }
+
+  // GCash Reference Number Direct Interceptor
+  const standaloneRefMatch = rawText.match(/(?:ref(?:erence)?(?:\s*no\.?|\s*number)?:?\s*)?(\b\d{9,13}\b)/i);
+  if (standaloneRefMatch && (session.pendingGCashOrder || session.activeOrderNumber || session.active_order_id || session.state === 'AWAITING_PAYMENT_PROOF' || session.checkout_step === 'AWAITING_PAYMENT_PROOF')) {
+    const refNum = standaloneRefMatch[1];
+    if (session.pendingGCashOrder) {
+      return await finalizeOrderFromProofSubmission(psid, session, {
+        referenceNumber: refNum,
+        savedFilename: null,
+        ocrAmount: null
+      });
+    }
+
+    const targetOrderNum = session.activeOrderNumber;
+    const targetOrderId = session.active_order_id;
+    const [targetRows] = await db.query(
+      `SELECT id, order_number, status, payment_status, total_amount FROM orders
+       WHERE (${targetOrderId ? 'id = ? OR ' : ''} order_number = ?)
+       LIMIT 1`,
+      targetOrderId ? [targetOrderId, targetOrderNum || ''] : [targetOrderNum || '']
+    );
+    if (targetRows && targetRows.length > 0) {
+      const o = targetRows[0];
+      await db.query(
+        `UPDATE orders SET payment_ref_number = ?, gcash_ref = ?, payment_status = 'Pending Verification', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        [refNum, refNum, o.id]
+      );
+      const [existingPay] = await db.query(`SELECT id FROM payments WHERE order_id = ? LIMIT 1`, [o.id]).catch(() => [[]]);
+      if (existingPay && existingPay.length > 0) {
+        await db.query(
+          `UPDATE payments SET reference_no = ?, payment_method = 'gcash', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+          [refNum, existingPay[0].id]
+        ).catch(() => {});
+      } else {
+        await db.query(
+          `INSERT INTO payments (order_id, payment_method, amount_expected, reference_no, status) VALUES (?, 'gcash', ?, ?, 'pending')`,
+          [o.id, o.total_amount || 0, refNum]
+        ).catch(() => {});
+      }
+
+      if (notificationService && typeof notificationService.broadcastSSE === 'function') {
+        notificationService.broadcastSSE('ORDER_PAYMENT_UPDATED', {
+          orderId: o.id,
+          orderNumber: o.order_number,
+          paymentStatus: 'PENDING_APPROVAL',
+          referenceNumber: refNum
+        });
+      }
+
+      session.gcash_ref = refNum;
+      session.payment_mode = 'GCash';
+      await saveSession(session);
+
+      const confirmMsg = `Salamat po! Natanggap na po namin ang inyong GCash Reference Number (#${refNum}). Kasalukuyan na po itong bina-validate ng ating cashier para maipasa agad sa kusina ang inyong order!`;
+      await sendTextMessage(psid, confirmMsg);
+      return { intent: 'GCASH_REFERENCE_SUBMITTED', confidence: 1.0, replyLog: confirmMsg, referenceNumber: refNum };
+    }
   }
 
   // Check for payment confirmation signal like "Send na po", "Bayad na po", "Na-send ko na"
@@ -3105,6 +3195,9 @@ async function handleTextInput(psid, session, rawText) {
       }
 
       const parsed = parseCustomerInfo(rawText, currentDiningMode);
+      if (parsed.diningMode) {
+        currentDiningMode = parsed.diningMode;
+      }
 
       const candidateName = parsed.name || session.customer_name || session.details?.name || '';
       const nameCheck = await resolveCustomerNameWithFallback(psid, session, candidateName);
@@ -3124,8 +3217,8 @@ async function handleTextInput(psid, session, rawText) {
         ? calculateCartSubtotal(session.cart)
         : (session.order_subtotal || 0);
 
-      const isDineIn = /dine[\s-]*in|sa\s*loob/i.test(currentDiningMode || '') || /table|dine[\s-]*in|sa\s*loob/i.test(parsed.address || '');
-      const isPickup = /pick[\s-]*up|pickup|take[\s-]*out|takeout|daanan/i.test(currentDiningMode || '') || /pick[\s-]*up|pickup|take[\s-]*out|takeout|counter/i.test(parsed.address || '');
+      const isDineIn = /dine[\s-]*in|sa\s*loob|dating\s*(?:ako\s*)?d(?:y|i)an|kakain\s*d(?:y|i)an/i.test(currentDiningMode || '') || /table|dine[\s-]*in|sa\s*loob/i.test(parsed.address || '') || Boolean(parsed.arrivingTime);
+      const isPickup = !isDineIn && (/pick[\s-]*up|pickup|take[\s-]*out|takeout|daanan/i.test(currentDiningMode || '') || /pick[\s-]*up|pickup|take[\s-]*out|takeout|counter/i.test(parsed.address || ''));
       const isDelivery = !isDineIn && !isPickup && (/delivery/i.test(currentDiningMode || '') || (!currentDiningMode && parsed.address));
 
       if (isDineIn) session.dining_mode = 'Dine In';
@@ -3555,8 +3648,8 @@ async function handleTextInput(psid, session, rawText) {
 
   // 4. VIEW_CART (check BEFORE menu & SEND_PICTURE so "patingin ng cart" / "ano laman ng cart ko" never collides!)
   if (
-    ['cart', 'my cart', 'view cart', 'show cart', 'whats in my cart'].includes(norm) ||
-    (/\bcart\b/i.test(norm) && !/\b(?:add|order|pabili|pa-order|remove|delete|alisin|tanggalin|clear|empty)\b/i.test(norm))
+    ['cart', 'kart', 'my cart', 'my kart', 'view cart', 'show cart', 'whats in my cart', 'kart ko', 'cart ko'].includes(norm) ||
+    (/\b(?:cart|kart)\b/i.test(norm) && !/\b(?:add|order|pabili|pa-order|remove|delete|alisin|tanggalin|clear|empty)\b/i.test(norm))
   ) {
     const cartReply = await renderCartSummary(psid, session);
     return { intent: 'VIEW_CART', confidence: 1.0, replyLog: cartReply || 'Viewed cart' };
@@ -5688,6 +5781,13 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
           const { checkMenuAvailability } = require('./inventoryService');
           if (!session.cart) session.cart = [];
 
+          // Recommendation swap: If customer rejects previous suggestions and asks for different items, replace instead of stack
+          const isSwap = /\b(?:iba\s+na\s+lang|magkakaiba|mag[\s-]*kakaiba|ayaw\s+ko\s+ng\s+pare[\s-]*pareho|palitan\s+mo|palitan\s+yung|palitan\s+ung|wag\s+yan|huwag\s+yan|ibang\s+meal|ibang\s+ulam)\b/i.test(rawText);
+          if (isSwap && session.cart && session.cart.length > 0) {
+            session.cart = [];
+            await clearSessionCart(psid);
+          }
+
           const addedSummary = [];
           const outOfStockNotices = [];
           const ambiguousItems = [];
@@ -6242,7 +6342,13 @@ async function tryGeminiConversationalTurn(psid, session, rawText) {
   }
 }
 
+async function processMessage(psid, text) {
+  const session = await getSession(psid);
+  return handleTextInput(psid, session, text);
+}
+
 module.exports = {
+  processMessage,
   handleMessageEvent,
   handleTextInput,
   macroState,

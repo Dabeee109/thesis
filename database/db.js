@@ -132,7 +132,7 @@ function initSqliteFallback() {
         order_number TEXT UNIQUE NOT NULL,
         customer_id INTEGER NOT NULL REFERENCES customers(id),
         order_type TEXT CHECK(order_type IN ('delivery', 'pickup')) NOT NULL DEFAULT 'delivery',
-        status TEXT CHECK(status IN ('pending', 'preparing', 'dispatched', 'delivered', 'cancelled', 'voided', 'VOIDED', 'CANCELLED', 'PAID', 'FOR_CONFIRMATION', 'paid', 'for_confirmation', 'PENDING_ADMIN_QUOTE', 'pending_admin_quote', 'cancellation_requested', 'CANCELLATION_REQUESTED')) NOT NULL DEFAULT 'pending',
+        status TEXT CHECK(status IN ('pending', 'pending_approval', 'preparing', 'in_preparation', 'awaiting_confirmation', 'dispatched', 'delivered', 'cancelled', 'voided', 'VOIDED', 'CANCELLED', 'PAID', 'FOR_CONFIRMATION', 'paid', 'for_confirmation', 'PENDING_ADMIN_QUOTE', 'pending_admin_quote', 'cancellation_requested', 'CANCELLATION_REQUESTED')) NOT NULL DEFAULT 'pending',
         subtotal REAL NOT NULL DEFAULT 0.00,
         delivery_fee REAL NOT NULL DEFAULT 0.00,
         total_amount REAL NOT NULL DEFAULT 0.00,
