@@ -81,8 +81,8 @@ test('1. Customer Order Cancellation via Messenger (Pending Approval: Status = P
   assert.ok(sent.length >= 1, 'Should send response message');
   const lastMsg = sent[sent.length - 1].messagePayload.text;
 
-  const expectedReply = `Ang inyong order #${orderNumber} ay matagumpay nang nakansela. Kung nais ninyong mag-order muli, mag-type lamang po ng 'Menu'.`;
-  assert.strictEqual(lastMsg, expectedReply, 'Confirmation message must match exact requirement');
+  const expectedReply = `Naiintindihan po namin. Matagumpay na pong nakansela ang inyong Order #${orderNumber} dahil hindi pa po ito naipapasa sa kusina. Maaari po kayong mag-order muli anumang oras.`;
+  assert.strictEqual(lastMsg, expectedReply, 'Rule 1: Confirmation message must match 5-minute instant cancellation policy');
 
   // Verify status in DB is cancelled
   const [orderRows] = await db.query(`SELECT status FROM orders WHERE id = ?`, [orderId]);
@@ -93,7 +93,7 @@ test('1. Customer Order Cancellation via Messenger (Pending Approval: Status = P
   assert.strictEqual(itemRows[0].stock_quantity, initialStock + 2, 'Menu item stock must be restored +2');
 });
 
-test('2. Customer Order Cancellation Denied when Status has progressed (IN_PREPARATION)', async () => {
+test('2. Customer Order Cancellation Within 5 Minutes in Kitchen (IN_PREPARATION & elapsed <= 300s)', async () => {
   const psid = 'TEST_PSID_PREP_' + Date.now();
   clearSent();
 
@@ -117,19 +117,58 @@ test('2. Customer Order Cancellation Denied when Status has progressed (IN_PREPA
   session.active_order_id = orderId;
   await saveSession(session);
 
-  // Customer taps Cancel Order button
+  // Customer taps Cancel Order button within 5 minutes of placement
   await handleMessageEvent(psid, '', `CANCEL_ORDER_${orderNumber}`);
 
   const sent = getSent(psid);
   assert.ok(sent.length >= 1);
   const lastMsg = sent[sent.length - 1].messagePayload.text;
 
-  const expectedDenial = 'Paumanhin, hindi na po maaaring kanselahin ang inyong order dahil ito ay kasalukuyan nang inihahanda ng aming kusina o naipadala na. Mangyaring mag-iwan ng mensahe para sa aming staff.';
-  assert.strictEqual(lastMsg, expectedDenial, 'Denial message must match exact requirement');
+  const expectedGracePeriodMsg = `Naipasa na po ang inyong Order #${orderNumber} sa kusina, ngunit dahil pasok pa po ito sa 5-minute grace period, naipadala na po namin ang inyong cancellation request sa aming duty staff/admin. Maghintay lamang po ng sandali para sa kanilang kumpirmasyon kung maaari pa itong mahinto.`;
+  assert.strictEqual(lastMsg, expectedGracePeriodMsg, 'Rule 2: Within 5 min kitchen cancellation must be forwarded to admin');
 
-  // Order status should remain preparing
+  // Order status should be cancellation_requested with cancel_requested = 1
+  const [orderRows] = await db.query(`SELECT status, cancel_requested FROM orders WHERE id = ?`, [orderId]);
+  assert.strictEqual(orderRows[0].status, 'cancellation_requested');
+  assert.strictEqual(Number(orderRows[0].cancel_requested), 1);
+});
+
+test('2b. Customer Order Cancellation Past 5 Minutes in Kitchen (IN_PREPARATION & elapsed > 300s)', async () => {
+  const psid = 'TEST_PSID_PREP_EXPIRED_' + Date.now();
+  clearSent();
+
+  const [custRes] = await db.query(
+    `INSERT INTO customers (psid, first_name, last_name, phone_number) VALUES (?, 'Lando', 'Santos', '09181112222')`,
+    [psid]
+  );
+  const customerId = custRes.insertId;
+
+  const orderNumber = 'DNR-TEST-EXPIRED';
+  const [ordRes] = await db.query(
+    `INSERT INTO orders (order_number, customer_id, order_type, status, subtotal, delivery_fee, total_amount, created_at)
+     VALUES (?, ?, 'delivery', 'preparing', 200, 40, 240, datetime('now', '-10 minutes'))`,
+    [orderNumber, customerId]
+  );
+  const orderId = ordRes.insertId;
+
+  const session = await getSession(psid);
+  session.customerId = customerId;
+  session.activeOrderNumber = orderNumber;
+  session.active_order_id = orderId;
+  await saveSession(session);
+
+  await handleMessageEvent(psid, 'cancel order');
+
+  const sent = getSent(psid);
+  assert.ok(sent.length >= 1);
+  const lastMsg = sent[sent.length - 1].messagePayload.text;
+
+  const expectedDenial = `Paumanhin po, lampas na po sa 5-minute grace period at kasalukuyan nang niluluto (o naipadala na) ang inyong Order #${orderNumber}, kaya hindi na po ito maaaring kanselahin.`;
+  assert.strictEqual(lastMsg, expectedDenial, 'Rule 3: Past 5 minutes in kitchen must be declined');
+
+  // Order status must remain preparing
   const [orderRows] = await db.query(`SELECT status FROM orders WHERE id = ?`, [orderId]);
-  assert.strictEqual(orderRows[0].status, 'preparing', 'Order status must not change');
+  assert.strictEqual(orderRows[0].status, 'preparing');
 });
 
 test('3. Customer Order Cancellation Denied when Status has progressed (DISPATCHED or DELIVERED)', async () => {
@@ -163,8 +202,8 @@ test('3. Customer Order Cancellation Denied when Status has progressed (DISPATCH
   assert.ok(sent.length >= 1);
   const lastMsg = sent[sent.length - 1].messagePayload.text;
 
-  const expectedDenial = 'Paumanhin, hindi na po maaaring kanselahin ang inyong order dahil ito ay kasalukuyan nang inihahanda ng aming kusina o naipadala na. Mangyaring mag-iwan ng mensahe para sa aming staff.';
-  assert.strictEqual(lastMsg, expectedDenial, 'Denial message must match exact requirement for dispatched');
+  const expectedDenial = `Paumanhin po, lampas na po sa 5-minute grace period at kasalukuyan nang niluluto (o naipadala na) ang inyong Order #${orderNumber}, kaya hindi na po ito maaaring kanselahin.`;
+  assert.strictEqual(lastMsg, expectedDenial, 'Rule 3: Dispatched order cancellation must be denied');
 
   // Order status must remain dispatched
   const [orderRows] = await db.query(`SELECT status FROM orders WHERE id = ?`, [orderId]);
@@ -192,4 +231,47 @@ test('4. API / orderService: Order details include status, note, landmark, dinin
   assert.strictEqual(details.arriving_time, '3:30 PM');
   assert.strictEqual(details.note, 'Extra hot please');
   assert.strictEqual(details.customer_note, 'Extra hot please');
+  assert.ok(details.elapsed_seconds !== undefined, 'Must calculate elapsed_seconds');
+});
+
+test('5. Admin / Staff Approves Within-5-Minute Kitchen Cancellation Request', async () => {
+  const [custRes] = await db.query(
+    `INSERT INTO customers (psid, first_name, last_name, phone_number) VALUES ('PSID_APPR_TEST', 'Gloria', 'Macapagal', '09221234567')`
+  );
+  const customerId = custRes.insertId;
+  const orderNumber = 'DNR-APPR-TEST';
+  const [ordRes] = await db.query(
+    `INSERT INTO orders (order_number, customer_id, order_type, status, subtotal, delivery_fee, total_amount, cancel_requested)
+     VALUES (?, ?, 'delivery', 'cancellation_requested', 250, 40, 290, 1)`,
+    [orderNumber, customerId]
+  );
+  const orderId = ordRes.insertId;
+
+  const updated = await orderService.approveCancellationRequest(orderId, { name: 'Duty Manager', role: 'admin' }, 'Cooking has not started');
+  assert.strictEqual(updated.status, 'cancelled');
+
+  const [orderRows] = await db.query(`SELECT status, cancel_requested FROM orders WHERE id = ?`, [orderId]);
+  assert.strictEqual(orderRows[0].status, 'cancelled');
+  assert.strictEqual(Number(orderRows[0].cancel_requested), 0);
+});
+
+test('6. Admin / Staff Declines Within-5-Minute Kitchen Cancellation Request', async () => {
+  const [custRes] = await db.query(
+    `INSERT INTO customers (psid, first_name, last_name, phone_number) VALUES ('PSID_DECL_TEST', 'Rody', 'Duterte', '09231234567')`
+  );
+  const customerId = custRes.insertId;
+  const orderNumber = 'DNR-DECL-TEST';
+  const [ordRes] = await db.query(
+    `INSERT INTO orders (order_number, customer_id, order_type, status, subtotal, delivery_fee, total_amount, cancel_requested)
+     VALUES (?, ?, 'delivery', 'cancellation_requested', 250, 40, 290, 1)`,
+    [orderNumber, customerId]
+  );
+  const orderId = ordRes.insertId;
+
+  const result = await orderService.declineCancellationRequest(orderId, { name: 'Kitchen Chef', role: 'staff' }, 'Already on the grill');
+  assert.strictEqual(result.status, 'preparing');
+
+  const [orderRows] = await db.query(`SELECT status, cancel_requested FROM orders WHERE id = ?`, [orderId]);
+  assert.strictEqual(orderRows[0].status, 'preparing');
+  assert.strictEqual(Number(orderRows[0].cancel_requested), 0);
 });

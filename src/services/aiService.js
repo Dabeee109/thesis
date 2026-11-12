@@ -224,7 +224,8 @@ async function loadOperationalContext(psid, session = null) {
   if (psid) {
     try {
       const [orderRows] = await db.query(
-        `SELECT o.id, o.order_number, o.status, o.payment_status, o.order_type, o.dining_mode, o.total_amount, o.created_at
+        `SELECT o.id, o.order_number, o.status, o.payment_status, o.order_type, o.dining_mode, o.total_amount, o.created_at,
+                TIMESTAMPDIFF(SECOND, o.created_at, NOW()) AS elapsed_seconds
          FROM orders o
          JOIN customers c ON c.id = o.customer_id
          WHERE c.psid = ?
@@ -235,7 +236,16 @@ async function loadOperationalContext(psid, session = null) {
       if (orderRows && orderRows.length > 0) {
         const st = String(orderRows[0].status || '').toLowerCase();
         if (!['cancelled', 'voided'].includes(st)) {
-          latestOrder = orderRows[0];
+          latestOrder = { ...orderRows[0] };
+          let elapsedSec = 0;
+          if (latestOrder.elapsed_seconds !== undefined && latestOrder.elapsed_seconds !== null && !isNaN(Number(latestOrder.elapsed_seconds))) {
+            elapsedSec = Math.max(0, Number(latestOrder.elapsed_seconds));
+          } else if (latestOrder.created_at) {
+            const t = new Date(latestOrder.created_at).getTime();
+            if (!isNaN(t)) elapsedSec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+          }
+          latestOrder.elapsed_seconds = elapsedSec;
+          latestOrder.elapsed_minutes = Math.floor(elapsedSec / 60);
         }
       }
     } catch (err) {
@@ -297,7 +307,7 @@ function buildAssistantSystemInstruction(context = {}) {
     : 'Empty';
 
   const orderBlock = context.latestOrder
-    ? `Order #${context.latestOrder.order_number} | Status: ${context.latestOrder.status} | Payment: ${context.latestOrder.payment_status} | Total: ₱${Number(context.latestOrder.total_amount || 0).toFixed(2)}`
+    ? `Order #${context.latestOrder.order_number} | Status: ${context.latestOrder.status} | Payment: ${context.latestOrder.payment_status} | Elapsed: ${context.latestOrder.elapsed_minutes ?? 0} mins since placement | Total: ₱${Number(context.latestOrder.total_amount || 0).toFixed(2)}`
     : 'None';
 
   return `You are the official conversational Facebook Messenger assistant for Diner's Cafe.
@@ -354,7 +364,7 @@ ACTION ROUTING RULES:
 - RECOMMEND_ITEM: Customer asks for recommendations or bestsellers (e.g., "anong mare-recommend mo na drinks", "ano masarap"). NEVER trigger VIEW_MENU for recommendations—put 2 to 3 specific [AVAILABLE] items with brief descriptions & prices directly inside reply_message.
 - VIEW_MENU: Customer explicitly asks to see the full menu, food list, or drink list.
 - SEND_PICTURE: Customer asks to see a photo/picture of a specific menu dish or drink (NOT "cart" and NOT "menu"). Put the matched menu item name in action_payload.item_name.
-- CANCEL_ORDER: Customer explicitly asks to cancel their order.
+- CANCEL_ORDER: Customer explicitly asks to cancel their active order (e.g., "cancel my order", "pa-cancel", "ayoko na"). Follow the 5-Minute Order Cancellation Policy: (1) Orders that are PENDING or unpaid can be immediately cancelled. (2) Orders already in the kitchen (IN_PREPARATION) within 5 minutes of placement are forwarded to duty staff/admin for cancellation approval. (3) Orders past 5 minutes in kitchen preparation or already DISPATCHED cannot be cancelled. Always set detected_action: "CANCEL_ORDER".
 - CHECK_STATUS: Customer asks about their order status, delivery progress, or tracking.
 - PROCEED_CHECKOUT: Customer confirms they are ready to check out or pay for their cart.`;
 }

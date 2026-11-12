@@ -748,6 +748,14 @@ async function getOrderDetails(orderIdentifier) {
   order.landmark = order.landmark || '';
   order.dining_mode = order.dining_mode || (order.order_type === 'pickup' ? 'Pick-up' : 'Delivery');
   order.arriving_time = order.arriving_time || '';
+
+  let elapsedSeconds = 0;
+  if (order.created_at) {
+    const t = new Date(order.created_at).getTime();
+    if (!isNaN(t)) elapsedSeconds = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  }
+  order.elapsed_seconds = elapsedSeconds;
+  order.elapsed_minutes = Math.floor(elapsedSeconds / 60);
   return order;
 }
 
@@ -838,6 +846,97 @@ async function rejectVoidOrder(orderId, adminUser, rejectionNote) {
   });
 
   return { orderId, orderNumber: order.order_number, void_status: 'rejected' };
+}
+
+/**
+ * Staff/Admin approves within-5-minute cancellation request
+ */
+async function approveCancellationRequest(orderId, adminUser = {}, notes = '') {
+  const [rows] = await db.query(`SELECT id, order_number, status, customer_id FROM orders WHERE id = ?`, [orderId]);
+  if (!rows || rows.length === 0) throw new Error(`Order #${orderId} not found.`);
+  const order = rows[0];
+
+  await db.query(
+    `UPDATE orders 
+     SET cancel_requested = 0, 
+         void_status = 'approved',
+         updated_at = CURRENT_TIMESTAMP 
+     WHERE id = ?`,
+    [orderId]
+  );
+
+  const updated = await updateOrderStatus(orderId, 'cancelled', {
+    cancellationReason: notes || `Cancellation approved by staff/admin (${adminUser.name || 'Duty Staff'})`
+  });
+
+  // Notify customer on Messenger if customer has PSID
+  try {
+    const [custRows] = await db.query(`SELECT psid FROM customers WHERE id = ?`, [order.customer_id]);
+    if (custRows && custRows.length > 0 && custRows[0].psid) {
+      const { sendTextMessage } = require('./messengerService');
+      const msg = `Magandang araw po! Ang inyong cancellation request para sa Order #${order.order_number} ay naaprubahan na ng kusina. Matagumpay na pong nakansela ang inyong order. Maaari po kayong mag-order muli anumang oras!`;
+      await sendTextMessage(custRows[0].psid, msg);
+    }
+  } catch (err) {
+    console.warn('[orderService] Failed to notify customer of approved cancellation:', err.message);
+  }
+
+  broadcastSSE('CANCELLATION_REQUEST_RESOLVED', {
+    orderId,
+    orderNumber: order.order_number,
+    status: 'approved',
+    resolvedBy: adminUser.name || 'Staff'
+  });
+
+  return {
+    orderId,
+    orderNumber: order.order_number,
+    status: 'cancelled',
+    newStatus: 'cancelled',
+    cancel_requested: 0,
+    ...updated
+  };
+}
+
+/**
+ * Staff/Admin declines within-5-minute cancellation request (already cooking in kitchen)
+ */
+async function declineCancellationRequest(orderId, adminUser = {}, reason = '') {
+  const [rows] = await db.query(`SELECT id, order_number, status, customer_id FROM orders WHERE id = ?`, [orderId]);
+  if (!rows || rows.length === 0) throw new Error(`Order #${orderId} not found.`);
+  const order = rows[0];
+
+  await db.query(
+    `UPDATE orders 
+     SET status = 'preparing',
+         cancel_requested = 0, 
+         void_status = 'rejected',
+         updated_at = CURRENT_TIMESTAMP 
+     WHERE id = ?`,
+    [orderId]
+  );
+
+  // Notify customer on Messenger if customer has PSID
+  try {
+    const [custRows] = await db.query(`SELECT psid FROM customers WHERE id = ?`, [order.customer_id]);
+    if (custRows && custRows.length > 0 && custRows[0].psid) {
+      const { sendTextMessage } = require('./messengerService');
+      const msg = `Magandang araw po! Sinuri po ng aming kusina ang inyong cancellation request para sa Order #${order.order_number}, ngunit kasalukuyan na po itong niluluto kaya hindi na po ito maaaring kanselahin. Maraming salamat po sa pag-unawa!`;
+      await sendTextMessage(custRows[0].psid, msg);
+    }
+  } catch (err) {
+    console.warn('[orderService] Failed to notify customer of declined cancellation:', err.message);
+  }
+
+  broadcastSSE('CANCELLATION_REQUEST_RESOLVED', {
+    orderId,
+    orderNumber: order.order_number,
+    status: 'declined',
+    reason: reason || 'Already cooking in kitchen',
+    resolvedBy: adminUser.name || 'Staff'
+  });
+
+  return { orderId, orderNumber: order.order_number, status: 'preparing', cancel_requested: 0 };
 }
 
 /**
@@ -1064,6 +1163,8 @@ module.exports = {
   requestVoidOrder,
   authorizeVoidOrder,
   rejectVoidOrder,
+  approveCancellationRequest,
+  declineCancellationRequest,
   verifyOrderPayment,
   markOrderPaymentInvalid
 };

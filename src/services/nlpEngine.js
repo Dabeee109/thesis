@@ -1339,7 +1339,11 @@ async function handleCancellationRequest(psid, session, rawText = '') {
   if (targetOrderIdOrNum) {
     const isNum = /^\d+$/.test(targetOrderIdOrNum);
     const [rows] = await db.query(
-      `SELECT id, order_number, status, total_amount FROM orders WHERE ${isNum ? '(id = ? OR order_number = ?)' : 'order_number = ?'} LIMIT 1`,
+      `SELECT id, order_number, status, total_amount, created_at, payment_status, cancel_requested,
+              TIMESTAMPDIFF(SECOND, created_at, NOW()) AS elapsed_seconds
+       FROM orders 
+       WHERE ${isNum ? '(id = ? OR order_number = ?)' : 'order_number = ?'} 
+       LIMIT 1`,
       isNum ? [targetOrderIdOrNum, targetOrderIdOrNum] : [targetOrderIdOrNum]
     );
     if (rows && rows.length > 0) {
@@ -1349,7 +1353,11 @@ async function handleCancellationRequest(psid, session, rawText = '') {
 
   if (!activeOrder && session.activeOrderNumber) {
     const [rows] = await db.query(
-      `SELECT id, order_number, status, total_amount FROM orders WHERE order_number = ? LIMIT 1`,
+      `SELECT id, order_number, status, total_amount, created_at, payment_status, cancel_requested,
+              TIMESTAMPDIFF(SECOND, created_at, NOW()) AS elapsed_seconds
+       FROM orders 
+       WHERE order_number = ? 
+       LIMIT 1`,
       [session.activeOrderNumber]
     );
     if (rows && rows.length > 0 && !['cancelled', 'voided'].includes(String(rows[0].status).toLowerCase())) {
@@ -1359,7 +1367,11 @@ async function handleCancellationRequest(psid, session, rawText = '') {
 
   if (!activeOrder && session.active_order_id) {
     const [rows] = await db.query(
-      `SELECT id, order_number, status, total_amount FROM orders WHERE id = ? LIMIT 1`,
+      `SELECT id, order_number, status, total_amount, created_at, payment_status, cancel_requested,
+              TIMESTAMPDIFF(SECOND, created_at, NOW()) AS elapsed_seconds
+       FROM orders 
+       WHERE id = ? 
+       LIMIT 1`,
       [session.active_order_id]
     );
     if (rows && rows.length > 0 && !['cancelled', 'voided'].includes(String(rows[0].status).toLowerCase())) {
@@ -1369,7 +1381,8 @@ async function handleCancellationRequest(psid, session, rawText = '') {
 
   if (!activeOrder && psid) {
     const [rows] = await db.query(
-      `SELECT o.id, o.order_number, o.status, o.total_amount
+      `SELECT o.id, o.order_number, o.status, o.total_amount, o.created_at, o.payment_status, o.cancel_requested,
+              TIMESTAMPDIFF(SECOND, o.created_at, NOW()) AS elapsed_seconds
        FROM orders o
        JOIN customers c ON c.id = o.customer_id
        WHERE c.psid = ? AND LOWER(o.status) NOT IN ('cancelled', 'voided')
@@ -1384,33 +1397,89 @@ async function handleCancellationRequest(psid, session, rawText = '') {
   if (activeOrder) {
     const s = String(activeOrder.status).toLowerCase();
     const { updateOrderStatus } = require('./orderService');
+    const orderIdentifier = activeOrder.order_number || activeOrder.id;
 
-    // Rule 1: If status has progressed to IN_PREPARATION, DISPATCHED, or DELIVERED:
-    const isProgressed = (
-      s === 'preparing' || s === 'in_preparation' || s === 'in kitchen preparation' ||
+    // Calculate elapsed seconds since placement (TIMESTAMPDIFF from DB, fallback to JS timestamp)
+    let elapsedSeconds = 0;
+    if (activeOrder.elapsed_seconds !== undefined && activeOrder.elapsed_seconds !== null && !isNaN(Number(activeOrder.elapsed_seconds))) {
+      elapsedSeconds = Math.max(0, Number(activeOrder.elapsed_seconds));
+    } else if (activeOrder.created_at) {
+      const createdMs = new Date(activeOrder.created_at).getTime();
+      if (!isNaN(createdMs)) {
+        elapsedSeconds = Math.max(0, Math.floor((Date.now() - createdMs) / 1000));
+      }
+    }
+
+    // Rule 3: Already dispatched or delivered cannot be cancelled
+    const isDispatched = (
       s === 'dispatched' || s === 'on_delivery' || s === 'dispatched / on delivery' ||
       s === 'delivered' || s === 'completed'
     );
-
-    if (isProgressed) {
-      const reply = "Paumanhin, hindi na po maaaring kanselahin ang inyong order dahil ito ay kasalukuyan nang inihahanda ng aming kusina o naipadala na. Mangyaring mag-iwan ng mensahe para sa aming staff.";
+    if (isDispatched) {
+      const reply = `Paumanhin po, lampas na po sa 5-minute grace period at kasalukuyan nang niluluto (o naipadala na) ang inyong Order #${orderIdentifier}, kaya hindi na po ito maaaring kanselahin.`;
       await sendTextMessage(psid, reply);
-      return { intent: 'ORDER_CANCEL_BLOCKED', confidence: 1.0, replyLog: reply };
+      return { intent: 'ORDER_CANCEL_BLOCKED', confidence: 1.0, replyLog: reply, orderNumber: orderIdentifier };
     }
 
-    // Rule 2: If status is strictly PENDING / PENDING_APPROVAL / awaiting_confirmation / PENDING_ADMIN_QUOTE:
-    const isPending = (s === 'pending' || s === 'pending_approval' || s === 'awaiting_confirmation' || s === 'pending_admin_quote');
-    if (isPending) {
-      await updateOrderStatus(activeOrder.id, 'cancelled', {
-        cancellationReason: 'Cancelled by customer via Messenger'
-      });
-      await resetUserSession(psid);
+    // Kitchen Preparation Check:
+    const isKitchen = (
+      s === 'preparing' || s === 'in_preparation' || s === 'in kitchen preparation' ||
+      s === 'cancellation_requested'
+    );
 
-      const orderIdentifier = activeOrder.order_number || activeOrder.id;
-      const reply = `Ang inyong order #${orderIdentifier} ay matagumpay nang nakansela. Kung nais ninyong mag-order muli, mag-type lamang po ng 'Menu'.`;
+    if (isKitchen) {
+      // Rule 2: In kitchen within 5 minutes (elapsedSeconds <= 300) -> Escalate to Duty Staff/Admin
+      if (elapsedSeconds <= 300) {
+        await db.query(
+          `UPDATE orders 
+           SET status = 'cancellation_requested', 
+               cancel_requested = 1, 
+               cancel_requested_at = CURRENT_TIMESTAMP, 
+               updated_at = CURRENT_TIMESTAMP 
+           WHERE id = ?`,
+          [activeOrder.id]
+        );
+
+        if (notificationService && typeof notificationService.broadcastSSE === 'function') {
+          notificationService.broadcastSSE('CANCELLATION_REQUESTED', {
+            orderId: activeOrder.id,
+            orderNumber: activeOrder.order_number,
+            status: 'cancellation_requested',
+            elapsedSeconds,
+            timestamp: new Date().toISOString()
+          });
+        }
+
+        const reply = `Naipasa na po ang inyong Order #${orderIdentifier} sa kusina, ngunit dahil pasok pa po ito sa 5-minute grace period, naipadala na po namin ang inyong cancellation request sa aming duty staff/admin. Maghintay lamang po ng sandali para sa kanilang kumpirmasyon kung maaari pa itong mahinto.`;
+        await sendTextMessage(psid, reply);
+        return {
+          intent: 'ORDER_CANCELLATION_REQUESTED_KITCHEN',
+          confidence: 1.0,
+          replyLog: reply,
+          orderNumber: orderIdentifier
+        };
+      }
+
+      // Rule 3: Past 5 minutes in kitchen (> 300 seconds) -> Decline
+      const reply = `Paumanhin po, lampas na po sa 5-minute grace period at kasalukuyan nang niluluto (o naipadala na) ang inyong Order #${orderIdentifier}, kaya hindi na po ito maaaring kanselahin.`;
       await sendTextMessage(psid, reply);
-      return { intent: 'ORDER_CANCELLED_PENDING', confidence: 1.0, replyLog: reply };
+      return { intent: 'ORDER_CANCEL_BLOCKED', confidence: 1.0, replyLog: reply, orderNumber: orderIdentifier };
     }
+
+    // Rule 1: Instant Self-Service Cancellation (PENDING / PENDING_APPROVAL / Unpaid)
+    await updateOrderStatus(activeOrder.id, 'cancelled', {
+      cancellationReason: 'Cancelled by customer via Messenger (Instant self-service)'
+    });
+    await resetUserSession(psid);
+
+    const reply = `Naiintindihan po namin. Matagumpay na pong nakansela ang inyong Order #${orderIdentifier} dahil hindi pa po ito naipapasa sa kusina. Maaari po kayong mag-order muli anumang oras.`;
+    await sendTextMessage(psid, reply);
+    return {
+      intent: 'ORDER_CANCELLED_PENDING',
+      confidence: 1.0,
+      replyLog: reply,
+      orderNumber: orderIdentifier
+    };
   }
 
   // If no placed active order: check for draft items in cart

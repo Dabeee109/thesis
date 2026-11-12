@@ -252,6 +252,44 @@ async function rejectVoid(req, res) {
 }
 
 /**
+ * Duty Staff / Admin approves customer's within-5-minute cancellation request
+ */
+async function approveCancellation(req, res) {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const user = req.user || { name: 'Staff', role: 'staff' };
+    const result = await require('../services/orderService').approveCancellationRequest(parseInt(id, 10), user, reason);
+    return res.json({
+      success: true,
+      message: `Cancellation request for Order #${result.orderNumber} was approved.`,
+      result
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message || 'Failed to approve cancellation.' });
+  }
+}
+
+/**
+ * Duty Staff / Admin declines customer's within-5-minute cancellation request
+ */
+async function declineCancellation(req, res) {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const user = req.user || { name: 'Staff', role: 'staff' };
+    const result = await require('../services/orderService').declineCancellationRequest(parseInt(id, 10), user, reason);
+    return res.json({
+      success: true,
+      message: `Cancellation request for Order #${result.orderNumber} was declined.`,
+      result
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message || 'Failed to decline cancellation.' });
+  }
+}
+
+/**
  * Cancel / Void Order endpoint
  * POST /api/admin/orders/:id/cancel
  * POST /api/orders/:id/cancel
@@ -358,5 +396,7 @@ module.exports = {
   createManualOrder,
   requestVoid,
   authorizeVoid,
-  rejectVoid
+  rejectVoid,
+  approveCancellation,
+  declineCancellation
 };

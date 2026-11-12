@@ -20,6 +20,16 @@ function initSqliteFallback() {
     // Register CONCAT and CONVERT_TZ functions for cross-version SQLite compatibility
     try {
       sqliteDb.function('CONCAT', (...args) => args.filter(a => a !== null && a !== undefined).join(''));
+      sqliteDb.function('NOW', () => new Date().toISOString().replace('T', ' ').substring(0, 19));
+      sqliteDb.function('TIMESTAMPDIFF', (unit, dt1, dt2) => {
+        if (!dt1 || !dt2) return 0;
+        const t1 = new Date(dt1).getTime();
+        const t2 = (typeof dt2 === 'string' && dt2.toLowerCase() === 'now') ? Date.now() : new Date(dt2).getTime();
+        if (isNaN(t1) || isNaN(t2)) return 0;
+        const diffSec = Math.floor((t2 - t1) / 1000);
+        if (String(unit).toUpperCase() === 'MINUTE') return Math.floor(diffSec / 60);
+        return diffSec;
+      });
       sqliteDb.function('CONVERT_TZ', (val, fromTz, toTz) => {
         if (!val) return null;
         const d = (typeof val === 'string' && val.toLowerCase() === 'now') ? new Date() : new Date(val);
@@ -111,7 +121,7 @@ function initSqliteFallback() {
         order_number TEXT UNIQUE NOT NULL,
         customer_id INTEGER NOT NULL REFERENCES customers(id),
         order_type TEXT CHECK(order_type IN ('delivery', 'pickup')) NOT NULL DEFAULT 'delivery',
-        status TEXT CHECK(status IN ('pending', 'preparing', 'dispatched', 'delivered', 'cancelled', 'voided', 'VOIDED', 'CANCELLED', 'PAID', 'FOR_CONFIRMATION', 'paid', 'for_confirmation', 'PENDING_ADMIN_QUOTE', 'pending_admin_quote')) NOT NULL DEFAULT 'pending',
+        status TEXT CHECK(status IN ('pending', 'preparing', 'dispatched', 'delivered', 'cancelled', 'voided', 'VOIDED', 'CANCELLED', 'PAID', 'FOR_CONFIRMATION', 'paid', 'for_confirmation', 'PENDING_ADMIN_QUOTE', 'pending_admin_quote', 'cancellation_requested', 'CANCELLATION_REQUESTED')) NOT NULL DEFAULT 'pending',
         subtotal REAL NOT NULL DEFAULT 0.00,
         delivery_fee REAL NOT NULL DEFAULT 0.00,
         total_amount REAL NOT NULL DEFAULT 0.00,
@@ -123,6 +133,8 @@ function initSqliteFallback() {
         distance_km REAL DEFAULT 1.00,
         customer_notes TEXT,
         cancellation_reason TEXT,
+        cancel_requested INTEGER DEFAULT 0,
+        cancel_requested_at DATETIME DEFAULT NULL,
         feedback_requested_at DATETIME DEFAULT NULL,
         gcash_ref TEXT DEFAULT NULL,
         receipt_url TEXT DEFAULT NULL,
@@ -390,6 +402,8 @@ function initSqliteFallback() {
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN void_requested_by TEXT DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN void_reason TEXT DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN void_requested_at DATETIME DEFAULT NULL;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN cancel_requested INTEGER DEFAULT 0;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN cancel_requested_at DATETIME DEFAULT NULL;`); } catch (e) { }
 
     // Conversation Flow v2 migrations
     try { sqliteDb.exec(`ALTER TABLE customers ADD COLUMN session_json TEXT DEFAULT NULL;`); } catch (e) { }
@@ -926,7 +940,9 @@ async function initDatabase() {
         { table: 'system_settings', column: 'fare_base', type: 'DECIMAL(10,2) DEFAULT 49.00' },
         { table: 'system_settings', column: 'fare_per_05km', type: 'DECIMAL(10,2) DEFAULT 12.00' },
         { table: 'system_settings', column: 'fare_fuel_cost', type: 'DECIMAL(10,2) DEFAULT 2.83' },
-        { table: 'system_settings', column: 'fare_maintenance', type: 'DECIMAL(10,2) DEFAULT 7.50' }
+        { table: 'system_settings', column: 'fare_maintenance', type: 'DECIMAL(10,2) DEFAULT 7.50' },
+        { table: 'orders', column: 'cancel_requested', type: 'TINYINT(1) DEFAULT 0' },
+        { table: 'orders', column: 'cancel_requested_at', type: 'DATETIME NULL' }
       ];
       for (const c of cols) {
         try {
@@ -1069,7 +1085,7 @@ async function initDatabase() {
 
       await conn.query(`
         ALTER TABLE orders
-        MODIFY COLUMN status ENUM('pending', 'preparing', 'dispatched', 'delivered', 'cancelled', 'voided', 'PAID', 'FOR_CONFIRMATION', 'PENDING_ADMIN_QUOTE') NOT NULL DEFAULT 'pending';
+        MODIFY COLUMN status ENUM('pending', 'preparing', 'dispatched', 'delivered', 'cancelled', 'voided', 'PAID', 'FOR_CONFIRMATION', 'PENDING_ADMIN_QUOTE', 'cancellation_requested', 'CANCELLATION_REQUESTED') NOT NULL DEFAULT 'pending';
       `).catch(() => {});
 
       // 3. Seed default admin & staff accounts if table is empty
@@ -1142,6 +1158,8 @@ function executeSqliteQuery(sql, params = []) {
 
   // Normalize MySQL SQL dialects to SQLite if needed
   const normalizedSql = sql
+    .replace(/TIMESTAMPDIFF\(\s*SECOND\s*,\s*([a-zA-Z0-9_.]+)\s*,\s*NOW\(\)\s*\)/gi, "(CAST((strftime('%s', datetime('now')) - strftime('%s', $1)) AS INTEGER))")
+    .replace(/TIMESTAMPDIFF\(\s*MINUTE\s*,\s*([a-zA-Z0-9_.]+)\s*,\s*NOW\(\)\s*\)/gi, "(CAST(((strftime('%s', datetime('now')) - strftime('%s', $1)) / 60) AS INTEGER))")
     .replace(/NOW\(\)/gi, "datetime('now')")
     .replace(/DATE_SUB\(NOW\(\),\s*INTERVAL\s+(\d+)\s+MINUTE\)/gi, "datetime('now', '-$1 minutes')")
     .replace(/IFNULL/gi, "COALESCE")

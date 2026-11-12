@@ -73,6 +73,8 @@ router.post('/payment/gcash/sms-webhook', webhookController.gcashSmsWebhook);
 router.post('/orders/:id/request-void', authController.authMiddleware, orderController.requestVoid);
 router.post('/orders/:id/authorize-void', authController.authMiddleware, orderController.authorizeVoid);
 router.post('/orders/:id/reject-void', authController.authMiddleware, orderController.rejectVoid);
+router.post('/orders/:id/approve-cancellation', authController.authMiddleware, orderController.approveCancellation);
+router.post('/orders/:id/decline-cancellation', authController.authMiddleware, orderController.declineCancellation);
 
 // 4. Smart Delivery Management Routes (FR6)
 router.get('/deliveries', authController.authMiddleware, deliveryController.getDeliveries);

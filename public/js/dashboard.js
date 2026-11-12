@@ -308,6 +308,16 @@ function handleRealtimeEvent(eventType, data) {
     API.toast(`📢 Order #${data.orderNumber} void was ${data.status} by ${data.resolvedBy}.`, data.status === 'approved' ? 'success' : 'info');
     loadOrders();
   }
+  if (eventType === 'CANCELLATION_REQUESTED') {
+    API.toast(`🚨 5-Minute Cancellation Alert: Order #${data.orderNumber} cancellation requested by customer!`, 'warning');
+    loadOrders();
+    loadKPIs();
+  }
+  if (eventType === 'CANCELLATION_REQUEST_RESOLVED') {
+    API.toast(`Order #${data.orderNumber} cancellation request was ${data.status}.`, 'info');
+    loadOrders();
+    loadKPIs();
+  }
   if (eventType === 'PROMOTIONS_UPDATED') {
     loadPromotions();
   }
@@ -472,6 +482,7 @@ function renderKanban(orders) {
   orders.forEach(order => {
     let status = (order.status || 'pending').toLowerCase();
     if (status === 'paid' || status === 'new' || status === 'unpaid') status = 'pending';
+    if (status === 'cancellation_requested') status = 'preparing';
     if (counts[status] !== undefined) counts[status]++;
     if (!columns[status]) return;
 
@@ -547,6 +558,19 @@ function renderKanban(orders) {
       `;
     }
 
+    let cancelReqNotice = '';
+    if ((order.cancel_requested || order.status === 'cancellation_requested') && order.status !== 'cancelled') {
+      cancelReqNotice = `
+        <div style="margin: 6px 0; padding: 6px 8px; background: rgba(239, 68, 68, 0.18); border: 1px dashed #ef4444; border-radius: 4px;">
+          <div style="color: #ef4444; font-size: 0.76rem; font-weight: 800;">🚨 5-Min Cancellation Requested</div>
+          <div style="display: flex; gap: 4px; margin-top: 6px;">
+            <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); approveCustomerCancellation(${order.id}, '${order.order_number}')" style="padding: 2px 8px; font-size: 0.72rem; font-weight: 700; background: #ef4444; color: #fff;">Approve Void</button>
+            <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); declineCustomerCancellation(${order.id}, '${order.order_number}')" style="padding: 2px 8px; font-size: 0.72rem;">Decline</button>
+          </div>
+        </div>
+      `;
+    }
+
     const card = document.createElement('div');
     card.className = `order-card ${status === 'cancelled' ? 'order-card-cancelled' : ''}`;
     card.onclick = () => viewOrderDetails(order.id);
@@ -558,6 +582,7 @@ function renderKanban(orders) {
       <div style="font-weight: 700; font-size: 0.92rem; margin-bottom: 4px;">${escapeHtml(order.customer_name || 'Customer')}</div>
       <div class="order-items-preview">${itemsSummary || '1x Order item'}</div>
       ${voidNotice}
+      ${cancelReqNotice}
       ${order.cancellation_reason ? `<div style="font-size: 0.76rem; color: var(--status-danger); margin-top: 4px;">Reason: ${order.cancellation_reason}</div>` : ''}
       <div class="order-card-footer">
         <div>
@@ -598,7 +623,13 @@ function renderOrdersTable(orders) {
           ${order.payment_mismatch ? '⚠️ Mismatch' : order.payment_method}
         </span>
       </td>
-      <td><span class="badge badge-${order.status}">${order.status}</span></td>
+      <td>
+        ${(order.cancel_requested || order.status === 'cancellation_requested') && order.status !== 'cancelled' ? `
+          <span class="badge badge-mismatch" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #ef4444;">🚨 Cancel Req</span>
+        ` : `
+          <span class="badge badge-${order.status}">${order.status}</span>
+        `}
+      </td>
       <td>
         <button class="btn btn-secondary btn-sm" onclick="viewOrderDetails(${order.id})">Details</button>
       </td>
@@ -619,7 +650,13 @@ function renderOverviewOrders(orders) {
       <td><span class="badge badge-info">${order.order_type}</span></td>
       <td><strong>₱${parseFloat(order.total_amount).toFixed(2)}</strong></td>
       <td><span class="badge ${order.payment_mismatch ? 'badge-mismatch' : (order.payment_method === 'gcash' || order.payment_method === 'xendit') ? 'badge-gcash' : 'badge-cash'}">${order.payment_method}</span></td>
-      <td><span class="badge badge-${order.status}">${order.status}</span></td>
+      <td>
+        ${(order.cancel_requested || order.status === 'cancellation_requested') && order.status !== 'cancelled' ? `
+          <span class="badge badge-mismatch" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #ef4444;">🚨 Cancel Req</span>
+        ` : `
+          <span class="badge badge-${order.status}">${order.status}</span>
+        `}
+      </td>
       <td><button class="btn btn-secondary btn-sm" onclick="viewOrderDetails(${order.id})">View</button></td>
     `;
     tbody.appendChild(tr);
@@ -797,6 +834,26 @@ async function viewOrderDetails(orderId) {
             </div>
           ` : ''}
         </div>
+
+        ${(o.cancel_requested || o.status === 'cancellation_requested') && o.status !== 'cancelled' ? `
+          <div id="cancellation-request-modal-banner" style="margin-top: 16px; padding: 14px; background: rgba(239, 68, 68, 0.15); border-left: 4px solid var(--status-danger); border-radius: var(--radius-sm); border: 1px solid rgba(239, 68, 68, 0.35);">
+            <div style="font-weight: 800; color: #ef4444; font-size: 0.95rem; display: flex; align-items: center; gap: 6px;">
+              <span>🚨 Customer Cancellation Requested (Within 5-Min Grace Period)</span>
+            </div>
+            <div style="font-size: 0.84rem; margin-top: 5px; color: var(--text-primary); line-height: 1.4;">
+              Customer requested cancellation while order is in kitchen preparation (elapsed time: <strong>${o.elapsed_minutes || '< 5'} min</strong>).
+              <br><span style="color: var(--text-secondary);">Please verify with the kitchen staff if cooking/beverage preparation has physically started:</span>
+            </div>
+            <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+              <button type="button" class="btn btn-danger btn-sm" onclick="approveCustomerCancellation(${o.id}, '${o.order_number}')" style="font-weight: 700; background: #ef4444; color: #fff; padding: 7px 16px; border: none; border-radius: 6px; cursor: pointer;">
+                ✅ Approve Void & Stop Cooking
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="declineCustomerCancellation(${o.id}, '${o.order_number}')" style="font-weight: 700; padding: 7px 16px; border-radius: 6px; cursor: pointer;">
+                ❌ Decline (Already Cooking)
+              </button>
+            </div>
+          </div>
+        ` : ''}
 
         ${o.void_status === 'pending_approval' && o.status !== 'cancelled' ? `
           <div style="margin-top: 16px; padding: 14px; background: rgba(234, 179, 8, 0.15); border-left: 4px solid var(--status-warning); border-radius: var(--radius-sm);">
@@ -996,6 +1053,54 @@ async function ownerQuickRejectVoid(orderId, orderNumber) {
     API.toast(err.message || 'Error rejecting void.', 'error');
   }
 }
+
+/**
+ * Staff/Admin approves customer's within-5-minute cancellation request
+ */
+async function approveCustomerCancellation(orderId, orderNumber) {
+  if (!confirm(`Approve cancellation request for Order #${orderNumber}?\n\n• Order will be cancelled and deducted stock restored to inventory.\n• Customer will be notified on Facebook Messenger.`)) {
+    return;
+  }
+  try {
+    const res = await API.post(`/orders/${orderId}/approve-cancellation`, {
+      reason: 'Approved within-5-minute cancellation request'
+    });
+    if (res && res.success) {
+      closeModal('modal-order-details');
+      API.toast(`✅ Order #${orderNumber} cancellation approved and inventory restocked.`, 'success');
+      await Promise.all([loadOrders(), loadKPIs(), loadInventory(), loadDeliveries()]);
+    } else {
+      API.toast(res.message || 'Failed to approve cancellation.', 'error');
+    }
+  } catch (err) {
+    API.toast(err.message || 'Error approving cancellation.', 'error');
+  }
+}
+
+/**
+ * Staff/Admin declines customer's within-5-minute cancellation request (already cooking in kitchen)
+ */
+async function declineCustomerCancellation(orderId, orderNumber) {
+  const reason = prompt(`Decline cancellation for Order #${orderNumber} (order is already cooking in kitchen). Rejection reason:`, 'Already cooking in kitchen');
+  if (reason === null) return;
+  try {
+    const res = await API.post(`/orders/${orderId}/decline-cancellation`, {
+      reason: reason || 'Already cooking in kitchen'
+    });
+    if (res && res.success) {
+      closeModal('modal-order-details');
+      API.toast(`🚫 Cancellation request for Order #${orderNumber} declined. Order remains in preparation.`, 'info');
+      await Promise.all([loadOrders(), loadKPIs()]);
+    } else {
+      API.toast(res.message || 'Failed to decline cancellation.', 'error');
+    }
+  } catch (err) {
+    API.toast(err.message || 'Error declining cancellation.', 'error');
+  }
+}
+
+window.approveCustomerCancellation = approveCustomerCancellation;
+window.declineCustomerCancellation = declineCustomerCancellation;
 
 function printReceipt() {
   window.print();
