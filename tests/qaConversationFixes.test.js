@@ -229,4 +229,34 @@ test('QA Conversation & Cancellation Policy Enhancements', async (t) => {
     assert.strictEqual(payCheck[0].payment_method, 'gcash');
     assert.strictEqual(payCheck[0].reference_no, '1238901234561');
   });
+
+  await t.test('7. Manual Store OPEN/CLOSE override overrides operating hours in systemSettings and AI operational context', async () => {
+    const systemSettingsService = require('../src/services/systemSettingsService');
+    const aiService = require('../src/services/aiService');
+
+    // 1. Manually force Store OPEN with schedule outside normal hours
+    await systemSettingsService.updateSystemSettings({
+      store_status: 'OPEN',
+      is_manual_override: 1,
+      store_open_time: '06:00:00',
+      store_close_time: '05:59:00',
+      override_at: new Date().toISOString(),
+      override_by: 'Admin'
+    });
+
+    const statusCheck = systemSettingsService.isStoreOpen();
+    assert.strictEqual(statusCheck.isOpen, true, 'Store is open due to manual override');
+    assert.strictEqual(statusCheck.status, 'OPEN');
+    assert.strictEqual(statusCheck.is_manual_override, 1);
+
+    const context = await aiService.loadOperationalContext('TEST_PSID');
+    assert.strictEqual(context.store.isOpen, true, 'AI context reflects store is OPEN');
+    assert.strictEqual(context.store.status, 'OPEN');
+    assert.strictEqual(context.store.isManualOverride, true, 'AI context flags manual override as active');
+    assert.ok(context.store.operatingHours.includes('6:00 AM'), 'AI context uses live operating hours');
+
+    const prompt = aiService.buildAssistantSystemInstruction(context);
+    assert.ok(prompt.includes('Manual Override: ACTIVE'), 'Prompt explicitly informs AI that manual override is ACTIVE');
+    assert.ok(!prompt.includes('STRICT STORE HOURS: Operating hours are strictly 9:00 AM - 9:00 PM'), 'Hardcoded 9:00 AM - 9:00 PM is removed');
+  });
 });

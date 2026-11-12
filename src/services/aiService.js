@@ -236,11 +236,14 @@ async function loadOperationalContext(psid, session = null) {
 
   let storeSchedule = {
     isOpen: true,
+    status: 'OPEN',
+    is_manual_override: 0,
     openTimeFormatted: '09:00 AM',
     closeTimeFormatted: '09:00 PM',
     timezone: 'Asia/Manila'
   };
   try {
+    await systemSettingsService.getSystemSettings();
     storeSchedule = systemSettingsService.isStoreOpen();
   } catch (_) {}
 
@@ -313,6 +316,8 @@ async function loadOperationalContext(psid, session = null) {
       address: storeSettings?.store_address || "Diner's Cafe, Tondo, Manila",
       maxDeliveryRadiusKm: Number(storeSettings?.max_delivery_radius_km) || 3.0,
       isOpen: Boolean(storeSchedule?.isOpen),
+      status: storeSchedule?.status || (storeSchedule?.isOpen ? 'OPEN' : 'CLOSED'),
+      isManualOverride: Boolean(storeSchedule?.is_manual_override),
       operatingHours: `${storeSchedule?.openTimeFormatted || '09:00 AM'} - ${storeSchedule?.closeTimeFormatted || '09:00 PM'} PHT`,
       phone: config.store?.phone || ''
     },
@@ -380,7 +385,11 @@ function buildAssistantSystemInstruction(context = {}) {
 - "IKAW NA BAHALA" / DEALER'S CHOICE COMBOS: If the customer asks you to pick for them, select AT LEAST 1 [AVAILABLE] food item AND AT LEAST 1 [AVAILABLE] drink item from the live catalog, set detected_action = "ADD_ITEM", put both in extracted_data.items, and tell them what you picked.
 - RECOMMENDATION SWAP: If customer changes their mind or asks for different recommendations (e.g. 'iba na lang', 'ayaw ko ng pare-pareho'), replace previously suggested items rather than stacking duplicates in cart.
 - STATE-LOCK ESCAPE HATCH: If the customer changes their mind, asks questions about the menu, or wants to add items while entering checkout info, gracefully handle their request without getting stuck in checkout.
-- STRICT STORE HOURS: Operating hours are strictly 9:00 AM - 9:00 PM Manila Time. NEVER fabricate alternative store hours even if asked.
+- LIVE STORE STATUS & STORE OVERRIDE (PRIORITY RULE):
+  - Always dynamically check Section 3 "LIVE STORE CONTEXT".
+  - If Store Operating Status is "OPEN" (including when the admin pressed the Store OPEN button to activate Manual Override): The store is ACTIVELY OPEN and accepting orders right now! This manual override or open status completely overrides regular operating hours. You MUST accept live orders and treat the customer's arriving time as valid. NEVER tell the customer the store is closed or argue about schedule when Operating Status is OPEN!
+  - If Store Operating Status is "CLOSED" (including when the admin pressed Store CLOSED): The store is currently closed. Politely inform the customer that the kitchen is closed, state the live operating hours (${store.operatingHours}), and offer to take an advance Pre-Order.
+  - NEVER hardcode 9:00 AM - 9:00 PM. Always use the live configured operating hours (${store.operatingHours}) and current Operating Status (${store.isOpen ? 'OPEN' : 'CLOSED'}).
 
 2. ORDER PROCESSING & LOGISTICS RULES:
 - Dining Modes: "Delivery", "Pick-up", "Dine-in".
@@ -399,8 +408,9 @@ function buildAssistantSystemInstruction(context = {}) {
 
 3. LIVE STORE CONTEXT:
 - Store Name: ${store.name || "Diner's Cafe - Tondo Branch"}
-- Operating Status: ${store.isOpen ? 'OPEN' : 'CLOSED'}
-- Operating Hours: ${store.operatingHours || '09:00 AM - 09:00 PM PHT'}
+- Operating Status: ${store.isOpen ? 'OPEN (Accepting live orders now; manual override or schedule active)' : 'CLOSED (Not accepting live orders; advance pre-orders only)'}
+- Operating Hours: ${store.operatingHours}
+- Manual Override: ${store.isManualOverride ? `ACTIVE (Admin manually set the store to ${store.status}. This OVERRIDES regular operating hours!)` : 'INACTIVE (Following regular operating hours schedule)'}
 - Address: ${store.address || "Diner's Cafe, Tondo, Manila"}
 - Maximum In-House Delivery Radius: ${Number(store.maxDeliveryRadiusKm || 3.0).toFixed(1)} km
 
