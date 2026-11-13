@@ -4680,13 +4680,15 @@ function populateBomMenuSelector() {
   if (!select) return;
 
   const prevVal = select.value;
-  select.innerHTML = '<option value="">-- Choose a Menu Item --</option>' +
+  select.innerHTML = `<option value="">-- All Menu Items (${bomMenuItemsCache.length} Assigned BOMs) --</option>` +
     bomMenuItemsCache.map(m => `<option value="${Number(m.id)}">${escapeHtml(m.name)} (${escapeHtml(m.categoryName || 'Cafe')})</option>`).join('');
 
   if (prevVal && bomMenuItemsCache.some(m => String(m.id) === String(prevVal))) {
     select.value = prevVal;
-    loadSelectedMenuRecipe();
+  } else {
+    select.value = '';
   }
+  loadSelectedMenuRecipe();
 }
 
 function openAddIngredientDialog() {
@@ -4835,18 +4837,92 @@ async function handleEditIngredientSubmit(event) {
   }
 }
 
+async function selectAndEditMenuRecipe(menuId) {
+  const select = document.getElementById('bom-recipe-menu-select');
+  if (select) {
+    select.value = String(menuId);
+  }
+  await loadSelectedMenuRecipe();
+  openEditRecipeDialog();
+}
+
 async function loadSelectedMenuRecipe() {
   const select = document.getElementById('bom-recipe-menu-select');
+  const searchInput = document.getElementById('bom-recipe-search-input');
   const body = document.getElementById('bom-recipe-view-body');
   const editBtn = document.getElementById('btn-open-edit-recipe');
   const kpiRecipe = document.getElementById('bom-kpi-recipe-count');
   const menuId = select?.value;
+  const searchQuery = String(searchInput?.value || '').trim().toLowerCase();
 
+  // Default View: Show ALL Menu Items & Their Assigned Bill of Materials (BOM) Recipes Immediately
   if (!menuId) {
     currentSelectedRecipe = null;
     if (editBtn) editBtn.disabled = true;
-    if (kpiRecipe) kpiRecipe.textContent = 'Select an item below';
-    if (body) body.innerHTML = '<div style="color: var(--text-muted);">Select a menu item above to inspect or edit its recipe ingredients.</div>';
+
+    const totalMenus = bomMenuItemsCache.length;
+    const mappedCount = bomMenuItemsCache.filter(m => Array.isArray(m.recipe_items) && m.recipe_items.length > 0).length;
+    const pct = totalMenus > 0 ? Math.round((mappedCount / totalMenus) * 100) : 100;
+    if (kpiRecipe) {
+      kpiRecipe.textContent = `${mappedCount} / ${totalMenus} Mapped (${pct}%)`;
+    }
+
+    if (!body) return;
+
+    const filteredMenus = bomMenuItemsCache.filter(m => {
+      if (!searchQuery) return true;
+      const nameMatch = String(m.name || '').toLowerCase().includes(searchQuery);
+      const catMatch = String(m.categoryName || m.category || '').toLowerCase().includes(searchQuery);
+      const ingMatch = (m.recipe_items || []).some(r =>
+        String(r.ingredient_name || '').toLowerCase().includes(searchQuery)
+      );
+      return nameMatch || catMatch || ingMatch;
+    });
+
+    if (filteredMenus.length === 0) {
+      body.innerHTML = `<div style="padding: 18px; text-align: center; color: var(--text-muted);">No menu item recipes match your search filter.</div>`;
+      return;
+    }
+
+    body.innerHTML = `
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 14px; max-height: 620px; overflow-y: auto; padding-right: 4px;">
+        ${filteredMenus.map(m => {
+          const rItems = Array.isArray(m.recipe_items) ? m.recipe_items : [];
+          const servings = Number(m.max_servings ?? m.stock_quantity ?? 0);
+          return `
+            <div style="padding: 14px; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-surface-elevated, #241a12); display: flex; flex-direction: column; justify-content: space-between; gap: 10px;">
+              <div>
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 6px;">
+                  <div>
+                    <div style="font-weight: 700; font-size: 0.98rem; color: var(--text-primary);">${escapeHtml(m.name)}</div>
+                    <div style="font-size: 0.76rem; color: var(--brand-caramel, #d4a373); margin-top: 2px;">${escapeHtml(m.categoryName || m.category || 'Cafe')}</div>
+                  </div>
+                  <div style="text-align: right; flex-shrink: 0;">
+                    ${renderStockBadge(servings, m.status, servings, m.is_available)}
+                    <div style="font-size: 0.74rem; color: var(--text-muted); margin-top: 4px;">Max Servings: <strong style="color: var(--text-primary);">${servings}</strong></div>
+                  </div>
+                </div>
+                <div style="border-top: 1px dashed var(--border-subtle); padding-top: 8px; margin-top: 6px; display: flex; flex-direction: column; gap: 4px;">
+                  ${rItems.length > 0
+                    ? rItems.map(r => `
+                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; padding: 3px 6px; border-radius: 5px; background: rgba(255,255,255,0.03);">
+                          <span style="color: var(--text-secondary);">${escapeHtml(r.ingredient_name)}</span>
+                          <strong style="color: var(--brand-primary, #d4a373); font-family: monospace;">${Number(r.quantity_required).toFixed(2)} ${escapeHtml(r.unit)}</strong>
+                        </div>
+                      `).join('')
+                    : `<div style="font-size: 0.8rem; color: var(--text-muted);">No ingredients linked yet.</div>`
+                  }
+                </div>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.05);">
+                <span style="font-size: 0.75rem; color: var(--text-muted);">${rItems.length} raw ingredient(s)</span>
+                <button type="button" class="btn btn-secondary btn-sm" style="padding: 4px 10px; font-size: 0.78rem;" onclick="selectAndEditMenuRecipe(${Number(m.id)})">✏️ Edit Recipe</button>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
     return;
   }
 
@@ -4855,7 +4931,12 @@ async function loadSelectedMenuRecipe() {
     currentSelectedRecipe = res;
     if (editBtn) editBtn.disabled = false;
     const items = Array.isArray(res?.recipeItems) ? res.recipeItems : [];
-    if (kpiRecipe) kpiRecipe.textContent = `${items.length} ingredient(s)`;
+    const matchedMenu = bomMenuItemsCache.find(m => Number(m.id) === Number(menuId));
+    const servings = matchedMenu ? Number(matchedMenu.max_servings ?? matchedMenu.stock_quantity ?? 0) : 0;
+
+    if (kpiRecipe) {
+      kpiRecipe.textContent = `${items.length} ingredient(s) — ${res.menuItem?.name || ''}`;
+    }
 
     if (items.length === 0) {
       body.innerHTML = `<div style="padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; color: var(--text-muted);">No BOM recipe mapped yet for <strong>${escapeHtml(res.menuItem?.name || '')}</strong>. Click <strong>Edit Recipe</strong> to assign raw ingredients.</div>`;
@@ -4863,6 +4944,16 @@ async function loadSelectedMenuRecipe() {
     }
 
     body.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; padding: 10px 14px; border-radius: 8px; background: rgba(212, 163, 115, 0.08); border: 1px solid rgba(212, 163, 115, 0.25);">
+        <div>
+          <strong style="font-size: 1rem; color: var(--text-primary);">${escapeHtml(res.menuItem?.name || '')}</strong>
+          <span style="margin-left: 10px; font-size: 0.82rem; color: var(--text-muted);">(${items.length} Raw Ingredients per 1 Serving)</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          ${matchedMenu ? renderStockBadge(servings, matchedMenu.status, servings, matchedMenu.is_available) : ''}
+          <span style="font-size: 0.84rem; color: var(--text-secondary);">Computed Max Servings: <strong style="color: var(--brand-primary);">${servings}</strong></span>
+        </div>
+      </div>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px;">
         ${items.map(r => `
           <div style="padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-surface-elevated, #241a12);">
@@ -4957,7 +5048,7 @@ async function handleSaveRecipeSubmit(event) {
     if (res && res.success) {
       API.toast('Recipe saved successfully!', 'success');
       document.getElementById('dialog-edit-recipe')?.close();
-      await loadSelectedMenuRecipe();
+      await Promise.all([loadBomInventory(), loadMenu()]);
     }
   } catch (err) {
     console.error('[BOM UI] Save recipe failed:', err);
@@ -4973,6 +5064,7 @@ window.handleRestockIngredientSubmit = handleRestockIngredientSubmit;
 window.openEditIngredientDialog = openEditIngredientDialog;
 window.handleEditIngredientSubmit = handleEditIngredientSubmit;
 window.loadSelectedMenuRecipe = loadSelectedMenuRecipe;
+window.selectAndEditMenuRecipe = selectAndEditMenuRecipe;
 window.openEditRecipeDialog = openEditRecipeDialog;
 window.appendRecipeEditorRow = appendRecipeEditorRow;
 window.handleSaveRecipeSubmit = handleSaveRecipeSubmit;

@@ -52,6 +52,9 @@ const INGREDIENTS_CATALOG = [
   ['Tapioca Pearls', 'Dairy & Toppings', 'g'],
   ['Coffee Jelly', 'Dairy & Toppings', 'g'],
   ['Rainbow Crystals', 'Dairy & Toppings', 'g'],
+  ['Nata de Coco', 'Dairy & Toppings', 'g'],
+  ['Egg Pudding', 'Dairy & Toppings', 'g'],
+  ['Condensed Milk', 'Dairy & Toppings', 'ml'],
   ['Chocolate Chips', 'Dairy & Toppings', 'g'],
   ['Crushed Oreo', 'Dairy & Toppings', 'g'],
   ['Biscoff Spread', 'Dairy & Toppings', 'g'],
@@ -431,18 +434,101 @@ const MENU_RECIPES = {
     ['Chicken Wings', 6], ['Teriyaki Sauce', 45], ['Sesame Seeds', 3], ['Cooking Oil', 45], ['Takeout Box', 1]
   ],
 
-  // ================= ADD-ONS (5) =================
+  // ================= ADD-ONS (8) =================
   'Coffee Jelly': [['Coffee Jelly', 50]],
   'Cream Cheese Wall': [['Cream Cheese Foam', 40]],
+  'Cream Cheese': [['Cream Cheese Foam', 40]],
   'Crushed Oreo': [['Crushed Oreo', 25]],
   'Rainbow Crystals': [['Rainbow Crystals', 50]],
-  'Tapioca Pearls': [['Tapioca Pearls', 50]]
+  'Tapioca Pearls': [['Tapioca Pearls', 50]],
+  'Pearls': [['Tapioca Pearls', 50]],
+  'Nata de Coco': [['Nata de Coco', 50]],
+  'Egg Pudding': [['Egg Pudding', 50]],
+
+  // ================= ADDITIONAL ESPRESSO & CAFE CLASSICS =================
+  'Signature Spanish Latte': [
+    ['Espresso Beans', 18], ['Fresh Milk', 180], ['Condensed Milk', 30], ['Cup/Lid/Straw Set', 1]
+  ],
+  'Iced Americano': [
+    ['Espresso Beans', 18], ['Sugar Syrup', 10], ['Cup/Lid/Straw Set', 1]
+  ],
+  'Kyoto Uji Matcha Latte': [
+    ['Matcha Powder', 15], ['Fresh Milk', 200], ['Sugar Syrup', 20], ['Cup/Lid/Straw Set', 1]
+  ],
+  'Hibiscus Berry Iced Tea': [
+    ['Jasmine Green Tea Base', 200], ['Strawberry Syrup', 25], ['Blueberry Fruit Puree', 20], ['Cup/Lid/Straw Set', 1]
+  ],
+  'Classic Beef Tapa Rice Bowl': [
+    ['Steamed Rice', 200], ['Marinated Beef Tapa', 120], ['Egg', 1], ['Spiced Vinegar', 15], ['Cooking Oil', 15], ['Meal Box', 1]
+  ],
+  'Creamy Truffle Bacon Carbonara': [
+    ['Spaghetti Pasta', 130], ['White Bechamel Sauce', 90], ['Bacon Strips', 35], ['Parmesan Cheese', 20], ['Garlic Bread', 1], ['Takeout Box', 1]
+  ],
+  'Almond Butter Croissant': [
+    ['Brioche Bread Slice', 2], ['Sliced Almonds', 15], ['White Chocolate Sauce', 15], ['Takeout Box', 1]
+  ],
+  'Dark Chocolate Chunk Cookie': [
+    ['Breader Flour', 50], ['Dark Chocolate Powder', 20], ['Chocolate Chips', 25], ['Takeout Box', 1]
+  ],
+  'Grilled Chicken Pesto Panini': [
+    ['Brioche Bread Slice', 2], ['Seasoned Chicken Strips', 90], ['Mozzarella Cheese', 40], ['Tomato', 20], ['Takeout Box', 1]
+  ]
 };
+
+/**
+ * Resolve or infer the Bill of Materials (BOM) recipe for any menu item.
+ * First checks exact/normalized match in MENU_RECIPES; if a custom item was added by admin,
+ * infers an authentic cafe recipe based on item name & category so 100% of menu items are mapped.
+ */
+function resolveRecipeForMenuItem(itemName, categoryName = '') {
+  const rawName = String(itemName || '').trim();
+  if (MENU_RECIPES[rawName]) {
+    return MENU_RECIPES[rawName];
+  }
+
+  const lowerName = rawName.toLowerCase();
+  for (const [key, reqs] of Object.entries(MENU_RECIPES)) {
+    if (key.trim().toLowerCase() === lowerName) {
+      return reqs;
+    }
+  }
+
+  const catLower = String(categoryName || '').toLowerCase();
+  if (catLower.includes('add-on') || catLower.includes('addon')) {
+    if (lowerName.includes('pearl')) return [['Tapioca Pearls', 50]];
+    if (lowerName.includes('nata')) return [['Nata de Coco', 50]];
+    if (lowerName.includes('pudding')) return [['Egg Pudding', 50]];
+    if (lowerName.includes('jelly')) return [['Coffee Jelly', 50]];
+    if (lowerName.includes('oreo')) return [['Crushed Oreo', 25]];
+    if (lowerName.includes('cheese')) return [['Cream Cheese Foam', 40]];
+    return [['Tapioca Pearls', 50]];
+  }
+  if (catLower.includes('drink') || catLower.includes('milktea') || catLower.includes('coffee') || catLower.includes('tea') || lowerName.includes('milktea') || lowerName.includes('latte')) {
+    return [['Black Tea Base', 160], ['Fresh Milk', 100], ['Sugar Syrup', 20], ['Cup/Lid/Straw Set', 1]];
+  }
+  if (catLower.includes('pizza') || lowerName.includes('pizza')) {
+    return [['Pizza Dough 10"', 1], ['Pizza Tomato Sauce', 60], ['Mozzarella Cheese', 110], ['Pizza Box', 1]];
+  }
+  if (catLower.includes('burger') || catLower.includes('sandwich') || lowerName.includes('burger')) {
+    return [['Burger Bun', 1], ['Beef Patty', 120], ['Lettuce', 15], ['Tomato', 20], ['Burger Sauce', 20], ['Takeout Box', 1]];
+  }
+  if (catLower.includes('wing') || lowerName.includes('wing') || lowerName.includes('boneless')) {
+    return [['Chicken Wings', 6], ['Buffalo Hot Sauce', 45], ['Cooking Oil', 45], ['Takeout Box', 1]];
+  }
+  if (catLower.includes('pasta') || catLower.includes('platter') || lowerName.includes('pasta') || lowerName.includes('platter')) {
+    return [['Spaghetti Pasta', 130], ['White Bechamel Sauce', 80], ['Parmesan Cheese', 20], ['Takeout Box', 1]];
+  }
+  if (catLower.includes('starter') || catLower.includes('fries') || lowerName.includes('fries')) {
+    return [['French Fries', 150], ['Liquid Cheese Sauce', 30], ['Cooking Oil', 30], ['Takeout Box', 1]];
+  }
+  return [['Steamed Rice', 200], ['Boneless Chicken', 120], ['Mushroom Gravy Sauce', 40], ['Meal Box', 1]];
+}
 
 module.exports = {
   INGREDIENT_CATEGORIES,
   INGREDIENT_UNITS,
   INGREDIENTS_CATALOG,
-  MENU_RECIPES
+  MENU_RECIPES,
+  resolveRecipeForMenuItem
 };
 

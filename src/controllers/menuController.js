@@ -56,9 +56,13 @@ async function getMenu(req, res) {
           r.menu_id,
           r.ingredient_id,
           r.quantity_required,
+          i.name AS ingredient_name,
+          i.unit,
+          i.category AS ingredient_category,
           i.stock_quantity AS ingredient_stock
         FROM recipe_items r
         JOIN ingredients i ON i.ingredient_id = r.ingredient_id
+        ORDER BY i.name ASC
       `);
       recipes = Array.isArray(recipeRows) ? recipeRows : [];
     } catch (_) {}
@@ -105,11 +109,24 @@ async function getMenu(req, res) {
         status = 'AVAILABLE';
       }
 
+      const recipeItemsFormatted = hasRecipe
+        ? reqs.map(r => ({
+            ingredient_id: r.ingredient_id,
+            ingredient_name: r.ingredient_name,
+            quantity_required: Number(r.quantity_required || 0),
+            unit: r.unit || 'g',
+            category: r.ingredient_category || 'Produce & Pantry',
+            stock_quantity: Number(r.ingredient_stock || 0)
+          }))
+        : [];
+
       return {
         ...item,
         stock_quantity: maxServings,
         max_servings: maxServings,
         has_recipe: hasRecipe,
+        recipe_count: recipeItemsFormatted.length,
+        recipe_items: recipeItemsFormatted,
         status,
         computed_status: status
       };

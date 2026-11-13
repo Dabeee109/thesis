@@ -422,8 +422,8 @@
               <div style="font-size: 1.7rem; font-weight: 800; color: var(--status-danger);" id="bom-kpi-low">0</div>
             </div>
             <div class="card" style="padding: 16px;">
-              <div style="font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase;">Selected Menu Recipe</div>
-              <div style="font-size: 1.15rem; font-weight: 700; color: var(--text-primary); margin-top: 6px;" id="bom-kpi-recipe-count">Select an item below</div>
+              <div style="font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase;">Assigned Menu Recipes (BOM)</div>
+              <div style="font-size: 1.15rem; font-weight: 700; color: var(--text-primary); margin-top: 6px;" id="bom-kpi-recipe-count">Loading recipes...</div>
             </div>
           </div>
 
@@ -476,18 +476,19 @@
             <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 14px;">
               <div>
                 <h2 style="margin: 0; font-size: 1.2rem;">Menu Item Recipes (Bill of Materials)</h2>
-                <p style="margin: 4px 0 0; font-size: 0.84rem; color: var(--text-muted);">Configure exact raw ingredient quantities consumed per 1 serving of each menu item.</p>
+                <p style="margin: 4px 0 0; font-size: 0.84rem; color: var(--text-muted);">Live Bill of Materials showing exact raw ingredient quantities consumed per 1 serving of each menu item.</p>
               </div>
               <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                <input type="search" id="bom-recipe-search-input" class="form-control" placeholder="Search menu item or ingredient..." oninput="loadSelectedMenuRecipe()" style="width: 210px; padding: 6px 10px;">
                 <select id="bom-recipe-menu-select" class="form-control" onchange="loadSelectedMenuRecipe()" style="min-width: 240px;">
-                  <option value="">-- Choose a Menu Item --</option>
+                  <option value="">-- All Menu Items (Show All BOMs) --</option>
                 </select>
                 <button type="button" class="btn btn-primary btn-sm" id="btn-open-edit-recipe" onclick="openEditRecipeDialog()" disabled>✏️ Edit Recipe</button>
               </div>
             </div>
 
             <div id="bom-recipe-view-body" style="color: var(--text-muted); font-size: 0.9rem;">
-              Select a menu item above to inspect or edit its recipe ingredients.
+              Loading assigned menu item recipes...
             </div>
           </div>
         </section>
@@ -2010,8 +2011,8 @@
   </dialog>
 
   <!-- Scripts -->
-  <script src="js/api.js?v=20261114_02"></script>
-  <script src="js/dashboard.js?v=20261114_02"></script>
+  <script src="js/api.js?v=20261114_03"></script>
+  <script src="js/dashboard.js?v=20261114_03"></script>
   <script src="js/orientation-lock.js?v=20261109_04"></script>
 </body>
 </html>

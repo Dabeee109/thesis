@@ -826,7 +826,7 @@ async function seedBomDefaults() {
   if (bomSeedPromise) return bomSeedPromise;
   bomSeedPromise = (async () => {
     try {
-      const { INGREDIENTS_CATALOG, MENU_RECIPES } = require('./bomRecipesSeedData');
+      const { INGREDIENTS_CATALOG, resolveRecipeForMenuItem } = require('./bomRecipesSeedData');
       const [existingIngRows] = await query(`SELECT ingredient_id, name, category FROM ingredients`);
       const existingIngMap = new Map((existingIngRows || []).map(r => [String(r.name).toLowerCase(), r]));
 
@@ -848,33 +848,47 @@ async function seedBomDefaults() {
         }
       }
 
-      const [recipeCountRows] = await query(`SELECT COUNT(*) AS cnt FROM recipe_items`);
-      const recipeCount = Number(recipeCountRows?.[0]?.cnt || recipeCountRows?.[0]?.['COUNT(*)'] || 0);
-      if (recipeCount < 100) {
-        const [allMenus] = await query(`SELECT id, name FROM menu_items WHERE COALESCE(is_deleted, 0) = 0`);
-        const [allIngs] = await query(`SELECT ingredient_id, name FROM ingredients`);
-        const [existingPairs] = await query(`SELECT menu_id, ingredient_id FROM recipe_items`);
+      const [allMenus] = await query(`
+        SELECT m.id, m.name, COALESCE(c.name, '') AS category_name
+        FROM menu_items m
+        LEFT JOIN categories c ON c.id = m.category_id
+        WHERE COALESCE(m.is_deleted, 0) = 0
+      `);
+      const [allIngs] = await query(`SELECT ingredient_id, name FROM ingredients`);
+      const [existingPairs] = await query(`SELECT menu_id, ingredient_id FROM recipe_items`);
 
-        const menuMap = new Map((allMenus || []).map(m => [String(m.name).trim().toLowerCase(), m.id]));
-        const ingMap = new Map((allIngs || []).map(i => [String(i.name).trim().toLowerCase(), i.ingredient_id]));
-        const pairSet = new Set((existingPairs || []).map(p => `${p.menu_id}:${p.ingredient_id}`));
+      const ingMap = new Map((allIngs || []).map(i => [String(i.name).trim().toLowerCase(), i.ingredient_id]));
+      const pairSet = new Set((existingPairs || []).map(p => `${p.menu_id}:${p.ingredient_id}`));
+      const menusWithRecipes = new Set((existingPairs || []).map(p => Number(p.menu_id)));
 
-        for (const [menuName, reqList] of Object.entries(MENU_RECIPES)) {
-          const menuId = menuMap.get(menuName.trim().toLowerCase());
-          if (!menuId) continue;
+      for (const menu of (allMenus || [])) {
+        // If a menu item has 0 recipes mapped yet, auto-link its full BOM
+        if (menusWithRecipes.has(Number(menu.id))) continue;
 
-          for (const [ingName, qtyReq] of reqList) {
-            const ingId = ingMap.get(ingName.trim().toLowerCase());
-            if (!ingId) continue;
-            const key = `${menuId}:${ingId}`;
-            if (pairSet.has(key)) continue;
-
-            await query(
-              `INSERT INTO recipe_items (menu_id, ingredient_id, quantity_required) VALUES (?, ?, ?)`,
-              [menuId, ingId, qtyReq]
-            ).catch(() => {});
-            pairSet.add(key);
+        const reqList = resolveRecipeForMenuItem(menu.name, menu.category_name);
+        for (const [ingName, qtyReq] of reqList) {
+          let ingId = ingMap.get(ingName.trim().toLowerCase());
+          if (!ingId) {
+            const [insRes] = await query(
+              `INSERT INTO ingredients (name, category, unit, stock_quantity, reorder_level, cost_per_unit)
+               VALUES (?, 'Produce & Pantry', 'g', 5000.00, 500.00, 0.00)`,
+              [ingName.trim()]
+            ).catch(() => [{}]);
+            if (insRes && insRes.insertId) {
+              ingId = insRes.insertId;
+              ingMap.set(ingName.trim().toLowerCase(), ingId);
+            }
           }
+          if (!ingId) continue;
+
+          const key = `${menu.id}:${ingId}`;
+          if (pairSet.has(key)) continue;
+
+          await query(
+            `INSERT INTO recipe_items (menu_id, ingredient_id, quantity_required) VALUES (?, ?, ?)`,
+            [menu.id, ingId, qtyReq]
+          ).catch(() => {});
+          pairSet.add(key);
         }
       }
     } catch (bomErr) {
