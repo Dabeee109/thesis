@@ -3489,6 +3489,23 @@ async function loadUsers() {
   }
 }
 
+function switchSettingsSubTab(tabKey) {
+  const validKeys = ['store-hours', 'payment-gateways', 'staff-accounts', 'integrations-security'];
+  const normalizedKey = validKeys.includes(tabKey) ? tabKey : 'store-hours';
+
+  document.querySelectorAll('.settings-subtab-btn').forEach(btn => {
+    const isMatch = btn.getAttribute('data-settings-tab') === normalizedKey;
+    btn.classList.toggle('active', isMatch);
+    btn.setAttribute('aria-selected', isMatch ? 'true' : 'false');
+  });
+
+  document.querySelectorAll('.settings-subtab-panel').forEach(panel => {
+    const isMatch = panel.id === `settings-panel-${normalizedKey}`;
+    panel.classList.toggle('active', isMatch);
+  });
+}
+window.switchSettingsSubTab = switchSettingsSubTab;
+
 function renderUsersTable(users) {
   const tbody = document.getElementById('users-table-tbody');
   if (!tbody) return;
@@ -3503,26 +3520,26 @@ function renderUsersTable(users) {
     
     let roleBadge = '';
     if (u.role === 'admin') {
-      roleBadge = `<span class="badge" style="background: rgba(212, 163, 115, 0.2); color: var(--brand-gold); border: 1px solid var(--brand-gold);">👑 Administrator</span>`;
+      roleBadge = `<span class="badge" style="background: rgba(212, 163, 115, 0.2); color: var(--brand-gold); border: 1px solid var(--brand-gold); padding: 5px 12px; border-radius: 999px; white-space: nowrap;">👑 Administrator</span>`;
     } else if (u.role === 'staff') {
-      roleBadge = `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid #3b82f6;">☕ Barista / Staff</span>`;
+      roleBadge = `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid #3b82f6; padding: 5px 12px; border-radius: 999px; white-space: nowrap;">☕ Barista / Staff</span>`;
     } else if (u.role === 'rider') {
-      roleBadge = `<span class="badge" style="background: rgba(34, 197, 94, 0.15); color: #86efac; border: 1px solid #22c55e;">🛵 Delivery Rider</span>`;
+      roleBadge = `<span class="badge" style="background: rgba(34, 197, 94, 0.15); color: #86efac; border: 1px solid #22c55e; padding: 5px 12px; border-radius: 999px; white-space: nowrap;">🛵 Delivery Rider</span>`;
     } else {
-      roleBadge = `<span class="badge badge-secondary">${u.role}</span>`;
+      roleBadge = `<span class="badge badge-secondary" style="padding: 5px 12px; border-radius: 999px; white-space: nowrap;">${u.role}</span>`;
     }
 
     const statusBadge = u.is_active
-      ? `<span class="badge badge-success">Active</span>`
-      : `<span class="badge badge-danger">Inactive</span>`;
+      ? `<span class="badge badge-success" style="white-space: nowrap;">Active</span>`
+      : `<span class="badge badge-danger" style="white-space: nowrap;">Inactive</span>`;
 
     const updatedDate = u.updated_at ? new Date(u.updated_at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Never';
 
     return `
-      <tr>
-        <td>
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <div style="width: 34px; height: 34px; border-radius: 50%; background: var(--brand-primary); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.82rem;">
+      <tr class="py-3.5">
+        <td class="py-3.5" style="padding: 14px 16px;">
+          <div style="display: flex; align-items: center; gap: 12px; white-space: nowrap;">
+            <div style="width: 36px; height: 36px; border-radius: 50%; background: var(--brand-primary); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.84rem; flex-shrink: 0;">
               ${initials}
             </div>
             <div>
@@ -3531,20 +3548,20 @@ function renderUsersTable(users) {
             </div>
           </div>
         </td>
-        <td><code>${u.email}</code></td>
-        <td>${roleBadge}</td>
-        <td>${u.phone_number || 'N/A'}</td>
-        <td>${statusBadge}</td>
-        <td style="font-size: 0.82rem; color: var(--text-secondary);">${updatedDate}</td>
-        <td>
-          <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-            <button class="btn btn-primary btn-sm" onclick="openResetPasswordModal(${u.id}, '${u.full_name.replace(/'/g, "\\'")}', '${u.email}')" style="font-size: 0.78rem; padding: 4px 10px; font-weight: 700;">
+        <td class="py-3.5" style="padding: 14px 16px; white-space: nowrap;"><code>${u.email}</code></td>
+        <td class="py-3.5" style="padding: 14px 16px; white-space: nowrap;">${roleBadge}</td>
+        <td class="py-3.5" style="padding: 14px 16px; white-space: nowrap;">${u.phone_number || 'N/A'}</td>
+        <td class="py-3.5" style="padding: 14px 16px; white-space: nowrap;">${statusBadge}</td>
+        <td class="py-3.5" style="padding: 14px 16px; font-size: 0.82rem; color: var(--text-secondary); white-space: nowrap;">${updatedDate}</td>
+        <td class="py-3.5" style="padding: 14px 16px; text-align: right; white-space: nowrap;">
+          <div style="display: inline-flex; gap: 8px; flex-wrap: nowrap; align-items: center; justify-content: flex-end;">
+            <button class="btn btn-primary btn-sm" onclick="openResetPasswordModal(${u.id}, '${u.full_name.replace(/'/g, "\\'")}', '${u.email}')" style="font-size: 0.78rem; padding: 6px 12px; font-weight: 700; white-space: nowrap;">
               🔑 Reset Password
             </button>
-            <button class="btn btn-secondary btn-sm" onclick="openUserModal(${u.id})" style="font-size: 0.78rem; padding: 4px 8px;">
+            <button class="btn btn-secondary btn-sm" onclick="openUserModal(${u.id})" style="font-size: 0.78rem; padding: 6px 10px; white-space: nowrap;">
               ✏️ Edit
             </button>
-            <button class="btn btn-secondary btn-sm" onclick="toggleUserStatus(${u.id})" title="Toggle Active Status" style="font-size: 0.78rem; padding: 4px 8px;">
+            <button class="btn btn-secondary btn-sm" onclick="toggleUserStatus(${u.id})" title="Toggle Active Status" style="font-size: 0.78rem; padding: 6px 10px;">
               ${u.is_active ? '⏸️' : '▶️'}
             </button>
           </div>
