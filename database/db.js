@@ -697,17 +697,38 @@ function initSqliteFallback() {
       seedSqliteData();
     }
 
-    // Ensure official legitimate Admin email (dinerscafe109@gmail.com) exists in SQLite
+    // Ensure official legitimate Admin, Staff, and Rider accounts exist in SQLite with password '12345'
     try {
-      const legitEmail = (config.brevo?.senderEmail || 'dinerscafe109@gmail.com').trim().toLowerCase();
-      const existingLegit = sqliteDb.prepare('SELECT id FROM admins_staff WHERE email = ?').get(legitEmail);
-      if (!existingLegit) {
-        const bcrypt = require('bcryptjs');
-        const hash = bcrypt.hashSync('password123', 10);
-        sqliteDb.prepare(`
-          INSERT INTO admins_staff (full_name, email, password_hash, role, phone_number, is_active)
-          VALUES (?, ?, ?, 'admin', '+63 928 176 2895', 1)
-        `).run("Diner's Cafe Admin", legitEmail, hash);
+      const bcrypt = require('bcryptjs');
+      const defaultHash = bcrypt.hashSync('12345', 10);
+      const officialAccounts = [
+        { fullName: "Diner's Cafe Admin", email: 'dinerscafe109@gmail.com', role: 'admin', phone: '+63 928 176 2895' },
+        { fullName: 'Maria Clara (Barista)', email: 'fernandez.fd.bsinfotech@gmail.com', role: 'staff', phone: '+63 917 333 4444' },
+        { fullName: 'Marco Santos (Motorcycle Rider)', email: 'fdave0456@gmail.com', role: 'rider', phone: '+63 918 555 6666' }
+      ];
+
+      for (const acct of officialAccounts) {
+        const existing = sqliteDb.prepare('SELECT id, password_hash FROM admins_staff WHERE email = ?').get(acct.email);
+        let userId = existing ? existing.id : null;
+        if (!existing) {
+          const info = sqliteDb.prepare(`
+            INSERT INTO admins_staff (full_name, email, password_hash, role, phone_number, is_active)
+            VALUES (?, ?, ?, ?, ?, 1)
+          `).run(acct.fullName, acct.email, defaultHash, acct.role, acct.phone);
+          userId = Number(info.lastInsertRowid);
+        } else if (bcrypt.compareSync('password123', existing.password_hash)) {
+          sqliteDb.prepare(`UPDATE admins_staff SET password_hash = ?, role = ?, is_active = 1 WHERE id = ?`).run(defaultHash, acct.role, existing.id);
+        }
+
+        if (acct.role === 'rider' && userId) {
+          const existingRider = sqliteDb.prepare('SELECT id FROM delivery_personnel WHERE user_id = ?').get(userId);
+          if (!existingRider) {
+            sqliteDb.prepare(`
+              INSERT INTO delivery_personnel (user_id, full_name, phone_number, vehicle_type, vehicle_plate_no, status, is_active)
+              VALUES (?, ?, ?, 'motorcycle', 'MC-7890-PH', 'available', 1)
+            `).run(userId, 'Marco Santos', acct.phone);
+          }
+        }
       }
     } catch (_) {}
 
@@ -1236,17 +1257,42 @@ async function initDatabase() {
           console.log('[Database] Seeded initial MySQL admin, staff, and rider accounts.');
         }
 
-        // Always ensure legitimate Admin email (dinerscafe109@gmail.com) exists in MySQL/TiDB
-        const legitEmail = (config.brevo?.senderEmail || 'dinerscafe109@gmail.com').trim().toLowerCase();
-        const [legitRows] = await conn.query(`SELECT id FROM admins_staff WHERE email = ?`, [legitEmail]);
-        if (!legitRows || legitRows.length === 0) {
-          const bcrypt = require('bcryptjs');
-          const hash = bcrypt.hashSync('password123', 10);
-          await conn.query(`
-            INSERT INTO admins_staff (full_name, email, password_hash, role, phone_number, is_active)
-            VALUES (?, ?, ?, 'admin', '+63 928 176 2895', 1)
-          `, ["Diner's Cafe Admin", legitEmail, hash]);
-          console.log(`[Database] Seeded legitimate Admin account (${legitEmail}).`);
+        // Always ensure legitimate Admin, Staff, and Rider accounts exist in MySQL/TiDB with password '12345'
+        const bcrypt = require('bcryptjs');
+        const defaultHash = bcrypt.hashSync('12345', 10);
+        const officialAccounts = [
+          { fullName: "Diner's Cafe Admin", email: 'dinerscafe109@gmail.com', role: 'admin', phone: '+63 928 176 2895' },
+          { fullName: 'Maria Clara (Barista)', email: 'fernandez.fd.bsinfotech@gmail.com', role: 'staff', phone: '+63 917 333 4444' },
+          { fullName: 'Marco Santos (Motorcycle Rider)', email: 'fdave0456@gmail.com', role: 'rider', phone: '+63 918 555 6666' }
+        ];
+
+        for (const acct of officialAccounts) {
+          const [legitRows] = await conn.query(`SELECT id, password_hash FROM admins_staff WHERE email = ?`, [acct.email]);
+          let userId = legitRows && legitRows[0] ? legitRows[0].id : null;
+          if (!legitRows || legitRows.length === 0) {
+            const [insRes] = await conn.query(`
+              INSERT INTO admins_staff (full_name, email, password_hash, role, phone_number, is_active)
+              VALUES (?, ?, ?, ?, ?, 1)
+            `, [acct.fullName, acct.email, defaultHash, acct.role, acct.phone]);
+            userId = insRes.insertId;
+            console.log(`[Database] Seeded legitimate ${acct.role} account (${acct.email}).`);
+          } else if (bcrypt.compareSync('password123', legitRows[0].password_hash)) {
+            await conn.query(
+              `UPDATE admins_staff SET password_hash = ?, role = ?, is_active = 1 WHERE id = ?`,
+              [defaultHash, acct.role, userId]
+            );
+            console.log(`[Database] Updated password to 12345 for ${acct.email}.`);
+          }
+
+          if (acct.role === 'rider' && userId) {
+            const [riderRows] = await conn.query(`SELECT id FROM delivery_personnel WHERE user_id = ?`, [userId]);
+            if (!riderRows || riderRows.length === 0) {
+              await conn.query(`
+                INSERT INTO delivery_personnel (user_id, full_name, phone_number, vehicle_type, vehicle_plate_no, status, is_active)
+                VALUES (?, ?, ?, 'motorcycle', 'MC-7890-PH', 'available', 1)
+              `, [userId, 'Marco Santos', acct.phone]).catch(() => {});
+            }
+          }
         }
       } catch (seedErr) {
         console.warn('[Database] User seed warning:', seedErr.message);

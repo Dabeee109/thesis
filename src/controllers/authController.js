@@ -222,8 +222,8 @@ async function updateUserPassword(req, res) {
     }
 
     const trimmedPassword = newPassword.trim();
-    if (trimmedPassword.length < 6) {
-      return res.status(400).json({ success: false, message: 'Password must be at least 6 characters long.' });
+    if (trimmedPassword.length < 5) {
+      return res.status(400).json({ success: false, message: 'Password must be at least 5 characters long.' });
     }
 
     if (confirmPassword !== undefined && trimmedPassword !== confirmPassword.trim()) {
@@ -499,10 +499,10 @@ async function resetPasswordWithOtp(req, res) {
       });
     }
 
-    if (newPassword.length < 6) {
+    if (newPassword.length < 5) {
       return res.status(400).json({
         success: false,
-        message: 'New password must be at least 6 characters long.'
+        message: 'New password must be at least 5 characters long.'
       });
     }
 

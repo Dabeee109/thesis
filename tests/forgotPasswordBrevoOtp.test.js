@@ -39,16 +39,24 @@ test('Forgot Password + Brevo Email OTP Suite', async (t) => {
     return { messageId: `<test.${Date.now()}@brevo.com>` };
   });
 
-  await t.test('1. Legitimate Admin account (dinerscafe109@gmail.com) is seeded and can log in', async () => {
-    const res = createMockRes();
-    await authController.login(
-      { body: { email: 'dinerscafe109@gmail.com', password: 'password123' } },
-      res
-    );
-    assert.strictEqual(res.statusCode, 200);
-    assert.strictEqual(res.body.success, true);
-    assert.strictEqual(res.body.user.email, 'dinerscafe109@gmail.com');
-    assert.strictEqual(res.body.user.role, 'admin');
+  await t.test('1. Legitimate Admin, Staff, and Rider accounts are seeded and can log in with 12345', async () => {
+    const accounts = [
+      { email: 'dinerscafe109@gmail.com', role: 'admin' },
+      { email: 'fernandez.fd.bsinfotech@gmail.com', role: 'staff' },
+      { email: 'fdave0456@gmail.com', role: 'rider' }
+    ];
+
+    for (const acct of accounts) {
+      const res = createMockRes();
+      await authController.login(
+        { body: { email: acct.email, password: '12345' } },
+        res
+      );
+      assert.strictEqual(res.statusCode, 200, `Login failed for ${acct.email}`);
+      assert.strictEqual(res.body.success, true);
+      assert.strictEqual(res.body.user.email, acct.email);
+      assert.strictEqual(res.body.user.role, acct.role);
+    }
   });
 
   await t.test('2. Send OTP generates 6-digit code and dispatches email to dinerscafe109@gmail.com', async () => {
@@ -119,5 +127,8 @@ test('Forgot Password + Brevo Email OTP Suite', async (t) => {
     assert.ok(html.includes('/auth/forgot-password/send-otp'));
     assert.ok(html.includes('/auth/forgot-password/reset'));
     assert.ok(html.includes('dinerscafe109@gmail.com'));
+    assert.ok(html.includes('fernandez.fd.bsinfotech@gmail.com'));
+    assert.ok(html.includes('fdave0456@gmail.com'));
   });
 });
+

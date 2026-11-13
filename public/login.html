@@ -154,13 +154,13 @@
       <div style="margin-bottom: 12px;">
         <label class="form-label" style="font-size: 0.78rem; text-transform: uppercase;">Quick 1-Click Demo Login:</label>
         <div class="quick-roles">
-          <button type="button" class="role-btn" onclick="fillCredentials('dinerscafe109@gmail.com', 'password123')">
+          <button type="button" class="role-btn" onclick="fillCredentials('dinerscafe109@gmail.com', '12345')">
             👑 Admin
           </button>
-          <button type="button" class="role-btn" onclick="fillCredentials('staff@dinerscafe.ph', 'password123')">
+          <button type="button" class="role-btn" onclick="fillCredentials('fernandez.fd.bsinfotech@gmail.com', '12345')">
             ☕ Barista
           </button>
-          <button type="button" class="role-btn" onclick="fillCredentials('rider1@dinerscafe.ph', 'password123')">
+          <button type="button" class="role-btn" onclick="fillCredentials('fdave0456@gmail.com', '12345')">
             🛵 Rider
           </button>
         </div>
@@ -177,7 +177,7 @@
             <label class="form-label" for="password" style="margin-bottom: 0;">Password</label>
             <a href="javascript:void(0)" class="forgot-link" id="open-forgot-modal-link" onclick="openForgotPasswordModal()">Forgot Password?</a>
           </div>
-          <input type="password" id="password" class="form-control" placeholder="••••••••" required value="password123">
+          <input type="password" id="password" class="form-control" placeholder="••••••••" required value="12345">
         </div>
 
         <button type="submit" class="btn btn-primary btn-block" style="margin-top: 10px;" id="login-btn">
@@ -223,13 +223,13 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="fp-new-password">New Password (min. 6 characters)</label>
-          <input type="password" id="fp-new-password" class="form-control" placeholder="Enter new password" minlength="6" required>
+          <label class="form-label" for="fp-new-password">New Password (min. 5 characters)</label>
+          <input type="password" id="fp-new-password" class="form-control" placeholder="Enter new password" minlength="5" required>
         </div>
 
         <div class="form-group">
           <label class="form-label" for="fp-confirm-password">Confirm New Password</label>
-          <input type="password" id="fp-confirm-password" class="form-control" placeholder="Re-enter new password" minlength="6" required>
+          <input type="password" id="fp-confirm-password" class="form-control" placeholder="Re-enter new password" minlength="5" required>
         </div>
 
         <button type="submit" class="btn btn-primary btn-block" id="fp-verify-reset-btn">
@@ -329,8 +329,8 @@
         return;
       }
 
-      if (newPassword.length < 6) {
-        API.toast('New password must be at least 6 characters long.', 'error');
+      if (newPassword.length < 5) {
+        API.toast('New password must be at least 5 characters long.', 'error');
         return;
       }
 
