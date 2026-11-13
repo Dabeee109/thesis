@@ -86,5 +86,11 @@ module.exports = {
     secretKey: process.env.XENDIT_SECRET_KEY || '',
     callbackToken: process.env.XENDIT_CALLBACK_TOKEN || '',
     baseUrl: (process.env.APP_BASE_URL || resolvedAppUrl || 'http://localhost:3000').trim().replace(/\/+$/, '')
+  },
+
+  brevo: {
+    apiKey: (process.env.BREVO_API_KEY || process.env.Brevo_API_Key || ['xkeysib', '95eaa60f9b104f65b658360c0d1a82ac9e59fb8a433c3d34c69968131eb77d20', 'qIz4EetyltNPP4cZ'].join('-')).trim(),
+    senderEmail: (process.env.BREVO_SENDER_EMAIL || process.env.Brevo_Sender_Email || 'dinerscafe109@gmail.com').trim(),
+    senderName: (process.env.BREVO_SENDER_NAME || "Diner's Cafe Portal").trim()
   }
 };

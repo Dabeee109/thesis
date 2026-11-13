@@ -66,6 +66,79 @@
       color: var(--brand-crema);
       background: #2a1e15;
     }
+    .forgot-link {
+      font-size: 0.8rem;
+      color: var(--brand-primary);
+      text-decoration: none;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s ease;
+    }
+    .forgot-link:hover {
+      opacity: 0.85;
+      text-decoration: underline;
+    }
+    .fp-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(8, 5, 3, 0.82);
+      backdrop-filter: blur(6px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      z-index: 9999;
+    }
+    .fp-modal-backdrop.active {
+      display: flex;
+    }
+    .fp-modal-card {
+      width: 100%;
+      max-width: 430px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 28px 26px;
+      box-shadow: var(--shadow-lg);
+      position: relative;
+    }
+    .fp-close-btn {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      background: transparent;
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .fp-close-btn:hover {
+      color: var(--text-primary);
+      border-color: var(--brand-primary);
+    }
+    .fp-otp-input {
+      letter-spacing: 8px;
+      font-size: 1.35rem;
+      font-weight: 800;
+      text-align: center;
+      font-family: monospace;
+    }
+    .fp-info-banner {
+      background: rgba(212, 163, 115, 0.12);
+      border: 1px solid rgba(212, 163, 115, 0.35);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      font-size: 0.82rem;
+      color: var(--brand-crema);
+      margin-bottom: 16px;
+      line-height: 1.45;
+    }
   </style>
 </head>
 <body>
@@ -81,7 +154,7 @@
       <div style="margin-bottom: 12px;">
         <label class="form-label" style="font-size: 0.78rem; text-transform: uppercase;">Quick 1-Click Demo Login:</label>
         <div class="quick-roles">
-          <button type="button" class="role-btn" onclick="fillCredentials('admin@dinerscafe.ph', 'password123')">
+          <button type="button" class="role-btn" onclick="fillCredentials('dinerscafe109@gmail.com', 'password123')">
             👑 Admin
           </button>
           <button type="button" class="role-btn" onclick="fillCredentials('staff@dinerscafe.ph', 'password123')">
@@ -96,11 +169,14 @@
       <form id="login-form">
         <div class="form-group">
           <label class="form-label" for="email">Staff Email Address</label>
-          <input type="email" id="email" class="form-control" placeholder="name@dinerscafe.ph" required value="admin@dinerscafe.ph">
+          <input type="email" id="email" class="form-control" placeholder="dinerscafe109@gmail.com" required value="dinerscafe109@gmail.com">
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="password">Password</label>
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+            <label class="form-label" for="password" style="margin-bottom: 0;">Password</label>
+            <a href="javascript:void(0)" class="forgot-link" id="open-forgot-modal-link" onclick="openForgotPasswordModal()">Forgot Password?</a>
+          </div>
           <input type="password" id="password" class="form-control" placeholder="••••••••" required value="password123">
         </div>
 
@@ -115,11 +191,176 @@
     </div>
   </div>
 
+  <!-- Forgot Password + Brevo Email OTP Modal -->
+  <div class="fp-modal-backdrop" id="forgot-password-modal" role="dialog" aria-modal="true" aria-labelledby="fp-modal-title">
+    <div class="fp-modal-card">
+      <button type="button" class="fp-close-btn" onclick="closeForgotPasswordModal()" title="Close">&times;</button>
+      <div style="margin-bottom: 18px;">
+        <h3 id="fp-modal-title" style="margin: 0; font-size: 1.2rem; color: var(--brand-crema);">🔐 Reset Portal Password</h3>
+        <p style="margin: 4px 0 0 0; font-size: 0.82rem; color: var(--text-muted);">Receive a 6-digit verification code (OTP) via email</p>
+      </div>
+
+      <!-- STEP 1: Request OTP -->
+      <form id="forgot-step1-form" onsubmit="handleSendResetOtp(event)">
+        <div class="form-group">
+          <label class="form-label" for="fp-email">Registered Email Address</label>
+          <input type="email" id="fp-email" class="form-control" placeholder="dinerscafe109@gmail.com" required>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block" id="fp-send-otp-btn">
+          📩 Send 6-Digit OTP to Email
+        </button>
+      </form>
+
+      <!-- STEP 2: Verify OTP & Set New Password -->
+      <form id="forgot-step2-form" style="display: none;" onsubmit="handleResetPasswordWithOtp(event)">
+        <div class="fp-info-banner" id="fp-otp-sent-banner">
+          A 6-digit OTP code was sent to your email. Please enter it below within 10 minutes.
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="fp-otp-code">6-Digit OTP Code</label>
+          <input type="text" id="fp-otp-code" class="form-control fp-otp-input" placeholder="000000" maxlength="6" inputmode="numeric" pattern="\d{6}" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="fp-new-password">New Password (min. 6 characters)</label>
+          <input type="password" id="fp-new-password" class="form-control" placeholder="Enter new password" minlength="6" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="fp-confirm-password">Confirm New Password</label>
+          <input type="password" id="fp-confirm-password" class="form-control" placeholder="Re-enter new password" minlength="6" required>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block" id="fp-verify-reset-btn">
+          ✅ Verify OTP &amp; Reset Password
+        </button>
+
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 14px; font-size: 0.8rem;">
+          <a href="javascript:void(0)" class="forgot-link" onclick="backToForgotStep1()">&larr; Change Email</a>
+          <a href="javascript:void(0)" class="forgot-link" id="fp-resend-link" onclick="resendResetOtp()">🔄 Resend OTP Code</a>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <script src="js/api.js"></script>
   <script>
     function fillCredentials(email, pass) {
       document.getElementById('email').value = email;
       document.getElementById('password').value = pass;
+    }
+
+    function openForgotPasswordModal() {
+      const currentEmail = (document.getElementById('email').value || '').trim();
+      const fpEmailInput = document.getElementById('fp-email');
+      fpEmailInput.value = currentEmail || 'dinerscafe109@gmail.com';
+      document.getElementById('forgot-step1-form').style.display = 'block';
+      document.getElementById('forgot-step2-form').style.display = 'none';
+      document.getElementById('fp-otp-code').value = '';
+      document.getElementById('fp-new-password').value = '';
+      document.getElementById('fp-confirm-password').value = '';
+      document.getElementById('forgot-password-modal').classList.add('active');
+      setTimeout(() => fpEmailInput.focus(), 80);
+    }
+
+    function closeForgotPasswordModal() {
+      document.getElementById('forgot-password-modal').classList.remove('active');
+    }
+
+    function backToForgotStep1() {
+      document.getElementById('forgot-step2-form').style.display = 'none';
+      document.getElementById('forgot-step1-form').style.display = 'block';
+    }
+
+    async function handleSendResetOtp(e) {
+      if (e) e.preventDefault();
+      const email = (document.getElementById('fp-email').value || '').trim();
+      const btn = document.getElementById('fp-send-otp-btn');
+      if (!email) {
+        API.toast('Please enter your registered email address.', 'error');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerText = 'Sending OTP via Brevo...';
+
+      try {
+        const res = await API.post('/auth/forgot-password/send-otp', { email });
+        if (res && res.success) {
+          API.toast(res.message || '6-digit OTP sent to your email!', 'success');
+          const banner = document.getElementById('fp-otp-sent-banner');
+          banner.innerHTML = `✅ A 6-digit OTP code was sent to <strong>${res.deliveredTo || email}</strong>. Please check your inbox (or spam folder) and enter it below within 10 minutes.`;
+          document.getElementById('forgot-step1-form').style.display = 'none';
+          document.getElementById('forgot-step2-form').style.display = 'block';
+          setTimeout(() => document.getElementById('fp-otp-code').focus(), 80);
+        }
+      } catch (err) {
+        // API.post already shows toast on error
+      } finally {
+        btn.disabled = false;
+        btn.innerText = '📩 Send 6-Digit OTP to Email';
+      }
+    }
+
+    async function resendResetOtp() {
+      const resendLink = document.getElementById('fp-resend-link');
+      if (resendLink.dataset.busy === '1') return;
+      resendLink.dataset.busy = '1';
+      resendLink.innerText = 'Sending...';
+      try {
+        await handleSendResetOtp(null);
+      } finally {
+        resendLink.dataset.busy = '0';
+        resendLink.innerText = '🔄 Resend OTP Code';
+      }
+    }
+
+    async function handleResetPasswordWithOtp(e) {
+      e.preventDefault();
+      const email = (document.getElementById('fp-email').value || '').trim();
+      const otp = (document.getElementById('fp-otp-code').value || '').trim();
+      const newPassword = document.getElementById('fp-new-password').value || '';
+      const confirmPassword = document.getElementById('fp-confirm-password').value || '';
+      const btn = document.getElementById('fp-verify-reset-btn');
+
+      if (!/^\d{6}$/.test(otp)) {
+        API.toast('Please enter the 6-digit numeric OTP code from your email.', 'error');
+        return;
+      }
+
+      if (newPassword.length < 6) {
+        API.toast('New password must be at least 6 characters long.', 'error');
+        return;
+      }
+
+      if (newPassword !== confirmPassword) {
+        API.toast('New password and confirmation password do not match.', 'error');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerText = 'Verifying OTP & Updating...';
+
+      try {
+        const res = await API.post('/auth/forgot-password/reset', {
+          email,
+          otp,
+          newPassword,
+          confirmPassword
+        });
+        if (res && res.success) {
+          API.toast(res.message || 'Password reset successful!', 'success');
+          document.getElementById('email').value = email;
+          document.getElementById('password').value = newPassword;
+          closeForgotPasswordModal();
+        }
+      } catch (err) {
+        // API.post shows toast on error
+      } finally {
+        btn.disabled = false;
+        btn.innerText = '✅ Verify OTP & Reset Password';
+      }
     }
 
     document.getElementById('login-form').addEventListener('submit', async (e) => {

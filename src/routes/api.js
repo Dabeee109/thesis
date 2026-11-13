@@ -35,6 +35,8 @@ const quoteLimiter = rateLimit({
 // 1. Authentication & Staff Account Management Routes (FR1)
 router.post('/auth/login', authController.login);
 router.post('/auth/register', authController.register);
+router.post('/auth/forgot-password/send-otp', authController.requestPasswordResetOtp);
+router.post('/auth/forgot-password/reset', authController.resetPasswordWithOtp);
 router.get('/auth/me', authController.authMiddleware, authController.getProfile);
 router.get('/auth/users', authController.authMiddleware, authController.requireAdmin, authController.getAllUsers);
 router.post('/auth/users', authController.authMiddleware, authController.requireAdmin, authController.register);

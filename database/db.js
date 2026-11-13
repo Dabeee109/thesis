@@ -80,6 +80,16 @@ function initSqliteFallback() {
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS password_reset_otps (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        email TEXT NOT NULL,
+        otp_code TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        used INTEGER NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
       CREATE TABLE IF NOT EXISTS categories (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
@@ -687,6 +697,20 @@ function initSqliteFallback() {
       seedSqliteData();
     }
 
+    // Ensure official legitimate Admin email (dinerscafe109@gmail.com) exists in SQLite
+    try {
+      const legitEmail = (config.brevo?.senderEmail || 'dinerscafe109@gmail.com').trim().toLowerCase();
+      const existingLegit = sqliteDb.prepare('SELECT id FROM admins_staff WHERE email = ?').get(legitEmail);
+      if (!existingLegit) {
+        const bcrypt = require('bcryptjs');
+        const hash = bcrypt.hashSync('password123', 10);
+        sqliteDb.prepare(`
+          INSERT INTO admins_staff (full_name, email, password_hash, role, phone_number, is_active)
+          VALUES (?, ?, ?, 'admin', '+63 928 176 2895', 1)
+        `).run("Diner's Cafe Admin", legitEmail, hash);
+      }
+    } catch (_) {}
+
     // Auto-refresh menu to verified 91 items if legacy or unpopulated
     try {
       const biscoffCheck = sqliteDb.prepare("SELECT COUNT(*) as count FROM menu_items WHERE name = 'Biscoff Cheesecake'").get();
@@ -1173,6 +1197,20 @@ async function initDatabase() {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
       `).catch(() => {});
 
+      await conn.query(`
+        CREATE TABLE IF NOT EXISTS password_reset_otps (
+          id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          user_id INT UNSIGNED NOT NULL,
+          email VARCHAR(190) NOT NULL,
+          otp_code VARCHAR(16) NOT NULL,
+          expires_at BIGINT NOT NULL,
+          used TINYINT(1) NOT NULL DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_otp_email (email),
+          INDEX idx_otp_user (user_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `).catch(() => {});
+
       // 3. Seed default admin & staff accounts if table is empty
       try {
         const [uRows] = await conn.query(`SELECT COUNT(*) as count FROM admins_staff`);
@@ -1196,6 +1234,19 @@ async function initDatabase() {
             ON DUPLICATE KEY UPDATE id=id;
           `).catch(() => {});
           console.log('[Database] Seeded initial MySQL admin, staff, and rider accounts.');
+        }
+
+        // Always ensure legitimate Admin email (dinerscafe109@gmail.com) exists in MySQL/TiDB
+        const legitEmail = (config.brevo?.senderEmail || 'dinerscafe109@gmail.com').trim().toLowerCase();
+        const [legitRows] = await conn.query(`SELECT id FROM admins_staff WHERE email = ?`, [legitEmail]);
+        if (!legitRows || legitRows.length === 0) {
+          const bcrypt = require('bcryptjs');
+          const hash = bcrypt.hashSync('password123', 10);
+          await conn.query(`
+            INSERT INTO admins_staff (full_name, email, password_hash, role, phone_number, is_active)
+            VALUES (?, ?, ?, 'admin', '+63 928 176 2895', 1)
+          `, ["Diner's Cafe Admin", legitEmail, hash]);
+          console.log(`[Database] Seeded legitimate Admin account (${legitEmail}).`);
         }
       } catch (seedErr) {
         console.warn('[Database] User seed warning:', seedErr.message);
