@@ -52,120 +52,125 @@
     })();
   </script>
   <style>
+    body {
+      background: #0d0906;
+      color: var(--text-primary);
+    }
     .rider-container {
-      max-width: 600px;
+      max-width: 560px;
       margin: 0 auto;
-      padding: 16px;
+      padding: 0;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
+      background: linear-gradient(180deg, #130d09 0%, #0d0906 100%);
     }
     @media (min-width: 768px) {
       .rider-container {
-        max-width: 900px;
-        padding: 24px;
+        max-width: 720px;
+        margin: 18px auto;
+        border: 1px solid rgba(212, 163, 115, 0.16);
+        border-radius: 22px;
+        overflow: hidden;
+        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
       }
     }
     .rider-header {
-      background: var(--bg-surface);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-md);
-      padding: 10px 14px;
+      background: linear-gradient(180deg, #1b130d 0%, #140e09 100%);
+      border-bottom: 1px solid rgba(212, 163, 115, 0.16);
+      padding: 14px 16px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 10px;
-      margin-bottom: 8px;
-      box-shadow: var(--shadow-sm);
+      gap: 12px;
     }
     .rider-profile-bar {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 12px;
       min-width: 0;
     }
     .rider-avatar-circle {
-      width: 36px;
-      height: 36px;
+      width: 44px;
+      height: 44px;
       border-radius: 50%;
-      background: radial-gradient(circle at 30% 30%, rgba(212, 163, 115, 0.28), rgba(212, 163, 115, 0.08));
-      border: 1px solid rgba(212, 163, 115, 0.45);
+      background: radial-gradient(circle at 35% 30%, #2c1e15 0%, #160f0a 75%);
+      border: 1.5px solid rgba(212, 163, 115, 0.42);
+      box-shadow: inset 0 0 10px rgba(212, 163, 115, 0.14), 0 3px 10px rgba(0, 0, 0, 0.4);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 1.05rem;
+      font-size: 1.25rem;
       flex-shrink: 0;
     }
     .rider-badge {
       display: inline-flex;
       align-items: center;
-      gap: 5px;
-      font-size: 0.72rem;
-      padding: 3px 9px;
+      gap: 6px;
+      font-size: 0.76rem;
+      padding: 5px 12px;
       border-radius: 999px;
-      background: rgba(46, 204, 113, 0.14);
-      border: 1px solid rgba(46, 204, 113, 0.32);
-      color: #4ade80;
+      background: rgba(22, 101, 52, 0.34);
+      border: 1px solid rgba(74, 222, 128, 0.32);
+      color: #6ee7b7;
       font-weight: 700;
       white-space: nowrap;
     }
     .rider-status-dot {
-      width: 7px;
-      height: 7px;
+      width: 8px;
+      height: 8px;
       border-radius: 50%;
-      background: #4ade80;
-      box-shadow: 0 0 6px #4ade80;
+      background: #34d399;
+      box-shadow: 0 0 8px #34d399;
       display: inline-block;
     }
     .btn-logout-icon {
-      width: 34px;
-      height: 34px;
-      border-radius: 8px;
-      background: rgba(239, 68, 68, 0.1);
-      border: 1px solid rgba(239, 68, 68, 0.3);
-      color: #fca5a5;
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      background: rgba(127, 29, 29, 0.28);
+      border: 1px solid rgba(239, 68, 68, 0.32);
+      color: #f87171;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      font-size: 0.95rem;
       cursor: pointer;
       transition: all 0.18s ease;
       padding: 0;
       flex-shrink: 0;
     }
     .btn-logout-icon:hover {
-      background: rgba(239, 68, 68, 0.22);
-      border-color: rgba(239, 68, 68, 0.55);
+      background: rgba(185, 28, 28, 0.4);
+      border-color: rgba(248, 113, 113, 0.6);
+      transform: translateY(-1px);
     }
     .nano-status-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 8px;
-      padding: 5px 10px;
-      margin-bottom: 10px;
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid var(--border-subtle);
-      border-radius: 999px;
-      font-size: 0.72rem;
+      gap: 10px;
+      padding: 9px 16px;
+      background: #120c08;
+      border-bottom: 1px solid rgba(212, 163, 115, 0.13);
+      font-size: 0.75rem;
       color: var(--text-muted);
     }
     .nano-status-left {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 12px;
       flex-wrap: nowrap;
       overflow: hidden;
     }
     .audio-hint-pill {
       display: inline-flex;
       align-items: center;
-      gap: 4px;
-      font-size: 0.72rem;
-      color: var(--brand-crema);
+      gap: 5px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #52b788;
       cursor: pointer;
-      padding: 2px 6px;
-      border-radius: 999px;
+      padding: 2px 0;
       background: transparent;
       border: none;
       margin: 0;
@@ -173,27 +178,27 @@
       white-space: nowrap;
     }
     .audio-hint-pill:hover {
-      color: var(--brand-primary);
+      color: #6ee7b7;
     }
     .nano-divider {
       width: 1px;
       height: 12px;
-      background: var(--border-subtle);
+      background: rgba(212, 163, 115, 0.18);
       display: inline-block;
     }
     .nano-refresh-btn {
-      background: transparent;
-      border: 1px solid var(--border-subtle);
-      color: var(--brand-primary);
-      border-radius: 999px;
-      padding: 2px 9px;
-      font-size: 0.72rem;
-      font-weight: 700;
+      width: 34px;
+      height: 34px;
+      background: #1a120c;
+      border: 1px solid rgba(212, 163, 115, 0.22);
+      color: #7dd3fc;
+      border-radius: 9px;
+      padding: 0;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
-      gap: 4px;
-      transition: all 0.15s ease;
+      justify-content: center;
+      transition: all 0.18s ease;
       flex-shrink: 0;
     }
     .nano-refresh-btn:hover {
@@ -202,13 +207,15 @@
     }
     .rider-tabs-bar {
       display: flex;
-      align-items: stretch;
-      gap: 6px;
-      background: var(--bg-surface);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-md);
-      padding: 5px;
-      margin-bottom: 14px;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 16px 12px;
+      background: transparent;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .rider-tabs-bar::-webkit-scrollbar {
+      display: none;
     }
     .rider-tab-btn {
       flex: 1;
@@ -216,63 +223,67 @@
       align-items: center;
       justify-content: center;
       gap: 6px;
-      padding: 9px 10px;
-      border-radius: var(--radius-sm);
-      border: 1px solid transparent;
-      background: transparent;
-      color: var(--text-secondary);
-      font-size: 0.82rem;
+      padding: 10px 12px;
+      border-radius: 11px;
+      border: 1px solid rgba(212, 163, 115, 0.2);
+      background: #1b130d;
+      color: #ebd9c8;
+      font-size: 0.81rem;
       font-weight: 700;
       cursor: pointer;
-      transition: all 0.18s ease;
+      transition: all 0.2s ease;
       white-space: nowrap;
     }
     .rider-tab-btn.compact-tab {
-      flex: 0 0 auto;
-      padding: 9px 12px;
+      flex: 0.9;
+      padding: 10px 12px;
     }
     .rider-tab-btn.active {
-      background: linear-gradient(135deg, rgba(212, 163, 115, 0.24), rgba(212, 163, 115, 0.1));
-      color: var(--brand-gold);
-      border-color: rgba(212, 163, 115, 0.55);
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+      background: linear-gradient(135deg, #d4a373 0%, #b57c49 100%);
+      color: #19100a;
+      border-color: #e6b98a;
+      box-shadow: 0 4px 14px rgba(212, 163, 115, 0.28);
+      font-weight: 800;
+    }
+    .rider-feed-main {
+      flex: 1;
+      padding: 4px 16px 28px;
     }
     .empty-state-canvas {
-      background: radial-gradient(circle at 50% 25%, rgba(212, 163, 115, 0.08) 0%, var(--bg-surface) 70%);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-lg);
-      padding: 72px 24px;
+      background: radial-gradient(circle at 50% 34%, rgba(212, 163, 115, 0.15) 0%, rgba(26, 19, 13, 0.96) 58%, #140e09 100%);
+      border: 1px solid rgba(212, 163, 115, 0.22);
+      border-radius: 20px;
+      padding: 68px 24px;
       text-align: center;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      min-height: 320px;
+      min-height: 350px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 12px 30px rgba(0, 0, 0, 0.45);
     }
     .empty-state-glow-icon {
-      width: 82px;
-      height: 82px;
-      border-radius: 50%;
-      background: radial-gradient(circle, rgba(212, 163, 115, 0.22) 0%, rgba(212, 163, 115, 0.04) 70%);
-      border: 1px solid rgba(212, 163, 115, 0.32);
-      box-shadow: 0 0 28px rgba(212, 163, 115, 0.16);
+      width: 110px;
+      height: 92px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 2.3rem;
-      margin-bottom: 18px;
+      margin-bottom: 22px;
+      position: relative;
+      filter: drop-shadow(0 0 18px rgba(244, 162, 97, 0.48));
     }
     .empty-state-title {
-      font-size: 1.05rem;
-      font-weight: 700;
-      color: var(--brand-crema);
-      margin: 0 0 8px 0;
-      max-width: 320px;
-      line-height: 1.45;
+      font-size: 1.16rem;
+      font-weight: 800;
+      color: #d8c8b8;
+      margin: 0 0 12px 0;
+      max-width: 310px;
+      line-height: 1.4;
+      letter-spacing: -0.01em;
     }
     .empty-state-subtitle {
-      font-size: 0.84rem;
-      color: var(--text-muted);
+      font-size: 0.88rem;
+      color: #8c7b6c;
       margin: 0;
       max-width: 300px;
       line-height: 1.5;
@@ -381,24 +392,6 @@
     .profile-row:last-child {
       border-bottom: none;
     }
-    .audio-hint-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      cursor: pointer;
-      padding: 4px 10px;
-      border-radius: 999px;
-      background: var(--bg-surface-elevated);
-      border: 1px solid var(--border-subtle);
-      margin-bottom: 12px;
-      user-select: none;
-    }
-    .audio-hint-pill:hover {
-      color: var(--brand-primary);
-      border-color: var(--brand-primary);
-    }
   </style>
 </head>
 <body>
@@ -407,20 +400,24 @@
     <!-- 1. Ultra-Compact Top Rider Profile Header -->
     <header class="rider-header">
       <div class="rider-profile-bar" onclick="setRiderView('profile')" style="cursor: pointer;" title="View Rider Profile">
-        <div class="rider-avatar-circle">🛵</div>
+        <div class="rider-avatar-circle">☕</div>
         <div style="min-width: 0;">
-          <h2 style="font-size: 0.98rem; font-weight: 800; margin: 0; line-height: 1.2; color: var(--brand-crema); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" id="rider-name-display">Marco Santos</h2>
-          <span style="font-size: 0.72rem; color: var(--brand-primary); font-weight: 600; display: block; margin-top: 2px; opacity: 0.9;" id="rider-vehicle-display">MC-7890-PH</span>
+          <h2 style="font-size: 1.06rem; font-weight: 800; margin: 0; line-height: 1.2; color: #fbf6f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" id="rider-name-display">Marco Santos</h2>
+          <span style="font-size: 0.76rem; color: #c89f74; font-weight: 600; display: block; margin-top: 2px; opacity: 0.92;" id="rider-vehicle-display">MC-7890-PH</span>
         </div>
       </div>
-      <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+      <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">
         <span class="rider-badge" id="rider-status-pill">
           <span class="rider-status-dot"></span>
           <span>Online</span>
         </span>
         <!-- Compact Logout Icon Button -->
         <button class="btn-logout-icon" id="btn-logout-rider" onclick="logoutRider()" title="Sign out of Rider Portal" aria-label="Sign out of Rider Portal">
-          🚪
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+            <polyline points="16 17 21 12 16 7"/>
+            <line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
         </button>
       </div>
     </header>
@@ -432,10 +429,10 @@
           <span>🔔 Alerts Active</span>
         </div>
         <span class="nano-divider"></span>
-        <span style="font-size: 0.72rem; color: var(--text-secondary); white-space: nowrap;" id="live-indicator">⚡ Live Sync</span>
+        <span style="font-size: 0.75rem; color: #b5a395; font-weight: 600; white-space: nowrap;" id="live-indicator">⚡ Live Sync</span>
       </div>
-      <button type="button" class="nano-refresh-btn" id="btn-refresh-rider" onclick="loadRiderDeliveries()" title="Refresh Deliveries">
-        <span>🔄</span>
+      <button type="button" class="nano-refresh-btn" id="btn-refresh-rider" onclick="loadRiderDeliveries()" title="Refresh Deliveries" aria-label="Refresh Deliveries">
+        <span style="font-size: 0.95rem; line-height: 1;">🔄</span>
       </button>
     </div>
 
@@ -453,7 +450,7 @@
     </nav>
 
     <!-- Main Dynamic Feed Container -->
-    <main id="rider-trips-container" style="flex: 1;">
+    <main id="rider-trips-container" class="rider-feed-main">
       <!-- Populated via loadRiderDeliveries() or showProfile() -->
     </main>
   </div>
@@ -663,7 +660,31 @@
           if (currentRiderView === 'active') {
             container.innerHTML = `
               <div class="empty-state-canvas py-16 py-20">
-                <div class="empty-state-glow-icon">🛵</div>
+                <div class="empty-state-glow-icon" aria-hidden="true">
+                  <svg width="92" height="76" viewBox="0 0 92 76" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                      <linearGradient id="scooterGlowGrad" x1="10" y1="12" x2="82" y2="66" gradientUnits="userSpaceOnUse">
+                        <stop offset="0%" stop-color="#f7d6b5"/>
+                        <stop offset="55%" stop-color="#e2a872"/>
+                        <stop offset="100%" stop-color="#c97b53"/>
+                      </linearGradient>
+                    </defs>
+                    <!-- Delivery Thermal Box -->
+                    <rect x="14" y="16" width="22" height="19" rx="4" stroke="url(#scooterGlowGrad)" stroke-width="3.2" fill="rgba(212, 163, 115, 0.14)"/>
+                    <line x1="18" y1="24" x2="32" y2="24" stroke="#f7d6b5" stroke-width="2.2" stroke-linecap="round"/>
+                    <!-- Scooter Body & Handlebar -->
+                    <path d="M18 39H46L56 23H49" stroke="url(#scooterGlowGrad)" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M55 23L65 48H43L35 39H18C15.5 39 14 41 14 43.5V48H22" stroke="url(#scooterGlowGrad)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" fill="rgba(212, 163, 115, 0.12)"/>
+                    <!-- Front Fender & Headlight -->
+                    <path d="M61 36H70C73 36 75 38.5 75 41.5V44H63" stroke="url(#scooterGlowGrad)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <circle cx="62" cy="24" r="3" fill="#faedcd"/>
+                    <!-- Rear & Front Wheels -->
+                    <circle cx="26" cy="54" r="10.5" stroke="url(#scooterGlowGrad)" stroke-width="3.8" fill="#17100b"/>
+                    <circle cx="26" cy="54" r="4" fill="#e2a872"/>
+                    <circle cx="66" cy="54" r="10.5" stroke="url(#scooterGlowGrad)" stroke-width="3.8" fill="#17100b"/>
+                    <circle cx="66" cy="54" r="4" fill="#e2a872"/>
+                  </svg>
+                </div>
                 <h3 class="empty-state-title">Walang aktibong delivery sa iyong queue ngayon.</h3>
                 <p class="empty-state-subtitle">Awtomatikong lalabas dito kapag may bagong order na na-assign sa iyo.</p>
               </div>
