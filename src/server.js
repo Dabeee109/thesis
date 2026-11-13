@@ -84,8 +84,9 @@ app.use((req, res, next) => {
 });
 
 // Rider Portal Route Aliases (Supports /rider-portal.html and /rider.html)
-app.get(['/rider-portal.html', '/rider-portal'], (req, res) => {
-  res.sendFile(path.join(__dirname, '../public/rider.html'));
+app.get(['/rider-portal.html', '/rider-portal', '/rider.html', '/rider'], (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.sendFile(path.join(__dirname, '../public/rider-portal.html'));
 });
 
 // Dedicated Payment Proof Image Route (recovers from DB or generates digital receipt if wiped on Render disk)

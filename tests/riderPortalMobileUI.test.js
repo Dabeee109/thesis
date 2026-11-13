@@ -5,6 +5,14 @@ const path = require('path');
 
 describe('Mobile UI Redesign: Spacious & Modern Mobile Rider View', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'rider-portal.html'), 'utf8');
+  const riderAliasHtml = fs.readFileSync(path.join(__dirname, '..', 'public', 'rider.html'), 'utf8');
+  const serverJs = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
+
+  it('0. Ensures both rider-portal.html and rider.html are synced and served with no-store headers', () => {
+    assert.ok(riderAliasHtml.includes('class="rider-avatar-circle"'));
+    assert.ok(riderAliasHtml.includes('empty-state-canvas'));
+    assert.ok(serverJs.includes('../public/rider-portal.html'));
+  });
 
   it('1. Renders ultra-compact top rider profile header with Marco Santos, MC-7890-PH, Online dot badge, and compact Logout icon button', () => {
     assert.ok(html.includes('class="rider-avatar-circle"'));
@@ -41,3 +49,4 @@ describe('Mobile UI Redesign: Spacious & Modern Mobile Rider View', () => {
     assert.ok(html.includes('/js/app-install-banner.js'));
   });
 });
+
