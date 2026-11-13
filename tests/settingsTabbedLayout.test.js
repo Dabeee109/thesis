@@ -70,3 +70,4 @@ describe('System Settings & Account Management Tabbed Layout Refactor', () => {
     assert.ok(js.includes('class="py-3.5"'));
   });
 });
+

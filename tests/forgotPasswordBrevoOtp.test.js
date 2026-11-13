@@ -5,7 +5,7 @@ const fs = require('fs');
 
 const testDbPath = path.join(__dirname, 'test_forgot_password_otp.sqlite');
 if (fs.existsSync(testDbPath)) {
-  try { fs.unlinkSync(testDbPath); } catch (_) {}
+  try { fs.unlinkSync(testDbPath); } catch (_) { }
 }
 
 process.env.DB_FORCE_SQLITE = '1';
@@ -57,6 +57,11 @@ test('Forgot Password + Brevo Email OTP Suite', async (t) => {
       assert.strictEqual(res.body.user.email, acct.email);
       assert.strictEqual(res.body.user.role, acct.role);
     }
+
+    const [removedRows] = await db.query(
+      `SELECT email FROM admins_staff WHERE email IN ('admin@dinerscafe.ph', 'staff@dinerscafe.ph', 'rider1@dinerscafe.ph')`
+    );
+    assert.strictEqual(removedRows.length, 0, 'Legacy duplicate @dinerscafe.ph accounts must be removed');
   });
 
   await t.test('2. Send OTP generates 6-digit code and dispatches email to dinerscafe109@gmail.com', async () => {

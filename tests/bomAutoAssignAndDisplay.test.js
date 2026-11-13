@@ -73,3 +73,4 @@ describe('Automated Bill of Materials (BOM) Recipe Assignment & UI Display', () 
     assert.ok(js.includes('Mapped ('));
   });
 });
+

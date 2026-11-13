@@ -721,6 +721,11 @@ function initSqliteFallback() {
         }
 
         if (acct.role === 'rider' && userId) {
+          // Re-link any legacy rider1@dinerscafe.ph delivery_personnel row to this legitimate rider account
+          const oldRiderUser = sqliteDb.prepare('SELECT id FROM admins_staff WHERE email = ?').get('rider1@dinerscafe.ph');
+          if (oldRiderUser) {
+            sqliteDb.prepare('UPDATE delivery_personnel SET user_id = ? WHERE user_id = ?').run(userId, oldRiderUser.id);
+          }
           const existingRider = sqliteDb.prepare('SELECT id FROM delivery_personnel WHERE user_id = ?').get(userId);
           if (!existingRider) {
             sqliteDb.prepare(`
@@ -730,6 +735,12 @@ function initSqliteFallback() {
           }
         }
       }
+
+      // Remove legacy duplicate accounts (admin@dinerscafe.ph, staff@dinerscafe.ph, rider1@dinerscafe.ph)
+      sqliteDb.prepare(`
+        DELETE FROM admins_staff
+        WHERE email IN ('admin@dinerscafe.ph', 'staff@dinerscafe.ph', 'rider1@dinerscafe.ph')
+      `).run();
     } catch (_) {}
 
     // Auto-refresh menu to verified 91 items if legacy or unpopulated
@@ -757,10 +768,10 @@ function seedSqliteData() {
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
   const bcrypt = require('bcryptjs');
-  const hash = bcrypt.hashSync('password123', 10);
-  insertUser.run(1, 'Diner Admin', 'admin@dinerscafe.ph', hash, 'admin', '+63 917 111 2222', 1);
-  insertUser.run(2, 'Maria Clara (Barista)', 'staff@dinerscafe.ph', hash, 'staff', '+63 917 333 4444', 1);
-  insertUser.run(3, 'Marco Santos (Motorcycle Rider)', 'rider1@dinerscafe.ph', hash, 'rider', '+63 918 555 6666', 1);
+  const hash = bcrypt.hashSync('12345', 10);
+  insertUser.run(1, "Diner's Cafe Admin", 'dinerscafe109@gmail.com', hash, 'admin', '+63 928 176 2895', 1);
+  insertUser.run(2, 'Maria Clara (Barista)', 'fernandez.fd.bsinfotech@gmail.com', hash, 'staff', '+63 917 333 4444', 1);
+  insertUser.run(3, 'Marco Santos (Motorcycle Rider)', 'fdave0456@gmail.com', hash, 'rider', '+63 918 555 6666', 1);
   insertUser.run(4, 'Leo Reyes (Bicycle Eco-Rider)', 'rider2@dinerscafe.ph', hash, 'rider', '+63 918 777 8888', 1);
 
   const insertRider = sqliteDb.prepare(`
@@ -1238,12 +1249,12 @@ async function initDatabase() {
         const uCount = uRows && uRows[0] ? (uRows[0].count || uRows[0]['COUNT(*)'] || 0) : 0;
         if (uCount === 0) {
           const bcrypt = require('bcryptjs');
-          const hash = bcrypt.hashSync('password123', 10);
+          const hash = bcrypt.hashSync('12345', 10);
           await conn.query(`
             INSERT INTO admins_staff (id, full_name, email, password_hash, role, phone_number, is_active) VALUES
-            (1, 'Diner Admin', 'admin@dinerscafe.ph', ?, 'admin', '+63 917 111 2222', 1),
-            (2, 'Maria Clara (Barista)', 'staff@dinerscafe.ph', ?, 'staff', '+63 917 333 4444', 1),
-            (3, 'Marco Santos (Motorcycle Rider)', 'rider1@dinerscafe.ph', ?, 'rider', '+63 918 555 6666', 1),
+            (1, 'Diner''s Cafe Admin', 'dinerscafe109@gmail.com', ?, 'admin', '+63 928 176 2895', 1),
+            (2, 'Maria Clara (Barista)', 'fernandez.fd.bsinfotech@gmail.com', ?, 'staff', '+63 917 333 4444', 1),
+            (3, 'Marco Santos (Motorcycle Rider)', 'fdave0456@gmail.com', ?, 'rider', '+63 918 555 6666', 1),
             (4, 'Leo Reyes (Bicycle Eco-Rider)', 'rider2@dinerscafe.ph', ?, 'rider', '+63 918 777 8888', 1)
             ON DUPLICATE KEY UPDATE id=id;
           `, [hash, hash, hash, hash]);
@@ -1285,15 +1296,30 @@ async function initDatabase() {
           }
 
           if (acct.role === 'rider' && userId) {
-            const [riderRows] = await conn.query(`SELECT id FROM delivery_personnel WHERE user_id = ?`, [userId]);
+            const [oldRiderRows] = await conn.query(`SELECT id FROM admins_staff WHERE email = 'rider1@dinerscafe.ph'`);
+            if (oldRiderRows && oldRiderRows.length > 0) {
+              await conn.query(`UPDATE delivery_personnel SET user_id = ? WHERE user_id = ?`, [userId, oldRiderRows[0].id]).catch(() => {});
+            }
+            const [riderRows] = await conn.query(`SELECT id FROM delivery_personnel WHERE user_id = ? ORDER BY id ASC`, [userId]);
             if (!riderRows || riderRows.length === 0) {
               await conn.query(`
                 INSERT INTO delivery_personnel (user_id, full_name, phone_number, vehicle_type, vehicle_plate_no, status, is_active)
                 VALUES (?, ?, ?, 'motorcycle', 'MC-7890-PH', 'available', 1)
               `, [userId, 'Marco Santos', acct.phone]).catch(() => {});
+            } else if (riderRows.length > 1) {
+              const keepId = riderRows[0].id;
+              const dupIds = riderRows.slice(1).map(r => r.id);
+              await conn.query(`UPDATE deliveries SET rider_id = ? WHERE rider_id IN (${dupIds.map(() => '?').join(',')})`, [keepId, ...dupIds]).catch(() => {});
+              await conn.query(`DELETE FROM delivery_personnel WHERE id IN (${dupIds.map(() => '?').join(',')})`, dupIds).catch(() => {});
             }
           }
         }
+
+        // Remove legacy duplicate accounts (admin@dinerscafe.ph, staff@dinerscafe.ph, rider1@dinerscafe.ph)
+        await conn.query(`
+          DELETE FROM admins_staff
+          WHERE email IN ('admin@dinerscafe.ph', 'staff@dinerscafe.ph', 'rider1@dinerscafe.ph')
+        `).catch(() => {});
       } catch (seedErr) {
         console.warn('[Database] User seed warning:', seedErr.message);
       }
