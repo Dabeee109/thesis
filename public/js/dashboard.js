@@ -2930,47 +2930,385 @@ async function loadFeedback() {
 }
 
 // ----------------------------------------------------------------------------
-// 7. Reports & Business Analytics (FR10)
+// 7. Reports & Business Analytics (FR10) — Date Range Filter & Drill-Down Modal
 // ----------------------------------------------------------------------------
+let activeReportStartDate = '';
+let activeReportEndDate = '';
+
+function formatPhpCurrency(amount) {
+  const num = Number(amount || 0);
+  if (!Number.isFinite(num)) return '₱0.00';
+  return '₱' + num.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function getLocalDateIsoString(dateObj) {
+  const year = dateObj.getFullYear();
+  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const day = String(dateObj.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function updateReportPresetButtonsHighlight(activePreset) {
+  const presetMap = {
+    today: 'btn-preset-today',
+    last7: 'btn-preset-last7',
+    month: 'btn-preset-month',
+    all: 'btn-preset-all',
+  };
+  Object.entries(presetMap).forEach(([key, btnId]) => {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    if (key === activePreset) {
+      btn.style.background = 'rgba(212, 163, 115, 0.18)';
+      btn.style.color = 'var(--brand-caramel)';
+      btn.style.borderColor = 'rgba(212, 163, 115, 0.45)';
+    } else {
+      btn.style.background = 'rgba(255, 255, 255, 0.04)';
+      btn.style.color = 'var(--text-secondary)';
+      btn.style.borderColor = 'var(--border-subtle)';
+    }
+  });
+}
+
+function formatReportRangeLabel(startDate, endDate) {
+  if (startDate && endDate) {
+    return startDate === endDate ? `${startDate} (Single Day)` : `${startDate} → ${endDate}`;
+  }
+  if (startDate) return `From ${startDate}`;
+  if (endDate) return `Up to ${endDate}`;
+  return 'All Time';
+}
+
+function handleReportDateChange(changedField) {
+  const startInput = document.getElementById('report-start-date');
+  const endInput = document.getElementById('report-end-date');
+  const validationEl = document.getElementById('report-date-validation-msg');
+  if (!startInput || !endInput) return;
+
+  let startVal = (startInput.value || '').trim();
+  let endVal = (endInput.value || '').trim();
+
+  if (startVal && endVal && startVal > endVal) {
+    if (changedField === 'start') {
+      endInput.value = startVal;
+      endVal = startVal;
+    } else {
+      startInput.value = endVal;
+      startVal = endVal;
+    }
+    if (validationEl) {
+      validationEl.textContent = 'End Date cannot be earlier than Start Date — automatically adjusted to match.';
+      validationEl.style.display = 'block';
+    }
+    if (typeof showToast === 'function') {
+      showToast('End Date adjusted so End Date ≥ Start Date.', 'warning');
+    }
+  } else if (validationEl) {
+    validationEl.style.display = 'none';
+    validationEl.textContent = '';
+  }
+
+  updateReportPresetButtonsHighlight('');
+  applyReportDateFilter();
+}
+
+function setReportDatePreset(preset) {
+  const startInput = document.getElementById('report-start-date');
+  const endInput = document.getElementById('report-end-date');
+  const validationEl = document.getElementById('report-date-validation-msg');
+  if (validationEl) {
+    validationEl.style.display = 'none';
+    validationEl.textContent = '';
+  }
+
+  const now = new Date();
+  const todayIso = getLocalDateIsoString(now);
+
+  if (preset === 'today') {
+    if (startInput) startInput.value = todayIso;
+    if (endInput) endInput.value = todayIso;
+  } else if (preset === 'last7') {
+    const sevenDaysAgo = new Date(now);
+    sevenDaysAgo.setDate(now.getDate() - 6);
+    if (startInput) startInput.value = getLocalDateIsoString(sevenDaysAgo);
+    if (endInput) endInput.value = todayIso;
+  } else if (preset === 'month') {
+    const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    if (startInput) startInput.value = getLocalDateIsoString(firstOfMonth);
+    if (endInput) endInput.value = todayIso;
+  } else {
+    if (startInput) startInput.value = '';
+    if (endInput) endInput.value = '';
+  }
+
+  updateReportPresetButtonsHighlight(preset);
+  applyReportDateFilter();
+}
+
+function applyReportDateFilter() {
+  const startInput = document.getElementById('report-start-date');
+  const endInput = document.getElementById('report-end-date');
+  const validationEl = document.getElementById('report-date-validation-msg');
+
+  let startVal = startInput ? (startInput.value || '').trim() : '';
+  let endVal = endInput ? (endInput.value || '').trim() : '';
+
+  if (startVal && endVal && startVal > endVal) {
+    if (validationEl) {
+      validationEl.textContent = 'Please ensure End Date is on or after Start Date.';
+      validationEl.style.display = 'block';
+    }
+    if (endInput) {
+      endInput.value = startVal;
+      endVal = startVal;
+    }
+  }
+
+  activeReportStartDate = startVal;
+  activeReportEndDate = endVal;
+  loadReports();
+}
+
 async function loadReports() {
   try {
-    const res = await API.get('/reports/sales');
+    const startInput = document.getElementById('report-start-date');
+    const endInput = document.getElementById('report-end-date');
+    const startDate = startInput ? (startInput.value || '').trim() : activeReportStartDate;
+    const endDate = endInput ? (endInput.value || '').trim() : activeReportEndDate;
+
+    activeReportStartDate = startDate;
+    activeReportEndDate = endDate;
+
+    const queryParams = new URLSearchParams();
+    if (startDate) queryParams.set('startDate', startDate);
+    if (endDate) queryParams.set('endDate', endDate);
+    const qs = queryParams.toString();
+
+    const rangeBadge = document.getElementById('report-active-range-badge');
+    if (rangeBadge) {
+      rangeBadge.textContent = formatReportRangeLabel(startDate, endDate);
+    }
+
+    const csvBtn = document.getElementById('btn-export-report-csv');
+    if (csvBtn) {
+      csvBtn.href = `/api/reports/export-csv${qs ? '?' + qs : ''}`;
+    }
+
+    const res = await API.get(`/reports/sales${qs ? '?' + qs : ''}`);
     if (res && res.success) {
-      // Payment Breakdown Table
+      // Update Summary KPI Cards dynamically for the selected date range
+      const overall = res.overall || {};
+      const grossSalesEl = document.getElementById('report-kpi-gross-sales');
+      const totalOrdersEl = document.getElementById('report-kpi-total-orders');
+      const avgOrderEl = document.getElementById('report-kpi-avg-order');
+      const deliverySalesEl = document.getElementById('report-kpi-delivery-sales');
+
+      if (grossSalesEl) grossSalesEl.textContent = formatPhpCurrency(overall.gross_sales || 0);
+      if (totalOrdersEl) totalOrdersEl.textContent = String(Number(overall.total_orders || 0));
+      if (avgOrderEl) avgOrderEl.textContent = formatPhpCurrency(overall.avg_order_value || 0);
+      if (deliverySalesEl) deliverySalesEl.textContent = formatPhpCurrency(overall.delivery_sales || 0);
+
+      // Payment Breakdown Table (Interactive Drill-Down Rows)
       const payTbody = document.getElementById('report-payments-tbody');
-      payTbody.innerHTML = '';
-      (res.paymentBreakdown || []).forEach(p => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td><strong>${p.payment_method.toUpperCase()}</strong></td>
-          <td>${p.transaction_count}</td>
-          <td><strong>₱${parseFloat(p.total_revenue).toFixed(2)}</strong></td>
-          <td>${p.mismatch_count > 0 ? `<span class="badge badge-mismatch">${p.mismatch_count}</span>` : '0'}</td>
-        `;
-        payTbody.appendChild(tr);
-      });
+      if (payTbody) {
+        payTbody.innerHTML = '';
+        const breakdown = res.paymentBreakdown || [];
+        if (breakdown.length === 0) {
+          payTbody.innerHTML = `
+            <tr>
+              <td colspan="5" style="text-align: center; padding: 22px; color: var(--text-muted);">
+                No transactions found for the selected date range (${escapeHtml(formatReportRangeLabel(startDate, endDate))}).
+              </td>
+            </tr>
+          `;
+        } else {
+          breakdown.forEach(p => {
+            const methodRaw = String(p.payment_method || 'cash').toLowerCase();
+            const methodUpper = escapeHtml(methodRaw.toUpperCase());
+            const txCount = Number(p.transaction_count || 0);
+            const totalRev = Number(p.total_revenue || 0);
+            const mismatchCount = Number(p.mismatch_count || 0);
+
+            const tr = document.createElement('tr');
+            tr.className = 'payment-method-drilldown-row';
+            tr.style.cursor = 'pointer';
+            tr.style.transition = 'background 0.15s ease';
+            tr.title = `Click to view all ${methodUpper} transactions`;
+            tr.onmouseenter = () => { tr.style.background = 'rgba(212, 163, 115, 0.1)'; };
+            tr.onmouseleave = () => { tr.style.background = ''; };
+            tr.onclick = () => openPaymentMethodModal(methodRaw);
+
+            tr.innerHTML = `
+              <td>
+                <span style="display: inline-flex; align-items: center; gap: 8px; font-weight: 700; color: var(--text-primary);">
+                  <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--brand-caramel); display: inline-block;"></span>
+                  ${methodUpper}
+                </span>
+              </td>
+              <td>${txCount}</td>
+              <td><strong style="color: var(--brand-caramel);">${formatPhpCurrency(totalRev)}</strong></td>
+              <td>${mismatchCount > 0 ? `<span class="badge badge-mismatch">${mismatchCount}</span>` : '0'}</td>
+              <td style="text-align: right;">
+                <span style="font-size: 0.78rem; font-weight: 600; color: var(--brand-caramel); background: rgba(212, 163, 115, 0.12); border: 1px solid rgba(212, 163, 115, 0.3); padding: 4px 10px; border-radius: 999px; white-space: nowrap;">
+                  View Details →
+                </span>
+              </td>
+            `;
+            payTbody.appendChild(tr);
+          });
+        }
+      }
 
       // Top Items Table
       const topTbody = document.getElementById('report-top-items-tbody');
-      topTbody.innerHTML = '';
-      (res.topItems || []).forEach(item => {
-        const catName = item.category_name || item.category || 'Uncategorized';
-        const units = item.total_units_sold !== undefined ? item.total_units_sold : (item.units_sold !== undefined ? item.units_sold : 0);
-        const rev = parseFloat(item.total_revenue !== undefined ? item.total_revenue : (item.revenue !== undefined ? item.revenue : 0));
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td><strong>${escapeHtml(item.item_name || 'Item')}</strong></td>
-          <td>${escapeHtml(catName)}</td>
-          <td>${units} units</td>
-          <td><strong>₱${rev.toFixed(2)}</strong></td>
-        `;
-        topTbody.appendChild(tr);
-      });
+      if (topTbody) {
+        topTbody.innerHTML = '';
+        const topItems = res.topItems || [];
+        if (topItems.length === 0) {
+          topTbody.innerHTML = `
+            <tr>
+              <td colspan="4" style="text-align: center; padding: 22px; color: var(--text-muted);">
+                No menu item sales recorded for this date range.
+              </td>
+            </tr>
+          `;
+        } else {
+          topItems.forEach(item => {
+            const catName = item.category_name || item.category || 'Uncategorized';
+            const units = item.total_units_sold !== undefined ? item.total_units_sold : (item.units_sold !== undefined ? item.units_sold : 0);
+            const rev = parseFloat(item.total_revenue !== undefined ? item.total_revenue : (item.revenue !== undefined ? item.revenue : 0));
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td><strong>${escapeHtml(item.item_name || 'Item')}</strong></td>
+              <td>${escapeHtml(catName)}</td>
+              <td>${units} units</td>
+              <td><strong>${formatPhpCurrency(rev)}</strong></td>
+            `;
+            topTbody.appendChild(tr);
+          });
+        }
+      }
     }
   } catch (err) {
     console.error('Load reports error:', err);
   }
 }
+
+async function openPaymentMethodModal(method) {
+  const normalizedMethod = String(method || 'cash').trim().toLowerCase();
+  const methodDisplay = normalizedMethod.toUpperCase();
+
+  const startInput = document.getElementById('report-start-date');
+  const endInput = document.getElementById('report-end-date');
+  const startDate = startInput ? (startInput.value || '').trim() : activeReportStartDate;
+  const endDate = endInput ? (endInput.value || '').trim() : activeReportEndDate;
+
+  const titleEl = document.getElementById('payment-drilldown-title');
+  const dateLabelEl = document.getElementById('payment-drilldown-date-label');
+  const tbodyEl = document.getElementById('payment-drilldown-tbody');
+  const countEl = document.getElementById('payment-drilldown-total-count');
+  const amountEl = document.getElementById('payment-drilldown-total-amount');
+
+  if (titleEl) {
+    titleEl.textContent = `${methodDisplay} — Transaction Breakdown`;
+  }
+  if (dateLabelEl) {
+    dateLabelEl.textContent = `Date Range: ${formatReportRangeLabel(startDate, endDate)}`;
+  }
+  if (countEl) countEl.textContent = '…';
+  if (amountEl) amountEl.textContent = '₱0.00';
+  if (tbodyEl) {
+    tbodyEl.innerHTML = `
+      <tr>
+        <td colspan="5" style="text-align: center; padding: 28px; color: var(--text-muted);">
+          Loading ${escapeHtml(methodDisplay)} transactions...
+        </td>
+      </tr>
+    `;
+  }
+
+  openModal('modal-payment-method-transactions');
+
+  try {
+    const params = new URLSearchParams();
+    params.set('method', normalizedMethod);
+    if (startDate) params.set('startDate', startDate);
+    if (endDate) params.set('endDate', endDate);
+
+    const res = await API.get(`/reports/transactions-by-method?${params.toString()}`);
+    if (!res || !res.success) {
+      throw new Error((res && res.error) || 'Failed to load transaction breakdown.');
+    }
+
+    const transactions = Array.isArray(res.transactions) ? res.transactions : [];
+    const totalCount = Number(res.totalCount !== undefined ? res.totalCount : transactions.length);
+    const totalAmountPaid = Number(
+      res.totalAmountPaid !== undefined
+        ? res.totalAmountPaid
+        : transactions.reduce((acc, t) => acc + Number(t.amount_paid || 0), 0)
+    );
+
+    if (countEl) countEl.textContent = String(totalCount);
+    if (amountEl) amountEl.textContent = formatPhpCurrency(totalAmountPaid);
+
+    if (tbodyEl) {
+      tbodyEl.innerHTML = '';
+      if (transactions.length === 0) {
+        tbodyEl.innerHTML = `
+          <tr>
+            <td colspan="5" style="text-align: center; padding: 28px; color: var(--text-muted);">
+              No ${escapeHtml(methodDisplay)} transactions found for ${escapeHtml(formatReportRangeLabel(startDate, endDate))}.
+            </td>
+          </tr>
+        `;
+      } else {
+        transactions.forEach(tx => {
+          const orderNum = tx.order_number
+            ? (String(tx.order_number).startsWith('#') ? String(tx.order_number) : `#${tx.order_number}`)
+            : `#${tx.id || ''}`;
+          const customerName = tx.customer_name || 'Walk-in / Guest';
+          const createdDateStr = tx.created_at
+            ? new Date(tx.created_at).toLocaleString('en-PH', {
+                year: 'numeric',
+                month: 'short',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+              })
+            : '—';
+          const refNo = tx.reference_number || (normalizedMethod === 'cash' ? 'N/A' : 'N/A');
+          const amountPaid = Number(tx.amount_paid || 0);
+
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td><strong style="color: var(--brand-caramel); font-family: monospace; font-size: 0.9rem;">${escapeHtml(orderNum)}</strong></td>
+            <td>${escapeHtml(customerName)}</td>
+            <td style="color: var(--text-secondary); font-size: 0.85rem;">${escapeHtml(createdDateStr)}</td>
+            <td><code style="font-size: 0.82rem; color: var(--text-secondary); background: rgba(255,255,255,0.04); padding: 2px 6px; border-radius: 4px;">${escapeHtml(refNo)}</code></td>
+            <td style="text-align: right;"><strong style="color: var(--text-primary);">${formatPhpCurrency(amountPaid)}</strong></td>
+          `;
+          tbodyEl.appendChild(tr);
+        });
+      }
+    }
+  } catch (err) {
+    console.error('Open payment method modal error:', err);
+    if (tbodyEl) {
+      tbodyEl.innerHTML = `
+        <tr>
+          <td colspan="5" style="text-align: center; padding: 24px; color: #f87171;">
+            Failed to load transactions: ${escapeHtml(err.message || 'Unknown error')}
+          </td>
+        </tr>
+      `;
+    }
+  }
+}
+
+window.handleReportDateChange = handleReportDateChange;
+window.setReportDatePreset = setReportDatePreset;
+window.applyReportDateFilter = applyReportDateFilter;
+window.openPaymentMethodModal = openPaymentMethodModal;
 
 // ----------------------------------------------------------------------------
 // 8. Chatbot & AI Logs

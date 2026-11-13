@@ -627,13 +627,13 @@
         <!-- TAB 7: REPORTS & ANALYTICS (FR10) -->
         <!-- ================================================================= -->
         <section id="tab-reports" class="tab-pane">
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 14px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; flex-wrap: wrap; gap: 14px;">
             <div>
               <h2>Sales & Operations Reports (FR10)</h2>
-              <p style="color: var(--text-muted); font-size: 0.88rem;">Detailed transaction summaries and delivery analytics</p>
+              <p style="color: var(--text-muted); font-size: 0.88rem;">Detailed transaction summaries, date range filtering, and payment method drill-down analytics</p>
             </div>
-            <div style="display: flex; gap: 10px;">
-              <a href="/api/reports/export-csv" class="btn btn-secondary btn-sm" download>
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <a id="btn-export-report-csv" href="/api/reports/export-csv" class="btn btn-secondary btn-sm" download>
                 📥 Export Orders CSV
               </a>
               <button class="btn btn-primary btn-sm" onclick="window.print()">
@@ -642,10 +642,78 @@
             </div>
           </div>
 
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+          <!-- Date Range Filter Bar (Part 1) -->
+          <div class="card" id="reports-date-filter-bar" style="margin-bottom: 20px; padding: 16px 20px; background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle);">
+            <div style="display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
+              <div style="display: flex; align-items: flex-end; flex-wrap: wrap; gap: 14px;">
+                <div>
+                  <label for="report-start-date" style="display: block; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--brand-crema); margin-bottom: 6px;">
+                    📅 Start Date
+                  </label>
+                  <input type="date" id="report-start-date" class="form-control" onchange="handleReportDateChange('start')" style="min-width: 155px; padding: 8px 12px; font-size: 0.88rem; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--text-primary); border-radius: 6px;" />
+                </div>
+                <div>
+                  <label for="report-end-date" style="display: block; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--brand-crema); margin-bottom: 6px;">
+                    📅 End Date
+                  </label>
+                  <input type="date" id="report-end-date" class="form-control" onchange="handleReportDateChange('end')" style="min-width: 155px; padding: 8px 12px; font-size: 0.88rem; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--text-primary); border-radius: 6px;" />
+                </div>
+                <div>
+                  <button type="button" id="btn-apply-report-filter" class="btn btn-primary btn-sm" onclick="applyReportDateFilter()" style="padding: 9px 16px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px;">
+                    <span>🔍 Apply Filter</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Quick-Preset Buttons -->
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <span style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Quick Presets:</span>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                  <button type="button" id="btn-preset-today" class="btn btn-secondary btn-sm report-preset-btn" data-preset="today" onclick="setReportDatePreset('today')" style="font-size: 0.8rem; padding: 6px 12px;">Today</button>
+                  <button type="button" id="btn-preset-last7" class="btn btn-secondary btn-sm report-preset-btn" data-preset="last7" onclick="setReportDatePreset('last7')" style="font-size: 0.8rem; padding: 6px 12px;">Last 7 Days</button>
+                  <button type="button" id="btn-preset-month" class="btn btn-secondary btn-sm report-preset-btn" data-preset="month" onclick="setReportDatePreset('month')" style="font-size: 0.8rem; padding: 6px 12px;">This Month</button>
+                  <button type="button" id="btn-preset-all" class="btn btn-secondary btn-sm report-preset-btn active" data-preset="all" onclick="setReportDatePreset('all')" style="font-size: 0.8rem; padding: 6px 12px; border-color: var(--brand-primary); color: var(--brand-crema);">All Time / Reset Filter</button>
+                </div>
+              </div>
+            </div>
+
+            <div style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border-subtle); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 0.82rem;">
+              <div id="report-active-range-badge" style="color: var(--brand-gold); font-weight: 600;">
+                📊 Active Range: All Time
+              </div>
+              <div style="color: var(--text-muted); font-size: 0.78rem;">
+                💡 Tip: Click any row in <strong>Revenue by Payment Method</strong> to inspect individual transactions.
+              </div>
+            </div>
+          </div>
+
+          <!-- Dynamic Summary KPIs for Selected Date Range -->
+          <div id="report-summary-kpis" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 22px;">
+            <div class="card" style="padding: 16px; border-left: 3px solid var(--brand-gold);">
+              <div style="font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Filtered Gross Sales</div>
+              <div id="report-kpi-gross-sales" style="font-size: 1.45rem; font-weight: 800; color: var(--brand-gold); margin-top: 4px;">₱0.00</div>
+            </div>
+            <div class="card" style="padding: 16px; border-left: 3px solid var(--brand-primary);">
+              <div style="font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Filtered Orders</div>
+              <div id="report-kpi-total-orders" style="font-size: 1.45rem; font-weight: 800; color: var(--text-primary); margin-top: 4px;">0</div>
+            </div>
+            <div class="card" style="padding: 16px; border-left: 3px solid #10b981;">
+              <div style="font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Average Order Value</div>
+              <div id="report-kpi-avg-order" style="font-size: 1.45rem; font-weight: 800; color: #10b981; margin-top: 4px;">₱0.00</div>
+            </div>
+            <div class="card" style="padding: 16px; border-left: 3px solid #3b82f6;">
+              <div style="font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">Delivery Fee Revenue</div>
+              <div id="report-kpi-delivery-sales" style="font-size: 1.45rem; font-weight: 800; color: #93c5fd; margin-top: 4px;">₱0.00</div>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 24px;">
             <!-- Payment Method Revenue -->
             <div class="card">
-              <h3 style="font-size: 1.1rem; margin-bottom: 16px;">Revenue by Payment Method</h3>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+                <h3 style="font-size: 1.1rem; margin: 0;">Revenue by Payment Method</h3>
+                <span style="font-size: 0.76rem; color: var(--brand-primary); font-weight: 600;">Click a row to drill down →</span>
+              </div>
               <div class="table-container" style="margin-top: 0;">
                 <table class="data-table">
                   <thead>
@@ -654,6 +722,7 @@
                       <th>Transactions</th>
                       <th>Total Revenue</th>
                       <th>Mismatches</th>
+                      <th style="text-align: right;">Action</th>
                     </tr>
                   </thead>
                   <tbody id="report-payments-tbody"></tbody>
@@ -1266,6 +1335,56 @@
         <a id="lightbox-download-link" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="font-size: 0.8rem; padding: 4px 12px; text-decoration: none; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px;">
           <span>↗️ Open in New Tab</span>
         </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1.4 Payment Method Transactions Drill-Down Modal (Part 2) -->
+  <div id="modal-payment-method-transactions" class="modal-overlay" onclick="if(event.target === this) closeModal('modal-payment-method-transactions')">
+    <div class="modal-content" style="max-width: 780px; width: 95%;" onclick="event.stopPropagation()">
+      <div class="modal-header" style="align-items: flex-start;">
+        <div>
+          <h3 id="payment-drilldown-title" style="margin: 0; color: var(--brand-crema); display: flex; align-items: center; gap: 8px;">
+            <span>💳 Payment Method — Transaction Breakdown</span>
+          </h3>
+          <div id="payment-drilldown-date-label" style="font-size: 0.82rem; color: var(--brand-gold); margin-top: 4px; font-weight: 600;">
+            Date Range: All Time
+          </div>
+        </div>
+        <button class="modal-close" onclick="closeModal('modal-payment-method-transactions')" title="Close (X)">&times;</button>
+      </div>
+
+      <div class="table-container" style="max-height: 58vh; overflow-y: auto; margin-top: 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);">
+        <table class="data-table" style="margin: 0;">
+          <thead style="position: sticky; top: 0; background: var(--bg-surface-elevated); z-index: 2;">
+            <tr>
+              <th>Order Number</th>
+              <th>Customer Name</th>
+              <th>Date &amp; Time</th>
+              <th>Reference No.</th>
+              <th style="text-align: right;">Amount Paid</th>
+            </tr>
+          </thead>
+          <tbody id="payment-drilldown-tbody">
+            <!-- Injected via JS -->
+          </tbody>
+        </table>
+      </div>
+
+      <div style="margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+        <div style="display: flex; align-items: center; gap: 20px; flex-wrap: wrap;">
+          <div style="font-size: 0.9rem; color: var(--text-secondary);">
+            Total Transactions: <strong id="payment-drilldown-total-count" style="color: var(--text-primary); font-size: 1rem;">0</strong>
+          </div>
+          <div style="font-size: 0.95rem; color: var(--text-secondary);">
+            Total Amount Paid: <strong id="payment-drilldown-total-amount" style="color: var(--brand-gold); font-size: 1.15rem; font-weight: 800;">₱0.00</strong>
+          </div>
+        </div>
+        <div>
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-payment-method-transactions')" style="padding: 8px 20px; font-weight: 600;">
+            Close
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -1891,8 +2010,8 @@
   </dialog>
 
   <!-- Scripts -->
-  <script src="js/api.js?v=20261114_01"></script>
-  <script src="js/dashboard.js?v=20261114_01"></script>
+  <script src="js/api.js?v=20261114_02"></script>
+  <script src="js/dashboard.js?v=20261114_02"></script>
   <script src="js/orientation-lock.js?v=20261109_04"></script>
 </body>
 </html>
