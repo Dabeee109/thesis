@@ -69,29 +69,213 @@
     .rider-header {
       background: var(--bg-surface);
       border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-lg);
-      padding: 16px 20px;
+      border-radius: var(--radius-md);
+      padding: 10px 14px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 16px;
+      gap: 10px;
+      margin-bottom: 8px;
       box-shadow: var(--shadow-sm);
     }
     .rider-profile-bar {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
+      min-width: 0;
+    }
+    .rider-avatar-circle {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 30% 30%, rgba(212, 163, 115, 0.28), rgba(212, 163, 115, 0.08));
+      border: 1px solid rgba(212, 163, 115, 0.45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.05rem;
+      flex-shrink: 0;
     }
     .rider-badge {
       display: inline-flex;
       align-items: center;
+      gap: 5px;
+      font-size: 0.72rem;
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: rgba(46, 204, 113, 0.14);
+      border: 1px solid rgba(46, 204, 113, 0.32);
+      color: #4ade80;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .rider-status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #4ade80;
+      box-shadow: 0 0 6px #4ade80;
+      display: inline-block;
+    }
+    .btn-logout-icon {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: all 0.18s ease;
+      padding: 0;
+      flex-shrink: 0;
+    }
+    .btn-logout-icon:hover {
+      background: rgba(239, 68, 68, 0.22);
+      border-color: rgba(239, 68, 68, 0.55);
+    }
+    .nano-status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 5px 10px;
+      margin-bottom: 10px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-subtle);
+      border-radius: 999px;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+    }
+    .nano-status-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: nowrap;
+      overflow: hidden;
+    }
+    .audio-hint-pill {
+      display: inline-flex;
+      align-items: center;
       gap: 4px;
       font-size: 0.72rem;
-      padding: 2px 8px;
+      color: var(--brand-crema);
+      cursor: pointer;
+      padding: 2px 6px;
       border-radius: 999px;
-      background: rgba(46, 204, 113, 0.15);
-      color: #2ecc71;
-      font-weight: 600;
+      background: transparent;
+      border: none;
+      margin: 0;
+      user-select: none;
+      white-space: nowrap;
+    }
+    .audio-hint-pill:hover {
+      color: var(--brand-primary);
+    }
+    .nano-divider {
+      width: 1px;
+      height: 12px;
+      background: var(--border-subtle);
+      display: inline-block;
+    }
+    .nano-refresh-btn {
+      background: transparent;
+      border: 1px solid var(--border-subtle);
+      color: var(--brand-primary);
+      border-radius: 999px;
+      padding: 2px 9px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.15s ease;
+      flex-shrink: 0;
+    }
+    .nano-refresh-btn:hover {
+      background: rgba(212, 163, 115, 0.14);
+      border-color: var(--brand-primary);
+    }
+    .rider-tabs-bar {
+      display: flex;
+      align-items: stretch;
+      gap: 6px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 5px;
+      margin-bottom: 14px;
+    }
+    .rider-tab-btn {
+      flex: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 9px 10px;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 0.82rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.18s ease;
+      white-space: nowrap;
+    }
+    .rider-tab-btn.compact-tab {
+      flex: 0 0 auto;
+      padding: 9px 12px;
+    }
+    .rider-tab-btn.active {
+      background: linear-gradient(135deg, rgba(212, 163, 115, 0.24), rgba(212, 163, 115, 0.1));
+      color: var(--brand-gold);
+      border-color: rgba(212, 163, 115, 0.55);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+    }
+    .empty-state-canvas {
+      background: radial-gradient(circle at 50% 25%, rgba(212, 163, 115, 0.08) 0%, var(--bg-surface) 70%);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 72px 24px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 320px;
+    }
+    .empty-state-glow-icon {
+      width: 82px;
+      height: 82px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(212, 163, 115, 0.22) 0%, rgba(212, 163, 115, 0.04) 70%);
+      border: 1px solid rgba(212, 163, 115, 0.32);
+      box-shadow: 0 0 28px rgba(212, 163, 115, 0.16);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2.3rem;
+      margin-bottom: 18px;
+    }
+    .empty-state-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--brand-crema);
+      margin: 0 0 8px 0;
+      max-width: 320px;
+      line-height: 1.45;
+    }
+    .empty-state-subtitle {
+      font-size: 0.84rem;
+      color: var(--text-muted);
+      margin: 0;
+      max-width: 300px;
+      line-height: 1.5;
     }
     .trip-card {
       background: var(--bg-surface);
@@ -220,42 +404,52 @@
 <body>
 
   <div class="rider-container">
-    <!-- Strict Role-Based Header (Admin Dashboard references completely removed) -->
+    <!-- 1. Ultra-Compact Top Rider Profile Header -->
     <header class="rider-header">
-      <div class="rider-profile-bar">
-        <div class="brand-icon" style="width: 42px; height: 42px; font-size: 1.3rem;">🛵</div>
-        <div>
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <h2 style="font-size: 1.1rem; margin: 0;" id="rider-name-display">Delivery Rider</h2>
-            <span class="rider-badge" id="rider-status-pill">🟢 Online</span>
-          </div>
-          <span style="font-size: 0.75rem; color: var(--brand-primary); font-weight: 600;" id="rider-vehicle-display">MOTORCYCLE (MC-7890-PH)</span>
+      <div class="rider-profile-bar" onclick="setRiderView('profile')" style="cursor: pointer;" title="View Rider Profile">
+        <div class="rider-avatar-circle">🛵</div>
+        <div style="min-width: 0;">
+          <h2 style="font-size: 0.98rem; font-weight: 800; margin: 0; line-height: 1.2; color: var(--brand-crema); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" id="rider-name-display">Marco Santos</h2>
+          <span style="font-size: 0.72rem; color: var(--brand-primary); font-weight: 600; display: block; margin-top: 2px; opacity: 0.9;" id="rider-vehicle-display">MC-7890-PH</span>
         </div>
       </div>
-      <div>
-        <!-- Logout strictly isolates rider from admin command interfaces -->
-        <button class="btn btn-secondary btn-sm" onclick="logoutRider()" style="color: #ff7b7b; border-color: rgba(239, 68, 68, 0.35);" title="Sign out of Rider Portal">
-          🚪 Logout
+      <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+        <span class="rider-badge" id="rider-status-pill">
+          <span class="rider-status-dot"></span>
+          <span>Online</span>
+        </span>
+        <!-- Compact Logout Icon Button -->
+        <button class="btn-logout-icon" id="btn-logout-rider" onclick="logoutRider()" title="Sign out of Rider Portal" aria-label="Sign out of Rider Portal">
+          🚪
         </button>
       </div>
     </header>
 
-    <!-- Audio / Alert sound unlock badge for mobile browsers -->
-    <div style="display: flex; justify-content: space-between; align-items: center;">
-      <div class="audio-hint-pill" id="audio-unlock-pill" onclick="unlockAudio()" title="Click to test & enable audio chimes">
-        <span>🔔 Alerts Enabled (Audio: Ready)</span>
+    <!-- 2. Consolidated Nano-Status Row -->
+    <div class="nano-status-row">
+      <div class="nano-status-left">
+        <div class="audio-hint-pill" id="audio-unlock-pill" onclick="unlockAudio()" title="Click to test & enable audio chimes">
+          <span>🔔 Alerts Active</span>
+        </div>
+        <span class="nano-divider"></span>
+        <span style="font-size: 0.72rem; color: var(--text-secondary); white-space: nowrap;" id="live-indicator">⚡ Live Sync</span>
       </div>
-      <span style="font-size: 0.75rem; color: var(--text-muted);" id="live-indicator">⚡ Live SSE Connected</span>
+      <button type="button" class="nano-refresh-btn" id="btn-refresh-rider" onclick="loadRiderDeliveries()" title="Refresh Deliveries">
+        <span>🔄</span>
+      </button>
     </div>
 
-    <!-- Navigation Tabs: Dedicated Rider Views Only -->
-    <nav style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
-      <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-        <button id="tab-active" class="btn btn-primary btn-sm" onclick="setRiderView('active')">🛵 Active Queue</button>
-        <button id="tab-history" class="btn btn-secondary btn-sm" onclick="setRiderView('history')">📜 Delivered History</button>
-        <button id="tab-profile" class="btn btn-secondary btn-sm" onclick="setRiderView('profile')">👤 My Profile</button>
-      </div>
-      <button class="btn btn-secondary btn-sm" onclick="loadRiderDeliveries()">🔄 Refresh</button>
+    <!-- 3. Top Horizontal Tabs for Active Views -->
+    <nav class="rider-tabs-bar" role="tablist" aria-label="Rider Portal Views">
+      <button id="tab-active" type="button" class="rider-tab-btn active" role="tab" aria-selected="true" onclick="setRiderView('active')">
+        <span>🚴 Active Queue</span>
+      </button>
+      <button id="tab-history" type="button" class="rider-tab-btn" role="tab" aria-selected="false" onclick="setRiderView('history')">
+        <span>📜 History</span>
+      </button>
+      <button id="tab-profile" type="button" class="rider-tab-btn compact-tab" role="tab" aria-selected="false" onclick="setRiderView('profile')" title="My Profile">
+        <span>👤 Profile</span>
+      </button>
     </nav>
 
     <!-- Main Dynamic Feed Container -->
@@ -293,8 +487,7 @@
       playRiderChime('preparing');
       const pill = document.getElementById('audio-unlock-pill');
       if (pill) {
-        pill.innerHTML = '<span>🔔 Alerts Sound: Active & Verified</span>';
-        pill.style.borderColor = 'var(--status-success)';
+        pill.innerHTML = '<span>🔔 Alerts Active</span>';
         pill.style.color = 'var(--status-success)';
       }
       // Request browser notification permission if available
@@ -382,12 +575,10 @@
     function initRiderProfile() {
       currentUser = API.getUser();
       if (currentUser) {
-        document.getElementById('rider-name-display').innerText = currentUser.name || currentUser.full_name || 'Delivery Rider';
-        if (currentUser.vehicle_plate_no || currentUser.vehiclePlate) {
-          const vType = (currentUser.vehicle_type || 'MOTORCYCLE').toUpperCase();
-          const plate = currentUser.vehicle_plate_no || currentUser.vehiclePlate || 'MC-7890-PH';
-          document.getElementById('rider-vehicle-display').innerText = `${vType} (${plate})`;
-        }
+        const rawName = (currentUser.name || currentUser.full_name || 'Marco Santos').replace(/\s*\([^)]*\)\s*$/, '').trim();
+        document.getElementById('rider-name-display').innerText = rawName || 'Marco Santos';
+        const plate = currentUser.vehicle_plate_no || currentUser.vehiclePlate || 'MC-7890-PH';
+        document.getElementById('rider-vehicle-display').innerText = plate;
       }
     }
 
@@ -430,9 +621,22 @@
     // -------------------------------------------------------------
     function setRiderView(view) {
       currentRiderView = view;
-      document.getElementById('tab-active').className = view === 'active' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm';
-      document.getElementById('tab-history').className = view === 'history' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm';
-      document.getElementById('tab-profile').className = view === 'profile' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm';
+      const tabActive = document.getElementById('tab-active');
+      const tabHistory = document.getElementById('tab-history');
+      const tabProfile = document.getElementById('tab-profile');
+
+      if (tabActive) {
+        tabActive.className = view === 'active' ? 'rider-tab-btn active' : 'rider-tab-btn';
+        tabActive.setAttribute('aria-selected', view === 'active' ? 'true' : 'false');
+      }
+      if (tabHistory) {
+        tabHistory.className = view === 'history' ? 'rider-tab-btn active' : 'rider-tab-btn';
+        tabHistory.setAttribute('aria-selected', view === 'history' ? 'true' : 'false');
+      }
+      if (tabProfile) {
+        tabProfile.className = view === 'profile' ? 'rider-tab-btn compact-tab active' : 'rider-tab-btn compact-tab';
+        tabProfile.setAttribute('aria-selected', view === 'profile' ? 'true' : 'false');
+      }
 
       if (view === 'profile') {
         renderProfileView();
@@ -456,10 +660,23 @@
         const trips = res.orders || res.history || res.deliveries || [];
 
         if (trips.length === 0) {
-          const emptyMsg = currentRiderView === 'active' 
-            ? '🛵 No active orders in your dispatch queue right now.' 
-            : '📜 No completed delivery history found.';
-          container.innerHTML = `<div class="card" style="text-align: center; color: var(--text-muted); padding: 32px; font-size: 0.95rem;">${emptyMsg}</div>`;
+          if (currentRiderView === 'active') {
+            container.innerHTML = `
+              <div class="empty-state-canvas py-16 py-20">
+                <div class="empty-state-glow-icon">🛵</div>
+                <h3 class="empty-state-title">Walang aktibong delivery sa iyong queue ngayon.</h3>
+                <p class="empty-state-subtitle">Awtomatikong lalabas dito kapag may bagong order na na-assign sa iyo.</p>
+              </div>
+            `;
+          } else {
+            container.innerHTML = `
+              <div class="empty-state-canvas py-16 py-20">
+                <div class="empty-state-glow-icon">📜</div>
+                <h3 class="empty-state-title">Wala pang natapos na delivery history.</h3>
+                <p class="empty-state-subtitle">Makikita rito ang lahat ng iyong nakumpletong deliveries.</p>
+              </div>
+            `;
+          }
           return;
         }
 
