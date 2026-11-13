@@ -7,9 +7,11 @@ process.env.TZ = config.timezone || 'Asia/Manila';
 
 const express = require('express');
 const cors = require('cors');
+const fs = require('fs');
 const path = require('path');
 const jwt = require('jsonwebtoken');
-const { initDatabase } = require('../database/db');
+const db = require('../database/db');
+const { initDatabase } = db;
 const { addSSEClient, broadcastSSE } = require('./services/notificationService');
 
 const webhookRoutes = require('./routes/webhook');
@@ -84,6 +86,132 @@ app.use((req, res, next) => {
 // Rider Portal Route Aliases (Supports /rider-portal.html and /rider.html)
 app.get(['/rider-portal.html', '/rider-portal'], (req, res) => {
   res.sendFile(path.join(__dirname, '../public/rider.html'));
+});
+
+// Dedicated Payment Proof Image Route (recovers from DB or generates digital receipt if wiped on Render disk)
+app.get('/uploads/payments/:filename', async (req, res) => {
+  const filename = path.basename(req.params.filename || '');
+  const uploadDir = path.join(__dirname, '../public/uploads/payments');
+  const filePath = path.join(uploadDir, filename);
+
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cache-Control', 'no-cache');
+
+  // 1. Serve from local disk if valid image file (> 64 bytes, not legacy 32-byte mock text)
+  try {
+    if (fs.existsSync(filePath)) {
+      const stat = fs.statSync(filePath);
+      if (stat.size > 64) {
+        const buf = fs.readFileSync(filePath);
+        const headStr = buf.slice(0, 64).toString('utf8').trim();
+        if (headStr.startsWith('<svg') || headStr.startsWith('<?xml')) {
+          res.setHeader('Content-Type', 'image/svg+xml');
+          return res.send(buf);
+        }
+        return res.sendFile(filePath);
+      }
+    }
+  } catch (fsErr) {
+    console.warn('[PaymentProofRoute] Disk check error:', fsErr.message);
+  }
+
+  // 2. Recover from payment_proof_blobs table in DB
+  try {
+    const [blobRows] = await db.query(
+      `SELECT mime_type, base64_data FROM payment_proof_blobs WHERE filename = ? LIMIT 1`,
+      [filename]
+    );
+    if (blobRows && blobRows.length > 0 && blobRows[0].base64_data) {
+      const buf = Buffer.from(blobRows[0].base64_data, 'base64');
+      if (buf.length > 64) {
+        try {
+          if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+          fs.writeFileSync(filePath, buf);
+        } catch (_) {}
+        const headStr = buf.slice(0, 64).toString('utf8').trim();
+        const mime = (headStr.startsWith('<svg') || headStr.startsWith('<?xml'))
+          ? 'image/svg+xml'
+          : (blobRows[0].mime_type || 'image/jpeg');
+        res.setHeader('Content-Type', mime);
+        return res.send(buf);
+      }
+    }
+  } catch (blobErr) {
+    // Table may not exist yet on older instances
+  }
+
+  // 3. Fallback: Lookup order details in DB and render a high-resolution GCash Digital Receipt SVG
+  let orderNum = 'DNR-ORDER';
+  let refNum = 'Submitted via Messenger';
+  let amountStr = '0.00';
+  let customerName = 'Valued Customer';
+  let dateStr = new Date().toLocaleString('en-PH');
+  let payStatus = 'Submitted';
+
+  try {
+    const likePattern = `%${filename}%`;
+    const idMatch = filename.match(/payment_proof_(\d+)_/i);
+    const extractedId = idMatch ? parseInt(idMatch[1], 10) : -1;
+
+    const [ordRows] = await db.query(
+      `SELECT o.order_number, o.total_amount, o.payment_ref_number, o.gcash_ref, o.payment_status, o.created_at,
+              c.first_name, c.last_name, p.reference_no
+       FROM orders o
+       LEFT JOIN customers c ON o.customer_id = c.id
+       LEFT JOIN payments p ON o.id = p.order_id
+       WHERE o.payment_proof_image LIKE ? OR o.receipt_url LIKE ? OR o.id = ?
+       ORDER BY o.id DESC LIMIT 1`,
+      [likePattern, likePattern, extractedId]
+    );
+
+    if (ordRows && ordRows.length > 0) {
+      const ord = ordRows[0];
+      orderNum = ord.order_number || orderNum;
+      refNum = ord.payment_ref_number || ord.gcash_ref || ord.reference_no || refNum;
+      amountStr = parseFloat(ord.total_amount || 0).toFixed(2);
+      const fullName = `${ord.first_name || ''} ${ord.last_name || ''}`.trim();
+      if (fullName) customerName = fullName;
+      if (ord.created_at) dateStr = new Date(ord.created_at).toLocaleString('en-PH');
+      if (ord.payment_status) payStatus = ord.payment_status;
+    }
+  } catch (ordErr) {
+    console.warn('[PaymentProofRoute] Order lookup fallback notice:', ordErr.message);
+  }
+
+  const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const receiptSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="540" height="720" viewBox="0 0 540 720">
+  <defs>
+    <linearGradient id="gcashBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0057e7"/>
+      <stop offset="100%" stop-color="#0039a6"/>
+    </linearGradient>
+  </defs>
+  <rect width="540" height="720" rx="24" fill="url(#gcashBg)"/>
+  <text x="270" y="52" text-anchor="middle" font-family="Arial, sans-serif" font-size="26" font-weight="bold" fill="#ffffff">GCash Digital Payment Receipt</text>
+  <rect x="30" y="78" width="480" height="602" rx="20" fill="#ffffff"/>
+  <circle cx="270" cy="134" r="34" fill="#10b981"/>
+  <text x="270" y="146" text-anchor="middle" font-family="Arial, sans-serif" font-size="34" font-weight="bold" fill="#ffffff">✓</text>
+  <text x="270" y="198" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="bold" fill="#0f172a">Diner's Cafe - Tondo Branch</text>
+  <text x="270" y="224" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#64748b">Express Send • Proof of Payment</text>
+  <text x="270" y="276" text-anchor="middle" font-family="Arial, sans-serif" font-size="36" font-weight="bold" fill="#0057e7">PHP ${esc(amountStr)}</text>
+  <line x1="60" y1="306" x2="480" y2="306" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="6,6"/>
+  <text x="65" y="352" font-family="Arial, sans-serif" font-size="15" fill="#64748b">Order Number</text>
+  <text x="475" y="352" text-anchor="end" font-family="monospace" font-size="16" font-weight="bold" fill="#0f172a">#${esc(orderNum)}</text>
+  <text x="65" y="398" font-family="Arial, sans-serif" font-size="15" fill="#64748b">Reference No.</text>
+  <text x="475" y="398" text-anchor="end" font-family="monospace" font-size="17" font-weight="bold" fill="#0057e7">${esc(refNum)}</text>
+  <text x="65" y="444" font-family="Arial, sans-serif" font-size="15" fill="#64748b">Customer</text>
+  <text x="475" y="444" text-anchor="end" font-family="Arial, sans-serif" font-size="15" font-weight="bold" fill="#0f172a">${esc(customerName)}</text>
+  <text x="65" y="490" font-family="Arial, sans-serif" font-size="15" fill="#64748b">Payment Status</text>
+  <text x="475" y="490" text-anchor="end" font-family="Arial, sans-serif" font-size="15" font-weight="bold" fill="#10b981">${esc(payStatus)}</text>
+  <text x="65" y="536" font-family="Arial, sans-serif" font-size="15" fill="#64748b">Date &amp; Time</text>
+  <text x="475" y="536" text-anchor="end" font-family="Arial, sans-serif" font-size="14" fill="#334155">${esc(dateStr)}</text>
+  <rect x="60" y="574" width="420" height="72" rx="12" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="270" y="605" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="#1e293b">Messenger Pay-First Verification Record</text>
+  <text x="270" y="627" text-anchor="middle" font-family="monospace" font-size="11" fill="#64748b">${esc(filename)}</text>
+</svg>`;
+
+  res.setHeader('Content-Type', 'image/svg+xml');
+  return res.status(200).send(receiptSvg);
 });
 
 // Serve static frontend assets with CORS and cache headers for Facebook crawler

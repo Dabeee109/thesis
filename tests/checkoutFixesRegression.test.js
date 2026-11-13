@@ -62,3 +62,4 @@ test('Checkout & Messenger State Machine Regression Suite', async (t) => {
     assert.equal(match[1], '4362754782834');
   });
 });
+

@@ -131,7 +131,7 @@ CREATE TABLE `orders` (
   `customer_phone` VARCHAR(50) DEFAULT NULL,
   `payment_proof_image` VARCHAR(500) DEFAULT NULL,
   `payment_ref_number` VARCHAR(100) DEFAULT NULL,
-  `payment_status` ENUM('Pending', 'Pending Verification', 'Paid', 'Failed') NOT NULL DEFAULT 'Pending',
+  `payment_status` VARCHAR(50) NOT NULL DEFAULT 'Pending',
   `distance_km` DECIMAL(4,2) DEFAULT 1.00,
   `landmark` VARCHAR(255) DEFAULT NULL,
   `dining_mode` VARCHAR(50) DEFAULT 'Delivery',

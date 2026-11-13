@@ -717,8 +717,8 @@ async function getOrdersList(filters = {}) {
       o.created_at,
       p.payment_method,
       COALESCE(o.payment_status, p.status, 'Pending') AS payment_status,
-      COALESCE(o.payment_ref_number, o.gcash_ref, p.reference_no) AS payment_ref_number,
-      COALESCE(o.payment_proof_image, o.receipt_url) AS payment_proof_image,
+      COALESCE(NULLIF(o.payment_ref_number, ''), NULLIF(o.gcash_ref, ''), NULLIF(p.reference_no, '')) AS payment_ref_number,
+      COALESCE(NULLIF(o.payment_proof_image, ''), NULLIF(o.receipt_url, ''), NULLIF(p.receipt_url, '')) AS payment_proof_image,
       p.is_mismatch AS payment_mismatch,
       p.amount_paid AS payment_amount_paid,
       p.reference_no AS payment_reference_no,
@@ -795,8 +795,8 @@ async function getOrderDetails(orderIdentifier) {
       COALESCE(o.customer_phone, c.phone_number) AS customer_phone,
       p.payment_method,
       COALESCE(o.payment_status, p.status, 'Pending') AS payment_status,
-      COALESCE(o.payment_ref_number, o.gcash_ref, p.reference_no) AS payment_ref_number,
-      COALESCE(o.payment_proof_image, o.receipt_url) AS payment_proof_image,
+      COALESCE(NULLIF(o.payment_ref_number, ''), NULLIF(o.gcash_ref, ''), NULLIF(p.reference_no, '')) AS payment_ref_number,
+      COALESCE(NULLIF(o.payment_proof_image, ''), NULLIF(o.receipt_url, ''), NULLIF(p.receipt_url, '')) AS payment_proof_image,
       p.is_mismatch AS payment_mismatch,
       p.amount_paid,
       p.reference_no,
@@ -1266,13 +1266,40 @@ async function rejectOrderPayment(orderId, reason = '', actor = null) {
     throw new Error('Rejection reason is required.');
   }
 
-  // 1. Update orders table in TiDB Cloud / SQLite
-  await db.query(
-    `UPDATE orders 
-     SET payment_status = 'REJECTED', status = 'cancelled', cancellation_reason = ?, updated_at = CURRENT_TIMESTAMP 
-     WHERE id = ?`,
-    [trimmedReason, orderId]
-  );
+      // 1. Update orders table in TiDB Cloud / SQLite (with automatic ENUM fallback protection)
+  try {
+    await db.query(
+      `UPDATE orders 
+       SET payment_status = 'REJECTED', status = 'cancelled', cancellation_reason = ?, updated_at = CURRENT_TIMESTAMP 
+       WHERE id = ?`,
+      [trimmedReason, orderId]
+    );
+  } catch (enumErr) {
+    try {
+      await db.query(`ALTER TABLE orders MODIFY COLUMN payment_status VARCHAR(50) NOT NULL DEFAULT 'Pending'`);
+      await db.query(
+        `UPDATE orders 
+         SET payment_status = 'REJECTED', status = 'cancelled', cancellation_reason = ?, updated_at = CURRENT_TIMESTAMP 
+         WHERE id = ?`,
+        [trimmedReason, orderId]
+      );
+    } catch (fallbackErr) {
+      await db.query(
+        `UPDATE orders 
+         SET payment_status = 'Failed', status = 'cancelled', cancellation_reason = ?, updated_at = CURRENT_TIMESTAMP 
+         WHERE id = ?`,
+        [trimmedReason, orderId]
+      );
+    }
+  }
+
+  // Cancel any associated delivery record
+  try {
+    await db.query(
+      `UPDATE deliveries SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE order_id = ?`,
+      [orderId]
+    );
+  } catch (delErr) {}
 
   // In case TiDB Cloud has an order_status column or legacy schema
   try {

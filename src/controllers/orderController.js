@@ -365,18 +365,19 @@ async function verifyPayment(req, res) {
 }
 
 /**
- * Mark payment invalid / prompt re-upload
+ * Mark payment invalid / reject payment proof
  * POST /api/orders/:id/invalid-payment
  */
 async function invalidPayment(req, res) {
   try {
     const { id } = req.params;
-    const { reason } = req.body;
+    const { reason, notes } = req.body;
+    const finalReason = (reason || notes || 'Invalid payment proof').trim();
     const actor = req.user || { id: null, username: 'Staff' };
-    const updated = await orderService.markOrderPaymentInvalid(parseInt(id, 10), reason, actor);
+    const updated = await orderService.rejectOrderPayment(parseInt(id, 10), finalReason, actor);
     return res.json({
       success: true,
-      message: `Payment proof for Order #${updated.order_number} marked as invalid. Customer has been notified and prompted to re-upload.`,
+      message: `Payment proof for Order #${updated.order_number} has been rejected. Order cancelled and customer notified.`,
       order: updated
     });
   } catch (err) {

@@ -383,6 +383,14 @@ function initSqliteFallback() {
         details TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE TABLE IF NOT EXISTS payment_proof_blobs (
+        filename TEXT PRIMARY KEY,
+        order_id TEXT,
+        mime_type TEXT DEFAULT 'image/jpeg',
+        base64_data TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
     `);
 
     // Seed default system_settings if empty
@@ -1134,6 +1142,21 @@ async function initDatabase() {
       await conn.query(`
         ALTER TABLE orders
         MODIFY COLUMN status ENUM('pending', 'preparing', 'dispatched', 'delivered', 'cancelled', 'voided', 'PAID', 'FOR_CONFIRMATION', 'PENDING_ADMIN_QUOTE', 'cancellation_requested', 'CANCELLATION_REQUESTED') NOT NULL DEFAULT 'pending';
+      `).catch(() => {});
+
+      await conn.query(`
+        ALTER TABLE orders
+        MODIFY COLUMN payment_status VARCHAR(50) NOT NULL DEFAULT 'Pending';
+      `).catch(() => {});
+
+      await conn.query(`
+        CREATE TABLE IF NOT EXISTS payment_proof_blobs (
+          filename VARCHAR(255) PRIMARY KEY,
+          order_id VARCHAR(64) DEFAULT NULL,
+          mime_type VARCHAR(64) DEFAULT 'image/jpeg',
+          base64_data LONGTEXT NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
       `).catch(() => {});
 
       // 3. Seed default admin & staff accounts if table is empty

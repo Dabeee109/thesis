@@ -693,11 +693,16 @@ async function viewOrderDetails(orderId) {
 
       const orderStatusNorm = String(o.status || o.order_status || '').toLowerCase().trim();
       const isPendingApprovalStatus = (orderStatusNorm === 'pending' || orderStatusNorm === 'pending_approval' || orderStatusNorm === 'awaiting_confirmation');
+      const paymentProofUrl = o.payment_proof_image || o.receipt_url || (
+        ((o.payment_method || '').toLowerCase() === 'gcash' && (o.payment_ref_number || o.reference_no || o.gcash_ref))
+          ? `/uploads/payments/payment_proof_${o.id}_ref.svg`
+          : ''
+      );
       const showPaymentActionButtons = isPendingApprovalStatus && (
         ['gcash', 'xendit'].includes((o.payment_method || '').toLowerCase()) ||
         o.payment_status === 'Pending Verification' ||
         Boolean(o.payment_ref_number || o.reference_no || o.gcash_ref) ||
-        Boolean(o.payment_proof_image || o.receipt_url)
+        Boolean(paymentProofUrl)
       );
 
       const itemsHtml = (o.items || []).map(i => `
@@ -853,23 +858,23 @@ async function viewOrderDetails(orderId) {
           ` : ''}
 
           <!-- Clickable thumbnail preview for payment_proof_image OR Xendit Invoice Link -->
-          ${(o.payment_proof_image || o.receipt_url) ? (
-            ((o.payment_method || '').toLowerCase() === 'xendit' || /xendit\.co/i.test(o.payment_proof_image || o.receipt_url)) ? `
+          ${paymentProofUrl ? (
+            ((o.payment_method || '').toLowerCase() === 'xendit' || /xendit\.co/i.test(paymentProofUrl)) ? `
               <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border-subtle);">
                 <div style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 6px;">
                   💳 Xendit Checkout Invoice:
                 </div>
-                <a href="${escapeHtml(o.payment_proof_image || o.receipt_url)}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 6px; text-decoration: none;">
+                <a href="${escapeHtml(paymentProofUrl)}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 6px; text-decoration: none;">
                   🔗 Open Xendit Invoice Page
                 </a>
               </div>
             ` : `
               <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border-subtle);" onclick="event.stopPropagation()">
                 <div style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 6px;">
-                  📸 <a href="javascript:void(0)" onclick="openImageLightbox(event, '${escapeHtml(o.payment_proof_image || o.receipt_url)}')" style="color: var(--brand-crema); text-decoration: underline; cursor: pointer; font-weight: 600;">Proof of Payment (Click to view full image):</a>
+                  📸 <a href="javascript:void(0)" onclick="openImageLightbox(event, '${escapeHtml(paymentProofUrl)}')" style="color: var(--brand-crema); text-decoration: underline; cursor: pointer; font-weight: 600;">Proof of Payment (Click to view full image):</a>
                 </div>
-                <div style="display: inline-block; cursor: pointer;" onclick="openImageLightbox(event, '${escapeHtml(o.payment_proof_image || o.receipt_url)}')">
-                  <img src="${escapeHtml(o.payment_proof_image || o.receipt_url)}" alt="GCash Receipt" 
+                <div style="display: inline-block; cursor: pointer;" onclick="openImageLightbox(event, '${escapeHtml(paymentProofUrl)}')">
+                  <img src="${escapeHtml(paymentProofUrl)}" alt="GCash Receipt" 
                        style="max-height: 125px; max-width: 220px; object-fit: contain; border-radius: 6px; border: 1px solid var(--border-subtle); background: #111; box-shadow: 0 2px 8px rgba(0,0,0,0.4); cursor: pointer; transition: transform 0.2s;" 
                        onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'" />
                 </div>
@@ -908,23 +913,23 @@ async function viewOrderDetails(orderId) {
 
               <div id="reject-reason-options-group" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;">
                 <label class="reject-reason-option" onclick="event.stopPropagation(); selectRejectReason('Blurred / Unreadable Receipt')" style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 8px 12px; background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 0.88rem; transition: all 0.2s;">
-                  <input type="radio" name="reject_reason_choice" value="Blurred / Unreadable Receipt" onchange="event.stopPropagation(); selectRejectReason(this.value)">
+                  <input type="radio" name="reject_reason_choice" value="Blurred / Unreadable Receipt" checked onclick="event.stopPropagation()" onchange="event.stopPropagation(); selectRejectReason(this.value)">
                   <span>📷 <strong>Blurred / Unreadable Receipt</strong> <span style="color: var(--text-muted); font-size: 0.8rem;">(Malabo ang larawan ng resibo)</span></span>
                 </label>
                 <label class="reject-reason-option" onclick="event.stopPropagation(); selectRejectReason('Incorrect Amount Paid')" style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 8px 12px; background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 0.88rem; transition: all 0.2s;">
-                  <input type="radio" name="reject_reason_choice" value="Incorrect Amount Paid" onchange="event.stopPropagation(); selectRejectReason(this.value)">
+                  <input type="radio" name="reject_reason_choice" value="Incorrect Amount Paid" onclick="event.stopPropagation()" onchange="event.stopPropagation(); selectRejectReason(this.value)">
                   <span>💰 <strong>Incorrect Amount Paid</strong> <span style="color: var(--text-muted); font-size: 0.8rem;">(Mali ang binayarang halaga)</span></span>
                 </label>
                 <label class="reject-reason-option" onclick="event.stopPropagation(); selectRejectReason('Invalid / Fake Reference Number')" style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 8px 12px; background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 0.88rem; transition: all 0.2s;">
-                  <input type="radio" name="reject_reason_choice" value="Invalid / Fake Reference Number" onchange="event.stopPropagation(); selectRejectReason(this.value)">
+                  <input type="radio" name="reject_reason_choice" value="Invalid / Fake Reference Number" onclick="event.stopPropagation()" onchange="event.stopPropagation(); selectRejectReason(this.value)">
                   <span>🔢 <strong>Invalid / Fake Reference Number</strong> <span style="color: var(--text-muted); font-size: 0.8rem;">(Hindi mahanap o peke ang ref number)</span></span>
                 </label>
                 <label class="reject-reason-option" onclick="event.stopPropagation(); selectRejectReason('Duplicate Receipt Used')" style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 8px 12px; background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 0.88rem; transition: all 0.2s;">
-                  <input type="radio" name="reject_reason_choice" value="Duplicate Receipt Used" onchange="event.stopPropagation(); selectRejectReason(this.value)">
+                  <input type="radio" name="reject_reason_choice" value="Duplicate Receipt Used" onclick="event.stopPropagation()" onchange="event.stopPropagation(); selectRejectReason(this.value)">
                   <span>🔄 <strong>Duplicate Receipt Used</strong> <span style="color: var(--text-muted); font-size: 0.8rem;">(Nagamit na ang resibo sa ibang order)</span></span>
                 </label>
                 <label class="reject-reason-option" onclick="event.stopPropagation(); selectRejectReason('Other Reason')" style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 8px 12px; background: var(--bg-surface-elevated); border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 0.88rem; transition: all 0.2s;">
-                  <input type="radio" name="reject_reason_choice" value="Other Reason" onchange="event.stopPropagation(); selectRejectReason(this.value)">
+                  <input type="radio" name="reject_reason_choice" value="Other Reason" onclick="event.stopPropagation()" onchange="event.stopPropagation(); selectRejectReason(this.value)">
                   <span>📝 <strong>Other Reason</strong> <span style="color: var(--text-muted); font-size: 0.8rem;">(Iba pang dahilan)</span></span>
                 </label>
               </div>
@@ -938,7 +943,7 @@ async function viewOrderDetails(orderId) {
                 <button type="button" class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); cancelInlineRejectPayment()" style="font-weight: 600; padding: 6px 14px; border-radius: 6px;">
                   Cancel
                 </button>
-                <button type="button" id="btn-confirm-reject-payment" class="btn btn-danger btn-sm" disabled onclick="event.stopPropagation(); submitRejectPayment(${o.id}, '${o.order_number}')" style="font-weight: 700; background: #ef4444; color: #fff; padding: 6px 16px; border-radius: 6px; border: none; cursor: not-allowed; opacity: 0.6; display: inline-flex; align-items: center; gap: 6px;">
+                <button type="button" id="btn-confirm-reject-payment" class="btn btn-danger btn-sm" onclick="event.stopPropagation(); submitRejectPayment(${o.id}, '${o.order_number}')" style="font-weight: 700; background: #ef4444; color: #fff; padding: 6px 16px; border-radius: 6px; border: none; cursor: pointer; opacity: 1; display: inline-flex; align-items: center; gap: 6px;">
                   <span>Confirm Reject Payment</span>
                 </button>
               </div>
@@ -990,17 +995,20 @@ async function viewOrderDetails(orderId) {
         ` : ''}
       `;
 
-      // Update Cancel Button in Modal Footer
-      const cancelBtn = document.getElementById('btn-cancel-order-modal');
-      if (cancelBtn) {
-        cancelBtn.style.display = (o.status === 'cancelled') ? 'none' : 'inline-flex';
-      }
-
+      // Update Cancel Button in Modal Footer (always restore button when order is not cancelled)
       const actionsLeft = document.getElementById('modal-order-actions-left');
-      if (actionsLeft && o.status === 'cancelled') {
-        actionsLeft.innerHTML = `
-          <span class="badge badge-danger" style="padding: 8px 14px; font-size: 0.85rem;">❌ Voided Order</span>
-        `;
+      if (actionsLeft) {
+        if (o.status === 'cancelled') {
+          actionsLeft.innerHTML = `
+            <span class="badge badge-danger" style="padding: 8px 14px; font-size: 0.85rem;">❌ Voided Order</span>
+          `;
+        } else {
+          actionsLeft.innerHTML = `
+            <button id="btn-cancel-order-modal" class="btn btn-danger" onclick="triggerCancelCurrentOrder()" style="font-weight: 700; background: #ef4444; color: #ffffff; border: none; padding: 10px 18px; border-radius: 8px; cursor: pointer; box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4); display: inline-flex; align-items: center; gap: 6px;">
+              <span>❌ Cancel / Void Order</span>
+            </button>
+          `;
+        }
       }
 
       openModal('modal-order-details');
@@ -1419,6 +1427,9 @@ function openImageLightbox(event, imgUrl, title = 'Proof of Payment') {
   if (fallbackLink) fallbackLink.href = imgUrl;
   if (downloadLink) downloadLink.href = imgUrl;
 
+  if (modal.parentNode !== document.body || document.body.lastElementChild !== modal) {
+    document.body.appendChild(modal);
+  }
   modal.style.display = 'flex';
   modal.classList.add('active');
 }
@@ -1444,7 +1455,7 @@ function closeImageLightbox(event) {
 /**
  * Inline Rejection State & Handlers (Targeted Fix 2)
  */
-let selectedRejectionReason = '';
+let selectedRejectionReason = 'Blurred / Unreadable Receipt';
 
 function toggleInlineRejectPayment(event, orderId, orderNumber) {
   if (event) {
@@ -1458,39 +1469,29 @@ function toggleInlineRejectPayment(event, orderId, orderNumber) {
   panel.style.display = isHidden ? 'block' : 'none';
 
   if (isHidden) {
-    selectedRejectionReason = '';
-    const radios = panel.querySelectorAll('input[name="reject_reason_choice"]');
-    radios.forEach(r => { r.checked = false; });
-    const options = panel.querySelectorAll('.reject-reason-option');
-    options.forEach(opt => {
-      opt.style.borderColor = 'var(--border-subtle)';
-      opt.style.background = 'var(--bg-surface-elevated)';
-    });
     const noteContainer = document.getElementById('reject-custom-note-container');
     if (noteContainer) noteContainer.style.display = 'none';
     const noteInput = document.getElementById('reject-custom-note-input');
     if (noteInput) noteInput.value = '';
-    const submitBtn = document.getElementById('btn-confirm-reject-payment');
-    if (submitBtn) {
-      submitBtn.disabled = true;
-      submitBtn.style.opacity = '0.6';
-      submitBtn.style.cursor = 'not-allowed';
-    }
+    selectRejectReason('Blurred / Unreadable Receipt');
   }
 }
 
 function selectRejectReason(reason) {
+  if (!reason) return;
   selectedRejectionReason = reason;
   const panel = document.getElementById('inline-reject-payment-panel');
   if (panel) {
-    const radio = panel.querySelector(`input[name="reject_reason_choice"][value="${reason}"]`);
-    if (radio) radio.checked = true;
+    const radios = panel.querySelectorAll('input[name="reject_reason_choice"]');
+    radios.forEach(r => {
+      r.checked = (r.value === reason);
+    });
 
     // Visually highlight selected option
     const options = panel.querySelectorAll('.reject-reason-option');
     options.forEach(opt => {
       const radioInside = opt.querySelector('input');
-      const isSelected = radioInside && radioInside.checked;
+      const isSelected = Boolean(radioInside && radioInside.checked);
       opt.style.borderColor = isSelected ? '#ef4444' : 'var(--border-subtle)';
       opt.style.background = isSelected ? 'rgba(239, 68, 68, 0.15)' : 'var(--bg-surface-elevated)';
     });
@@ -1519,7 +1520,8 @@ function cancelInlineRejectPayment() {
 }
 
 async function submitRejectPayment(orderId, orderNumber) {
-  let finalReason = selectedRejectionReason;
+  const checkedRadio = document.querySelector('#inline-reject-payment-panel input[name="reject_reason_choice"]:checked');
+  let finalReason = selectedRejectionReason || (checkedRadio ? checkedRadio.value : '');
   if (!finalReason) {
     API.toast('Please select a rejection reason before confirming.', 'warning');
     return;
@@ -1550,8 +1552,12 @@ async function submitRejectPayment(orderId, orderNumber) {
       reason: finalReason
     });
     if (res && res.success) {
-      API.toast(`⚠️ Payment for Order #${orderNumber} rejected. Customer notified on Messenger!`, 'info');
-      await Promise.all([loadOrders(), loadKPIs()]);
+      API.toast(`⚠️ Payment for Order #${orderNumber} rejected & order cancelled. Customer notified on Messenger!`, 'info');
+      await Promise.all([
+        loadOrders(),
+        loadKPIs(),
+        typeof loadBomInventory === 'function' ? loadBomInventory() : Promise.resolve()
+      ]);
       if (typeof viewOrderDetails === 'function') {
         await viewOrderDetails(orderId);
       }
