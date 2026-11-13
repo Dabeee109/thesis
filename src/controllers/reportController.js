@@ -55,30 +55,43 @@ async function getSalesReport(req, res) {
     // 1. Overall Revenue & Order Aggregates
     const [overall] = await db.query(
       `SELECT 
-        COUNT(CASE WHEN LOWER(COALESCE(o.status, '')) NOT IN ('cancelled', 'voided') THEN 1 END) AS total_orders,
-        COALESCE(SUM(CASE WHEN LOWER(COALESCE(o.status, '')) NOT IN ('cancelled', 'voided') THEN o.total_amount ELSE 0 END), 0) AS gross_sales,
-        COALESCE(SUM(CASE WHEN LOWER(COALESCE(o.status, '')) NOT IN ('cancelled', 'voided') THEN o.subtotal ELSE 0 END), 0) AS item_sales,
-        COALESCE(SUM(CASE WHEN LOWER(COALESCE(o.status, '')) NOT IN ('cancelled', 'voided') THEN o.delivery_fee ELSE 0 END), 0) AS delivery_sales,
-        COALESCE(AVG(CASE WHEN LOWER(COALESCE(o.status, '')) NOT IN ('cancelled', 'voided') THEN o.total_amount ELSE NULL END), 0) AS average_order_value,
-        COALESCE(AVG(CASE WHEN LOWER(COALESCE(o.status, '')) NOT IN ('cancelled', 'voided') THEN o.total_amount ELSE NULL END), 0) AS avg_order_value
+        COUNT(CASE WHEN LOWER(COALESCE(o.status, '')) NOT IN ('cancelled', 'voided') AND NOT (COALESCE(p.is_mismatch, 0) = 1 OR LOWER(COALESCE(p.status, '')) = 'mismatch_flagged' OR LOWER(COALESCE(o.payment_status, '')) LIKE '%mismatch%' OR LOWER(COALESCE(o.payment_status, '')) IN ('invalid', 'rejected', 'invalid payment', 'failed')) THEN 1 END) AS total_orders,
+        COALESCE(SUM(CASE WHEN LOWER(COALESCE(o.status, '')) NOT IN ('cancelled', 'voided') AND NOT (COALESCE(p.is_mismatch, 0) = 1 OR LOWER(COALESCE(p.status, '')) = 'mismatch_flagged' OR LOWER(COALESCE(o.payment_status, '')) LIKE '%mismatch%' OR LOWER(COALESCE(o.payment_status, '')) IN ('invalid', 'rejected', 'invalid payment', 'failed')) THEN o.total_amount ELSE 0 END), 0) AS gross_sales,
+        COALESCE(SUM(CASE WHEN LOWER(COALESCE(o.status, '')) NOT IN ('cancelled', 'voided') AND NOT (COALESCE(p.is_mismatch, 0) = 1 OR LOWER(COALESCE(p.status, '')) = 'mismatch_flagged' OR LOWER(COALESCE(o.payment_status, '')) LIKE '%mismatch%' OR LOWER(COALESCE(o.payment_status, '')) IN ('invalid', 'rejected', 'invalid payment', 'failed')) THEN o.subtotal ELSE 0 END), 0) AS item_sales,
+        COALESCE(SUM(CASE WHEN LOWER(COALESCE(o.status, '')) NOT IN ('cancelled', 'voided') AND NOT (COALESCE(p.is_mismatch, 0) = 1 OR LOWER(COALESCE(p.status, '')) = 'mismatch_flagged' OR LOWER(COALESCE(o.payment_status, '')) LIKE '%mismatch%' OR LOWER(COALESCE(o.payment_status, '')) IN ('invalid', 'rejected', 'invalid payment', 'failed')) THEN o.delivery_fee ELSE 0 END), 0) AS delivery_sales,
+        COALESCE(AVG(CASE WHEN LOWER(COALESCE(o.status, '')) NOT IN ('cancelled', 'voided') AND NOT (COALESCE(p.is_mismatch, 0) = 1 OR LOWER(COALESCE(p.status, '')) = 'mismatch_flagged' OR LOWER(COALESCE(o.payment_status, '')) LIKE '%mismatch%' OR LOWER(COALESCE(o.payment_status, '')) IN ('invalid', 'rejected', 'invalid payment', 'failed')) THEN o.total_amount ELSE NULL END), 0) AS average_order_value,
+        COALESCE(AVG(CASE WHEN LOWER(COALESCE(o.status, '')) NOT IN ('cancelled', 'voided') AND NOT (COALESCE(p.is_mismatch, 0) = 1 OR LOWER(COALESCE(p.status, '')) = 'mismatch_flagged' OR LOWER(COALESCE(o.payment_status, '')) LIKE '%mismatch%' OR LOWER(COALESCE(o.payment_status, '')) IN ('invalid', 'rejected', 'invalid payment', 'failed')) THEN o.total_amount ELSE NULL END), 0) AS avg_order_value,
+        COALESCE(SUM(CASE WHEN (COALESCE(p.is_mismatch, 0) = 1 OR LOWER(COALESCE(p.status, '')) = 'mismatch_flagged' OR LOWER(COALESCE(o.payment_status, '')) LIKE '%mismatch%' OR LOWER(COALESCE(o.payment_status, '')) IN ('invalid', 'rejected', 'invalid payment', 'failed')) THEN 1 ELSE 0 END), 0) AS payment_mismatches
       FROM orders o
+      LEFT JOIN payments p ON p.order_id = o.id
       WHERE 1=1 ${dateFilter.clause}`,
       dateFilter.params
     );
 
     // 2. Revenue Breakdown by Payment Method (Cash, GCash, Xendit, Maya, MariBank, etc.)
-    const [paymentBreakdown] = await db.query(
+    // Only verified/non-cancelled/non-mismatched orders count toward transaction_count and total_revenue,
+    // while mismatch_count accurately counts all orders/payments flagged with a payment mismatch within the date range.
+    const [rawPaymentBreakdown] = await db.query(
       `SELECT 
-        COALESCE(LOWER(NULLIF(p.payment_method, '')), 'cash') AS payment_method,
-        COUNT(o.id) AS transaction_count,
-        COALESCE(SUM(o.total_amount), 0) AS total_revenue,
-        COALESCE(SUM(CASE WHEN p.is_mismatch = 1 THEN 1 ELSE 0 END), 0) AS mismatch_count
+        COALESCE(
+          LOWER(NULLIF(p.payment_method, '')),
+          CASE WHEN NULLIF(o.gcash_ref, '') IS NOT NULL OR NULLIF(o.payment_ref_number, '') IS NOT NULL OR NULLIF(o.payment_proof_image, '') IS NOT NULL THEN 'gcash' ELSE 'cash' END
+        ) AS payment_method,
+        COALESCE(SUM(CASE WHEN LOWER(COALESCE(o.status, '')) NOT IN ('cancelled', 'voided') AND NOT (COALESCE(p.is_mismatch, 0) = 1 OR LOWER(COALESCE(p.status, '')) = 'mismatch_flagged' OR LOWER(COALESCE(o.payment_status, '')) LIKE '%mismatch%' OR LOWER(COALESCE(o.payment_status, '')) IN ('invalid', 'rejected', 'invalid payment', 'failed')) THEN 1 ELSE 0 END), 0) AS transaction_count,
+        COALESCE(SUM(CASE WHEN LOWER(COALESCE(o.status, '')) NOT IN ('cancelled', 'voided') AND NOT (COALESCE(p.is_mismatch, 0) = 1 OR LOWER(COALESCE(p.status, '')) = 'mismatch_flagged' OR LOWER(COALESCE(o.payment_status, '')) LIKE '%mismatch%' OR LOWER(COALESCE(o.payment_status, '')) IN ('invalid', 'rejected', 'invalid payment', 'failed')) THEN o.total_amount ELSE 0 END), 0) AS total_revenue,
+        COALESCE(SUM(CASE WHEN (COALESCE(p.is_mismatch, 0) = 1 OR LOWER(COALESCE(p.status, '')) = 'mismatch_flagged' OR LOWER(COALESCE(o.payment_status, '')) LIKE '%mismatch%' OR LOWER(COALESCE(o.payment_status, '')) IN ('invalid', 'rejected', 'invalid payment', 'failed')) THEN 1 ELSE 0 END), 0) AS mismatch_count
       FROM orders o
       LEFT JOIN payments p ON p.order_id = o.id
-      WHERE LOWER(COALESCE(o.status, '')) NOT IN ('cancelled', 'voided') ${dateFilter.clause}
-      GROUP BY COALESCE(LOWER(NULLIF(p.payment_method, '')), 'cash')
-      ORDER BY total_revenue DESC`,
+      WHERE 1=1 ${dateFilter.clause}
+      GROUP BY COALESCE(
+        LOWER(NULLIF(p.payment_method, '')),
+        CASE WHEN NULLIF(o.gcash_ref, '') IS NOT NULL OR NULLIF(o.payment_ref_number, '') IS NOT NULL OR NULLIF(o.payment_proof_image, '') IS NOT NULL THEN 'gcash' ELSE 'cash' END
+      )
+      ORDER BY total_revenue DESC, mismatch_count DESC`,
       dateFilter.params
+    );
+    const paymentBreakdown = (rawPaymentBreakdown || []).filter(
+      row => Number(row.transaction_count || 0) > 0 || Number(row.mismatch_count || 0) > 0
     );
 
     // 3. Top Selling Menu Items (Resilient LEFT JOIN with fallback)
@@ -448,9 +461,110 @@ async function exportOrdersCSV(req, res) {
   }
 }
 
+/**
+ * Payment Mismatches & Reconciliation Log (FR10)
+ * GET /api/reports/payment-mismatches?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+ */
+async function getPaymentMismatches(req, res) {
+  try {
+    const { startDate, endDate } = req.query;
+    const dateFilter = buildDateRangeFilter('o.created_at', startDate, endDate);
+    if (dateFilter.error) {
+      return res.status(400).json({ success: false, message: dateFilter.error });
+    }
+
+    const [rows] = await db.query(
+      `SELECT 
+        o.id,
+        o.order_number,
+        c.first_name,
+        c.last_name,
+        COALESCE(
+          LOWER(NULLIF(p.payment_method, '')),
+          CASE WHEN NULLIF(o.gcash_ref, '') IS NOT NULL OR NULLIF(o.payment_ref_number, '') IS NOT NULL OR NULLIF(o.payment_proof_image, '') IS NOT NULL THEN 'gcash' ELSE 'cash' END
+        ) AS payment_method,
+        COALESCE(NULLIF(p.reference_no, ''), NULLIF(o.payment_ref_number, ''), NULLIF(o.gcash_ref, '')) AS raw_reference_number,
+        COALESCE(o.total_amount, p.amount_expected, 0) AS expected_total,
+        COALESCE(p.amount_paid, 0) AS amount_paid,
+        COALESCE(NULLIF(p.mismatch_notes, ''), NULLIF(o.cancellation_reason, '')) AS mismatch_notes,
+        o.status AS order_status,
+        COALESCE(NULLIF(o.payment_status, ''), NULLIF(p.status, ''), 'MISMATCH') AS payment_status,
+        COALESCE(p.is_mismatch, 0) AS is_mismatch,
+        o.created_at
+      FROM orders o
+      LEFT JOIN customers c ON o.customer_id = c.id
+      LEFT JOIN payments p ON p.order_id = o.id
+      WHERE (
+        COALESCE(p.is_mismatch, 0) = 1
+        OR LOWER(COALESCE(p.status, '')) = 'mismatch_flagged'
+        OR LOWER(COALESCE(o.payment_status, '')) LIKE '%mismatch%'
+        OR LOWER(COALESCE(o.payment_status, '')) IN ('invalid', 'rejected', 'invalid payment', 'failed')
+      ) ${dateFilter.clause}
+      ORDER BY o.created_at DESC, o.id DESC`,
+      dateFilter.params
+    );
+
+    const mismatches = (rows || []).map(r => {
+      const rawOrdNum = String(r.order_number || '').replace(/^#/, '');
+      const fullName = [r.first_name, r.last_name].filter(Boolean).join(' ').trim();
+      const expectedNum = parseFloat(r.expected_total || 0);
+      const paidNum = parseFloat(r.amount_paid || 0);
+      const diffNum = Math.round((paidNum - expectedNum) * 100) / 100;
+
+      let discrepancyLabel = '';
+      let discrepancyType = 'mismatch';
+      if (diffNum < 0) {
+        discrepancyLabel = `-₱${Math.abs(diffNum).toFixed(2)} Short`;
+        discrepancyType = 'short';
+      } else if (diffNum > 0) {
+        discrepancyLabel = `+₱${diffNum.toFixed(2)} Overpaid`;
+        discrepancyType = 'overpaid';
+      } else {
+        discrepancyLabel = r.mismatch_notes ? String(r.mismatch_notes).trim() : 'Flagged Mismatch';
+        discrepancyType = 'flagged';
+      }
+
+      const methodUpper = String(r.payment_method || 'gcash').toUpperCase();
+      const refNo = (r.raw_reference_number && String(r.raw_reference_number).trim())
+        ? String(r.raw_reference_number).trim()
+        : 'N/A';
+
+      return {
+        id: r.id,
+        order_number: `#${rawOrdNum}`,
+        raw_order_number: rawOrdNum,
+        customer_name: fullName || 'Walk-in / Customer',
+        payment_method: methodUpper,
+        reference_number: refNo,
+        expected_total: expectedNum.toFixed(2),
+        amount_paid: paidNum.toFixed(2),
+        discrepancy_amount: diffNum.toFixed(2),
+        discrepancy_label: discrepancyLabel,
+        discrepancy_type: discrepancyType,
+        mismatch_notes: r.mismatch_notes || '',
+        order_status: r.order_status || 'pending',
+        payment_status: r.payment_status || 'MISMATCH',
+        created_at: r.created_at
+      };
+    });
+
+    return res.json({
+      success: true,
+      startDate: dateFilter.startDate,
+      endDate: dateFilter.endDate,
+      totalCount: mismatches.length,
+      mismatches
+    });
+  } catch (err) {
+    console.error('[Payment Mismatches Report Error]', err);
+    return res.status(500).json({ success: false, message: 'Failed to retrieve payment mismatches log.' });
+  }
+}
+
 module.exports = {
   getSalesReport,
   getTransactionsByMethod,
+  getPaymentMismatches,
   getDeliveryReport,
   exportOrdersCSV
 };

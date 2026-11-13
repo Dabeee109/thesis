@@ -3102,11 +3102,13 @@ async function loadReports() {
       const totalOrdersEl = document.getElementById('report-kpi-total-orders');
       const avgOrderEl = document.getElementById('report-kpi-avg-order');
       const deliverySalesEl = document.getElementById('report-kpi-delivery-sales');
+      const paymentMismatchesEl = document.getElementById('report-kpi-payment-mismatches');
 
       if (grossSalesEl) grossSalesEl.textContent = formatPhpCurrency(overall.gross_sales || 0);
       if (totalOrdersEl) totalOrdersEl.textContent = String(Number(overall.total_orders || 0));
       if (avgOrderEl) avgOrderEl.textContent = formatPhpCurrency(overall.avg_order_value || 0);
       if (deliverySalesEl) deliverySalesEl.textContent = formatPhpCurrency(overall.delivery_sales || 0);
+      if (paymentMismatchesEl) paymentMismatchesEl.textContent = String(Number(overall.payment_mismatches || 0));
 
       // Payment Breakdown Table (Interactive Drill-Down Rows)
       const payTbody = document.getElementById('report-payments-tbody');
@@ -3138,6 +3140,10 @@ async function loadReports() {
             tr.onmouseleave = () => { tr.style.background = ''; };
             tr.onclick = () => openPaymentMethodModal(methodRaw);
 
+            const mismatchCellHtml = mismatchCount > 0
+              ? `<span class="badge badge-mismatch" style="display: inline-flex; align-items: center; gap: 5px; background: rgba(239, 68, 68, 0.18); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.45); padding: 4px 10px; border-radius: 999px; font-weight: 800; font-size: 0.76rem;">⚠️ ${mismatchCount} ${mismatchCount === 1 ? 'Mismatch' : 'Mismatches'}</span>`
+              : `<span style="color: var(--text-muted); font-size: 0.85rem;">0</span>`;
+
             tr.innerHTML = `
               <td>
                 <span style="display: inline-flex; align-items: center; gap: 8px; font-weight: 700; color: var(--text-primary);">
@@ -3147,7 +3153,7 @@ async function loadReports() {
               </td>
               <td>${txCount}</td>
               <td><strong style="color: var(--brand-caramel);">${formatPhpCurrency(totalRev)}</strong></td>
-              <td>${mismatchCount > 0 ? `<span class="badge badge-mismatch">${mismatchCount}</span>` : '0'}</td>
+              <td>${mismatchCellHtml}</td>
               <td style="text-align: right;">
                 <span style="font-size: 0.78rem; font-weight: 600; color: var(--brand-caramel); background: rgba(212, 163, 115, 0.12); border: 1px solid rgba(212, 163, 115, 0.3); padding: 4px 10px; border-radius: 999px; white-space: nowrap;">
                   View Details →
@@ -3189,8 +3195,124 @@ async function loadReports() {
         }
       }
     }
+
+    await loadPaymentMismatchesLog(qs, startDate, endDate);
   } catch (err) {
     console.error('Load reports error:', err);
+  }
+}
+
+async function loadPaymentMismatchesLog(qs = '', startDate = '', endDate = '') {
+  const tbody = document.getElementById('report-mismatches-tbody');
+  const countBadge = document.getElementById('report-mismatches-count-badge');
+  const kpiEl = document.getElementById('report-kpi-payment-mismatches');
+  if (!tbody) return;
+
+  try {
+    const res = await API.get(`/reports/payment-mismatches${qs ? '?' + qs : ''}`);
+    if (!res || !res.success) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="8" style="text-align: center; padding: 22px; color: var(--text-muted);">
+            Unable to load payment mismatch reconciliation log.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    const list = res.mismatches || [];
+    const totalCount = Number(res.totalCount !== undefined ? res.totalCount : list.length);
+
+    if (countBadge) {
+      countBadge.textContent = `${totalCount} Flagged`;
+      if (totalCount > 0) {
+        countBadge.style.background = 'rgba(239, 68, 68, 0.2)';
+        countBadge.style.color = '#fca5a5';
+        countBadge.style.borderColor = 'rgba(239, 68, 68, 0.45)';
+      } else {
+        countBadge.style.background = 'rgba(16, 185, 129, 0.15)';
+        countBadge.style.color = '#6ee7b7';
+        countBadge.style.borderColor = 'rgba(16, 185, 129, 0.35)';
+      }
+    }
+    if (kpiEl) {
+      kpiEl.textContent = String(totalCount);
+    }
+
+    tbody.innerHTML = '';
+    if (list.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="8" style="text-align: center; padding: 26px; color: var(--text-muted);">
+            ✅ No payment mismatches or discrepancy alerts found for the selected date range (${escapeHtml(formatReportRangeLabel(startDate, endDate))}).
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    list.forEach(m => {
+      const orderNumDisplay = escapeHtml(m.order_number || `#${m.id}`);
+      const customerName = escapeHtml(m.customer_name || 'Walk-in / Customer');
+      const methodDisplay = escapeHtml(String(m.payment_method || 'GCASH').toUpperCase());
+      const refDisplay = escapeHtml(m.reference_number || 'N/A');
+      const expectedFormatted = formatPhpCurrency(m.expected_total || 0);
+      const paidFormatted = formatPhpCurrency(m.amount_paid || 0);
+
+      const discType = m.discrepancy_type || 'mismatch';
+      const discLabel = escapeHtml(m.discrepancy_label || 'Flagged Mismatch');
+      const notesText = m.mismatch_notes ? escapeHtml(m.mismatch_notes) : '';
+
+      let discBadgeStyle = 'background: rgba(239, 68, 68, 0.16); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4);';
+      if (discType === 'overpaid') {
+        discBadgeStyle = 'background: rgba(245, 158, 11, 0.18); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.42);';
+      }
+
+      const orderStatusRaw = String(m.order_status || 'pending').toUpperCase();
+      const payStatusRaw = String(m.payment_status || 'MISMATCH').toUpperCase();
+      const createdDateStr = m.created_at ? new Date(m.created_at).toLocaleString('en-PH', {
+        month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit'
+      }) : '—';
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>
+          <button type="button" onclick="openOrderModal(${Number(m.id)})" style="background: rgba(212, 163, 115, 0.12); border: 1px solid rgba(212, 163, 115, 0.35); color: var(--brand-gold); font-weight: 800; font-size: 0.82rem; padding: 5px 10px; border-radius: 8px; cursor: pointer; transition: all 0.15s ease;" title="Click to open Order Details Modal">
+            ${orderNumDisplay} ↗
+          </button>
+        </td>
+        <td><strong style="color: var(--text-primary);">${customerName}</strong></td>
+        <td>
+          <span style="font-size: 0.75rem; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: rgba(59, 130, 246, 0.14); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.32);">
+            ${methodDisplay}
+          </span>
+        </td>
+        <td style="font-family: monospace; font-size: 0.83rem; color: var(--text-secondary);">${refDisplay}</td>
+        <td><strong style="color: var(--text-primary);">${expectedFormatted}</strong></td>
+        <td><strong style="color: #fca5a5;">${paidFormatted}</strong></td>
+        <td>
+          <div style="display: flex; flex-direction: column; gap: 3px; align-items: flex-start;">
+            <span style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.76rem; font-weight: 800; padding: 3px 9px; border-radius: 999px; ${discBadgeStyle}">
+              ⚠️ ${discLabel}
+            </span>
+            ${notesText && notesText !== m.discrepancy_label ? `<span style="font-size: 0.73rem; color: var(--text-muted); max-width: 240px; line-height: 1.25;">${notesText}</span>` : ''}
+          </div>
+        </td>
+        <td>
+          <div style="display: flex; flex-direction: column; gap: 3px;">
+            <div style="display: flex; align-items: center; gap: 5px; flex-wrap: wrap;">
+              <span style="font-size: 0.7rem; font-weight: 700; padding: 2px 7px; border-radius: 6px; background: rgba(239, 68, 68, 0.16); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.35);">${escapeHtml(payStatusRaw)}</span>
+              <span style="font-size: 0.7rem; font-weight: 600; padding: 2px 7px; border-radius: 6px; background: rgba(255, 255, 255, 0.06); color: var(--text-secondary);">${escapeHtml(orderStatusRaw)}</span>
+            </div>
+            <span style="font-size: 0.73rem; color: var(--text-muted);">${escapeHtml(createdDateStr)}</span>
+          </div>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    console.error('Load payment mismatches log error:', err);
   }
 }
 

@@ -121,6 +121,8 @@ router.get('/reports/sales', authController.authMiddleware, reportController.get
 router.get('/analytics/reports', authController.authMiddleware, reportController.getSalesReport);
 router.get('/reports/transactions-by-method', authController.authMiddleware, reportController.getTransactionsByMethod);
 router.get('/analytics/transactions-by-method', authController.authMiddleware, reportController.getTransactionsByMethod);
+router.get('/reports/payment-mismatches', authController.authMiddleware, reportController.getPaymentMismatches);
+router.get('/analytics/payment-mismatches', authController.authMiddleware, reportController.getPaymentMismatches);
 router.get('/analytics/overview', authController.authMiddleware, orderController.getSummaryKPIs);
 router.get('/reports/delivery', authController.authMiddleware, reportController.getDeliveryReport);
 router.get('/reports/export-csv', authController.authMiddleware, reportController.exportOrdersCSV);
