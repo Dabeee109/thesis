@@ -533,7 +533,12 @@ async function dispatchPersonalGcashCheckout(psid, session, draftData = {}) {
 
   const gcashName = storeSettings?.gcash_account_name || config.store?.gcashName || "Diner's Cafe Official";
   const gcashNumber = storeSettings?.gcash_account_number || config.store?.gcashNumber || '0928 176 2895';
+  const cleanGcashDigits = String(gcashNumber).replace(/\D+/g, '') || '09281762895';
   const qrPath = storeSettings?.gcash_qr_image_url || '/images/gcash_official_qr.jpg';
+
+  // Send plain-text GCash trigger FIRST so Meta Messenger immediately attaches the native "Transfer with GCash" card
+  const gcashTriggerText = `💳 GCash Payment Details\nGCash Number: ${cleanGcashDigits}\nAccount Name: ${gcashName}\nTotal Amount: ₱${Number(pending.grandTotal).toFixed(2)}\n\nMaaari ninyong i-tap ang "Transfer with GCash" card o gamitin ang QR code / button sa ibaba upang magbayad.`;
+  await sendTextMessage(psid, gcashTriggerText);
 
   const baseUrl = (process.env.APP_BASE_URL || config.appUrl || 'http://localhost:3000').trim().replace(/\/+$/, '');
   const resolvedQrUrl = qrPath.startsWith('http://') || qrPath.startsWith('https://')
@@ -545,7 +550,7 @@ async function dispatchPersonalGcashCheckout(psid, session, draftData = {}) {
   }
 
   const gcashPortalUrl = `${baseUrl}/pay/gcash?psid=${encodeURIComponent(psid)}&amount=${Number(pending.grandTotal).toFixed(2)}&mode=personal`;
-  const payText = `📱 GCASH PAYMENT (Pay-First Verification)\nTotal Amount: ₱${Number(pending.grandTotal).toFixed(2)}\nGCash Name: ${gcashName}\nGCash No: ${gcashNumber}\n\n1. Buksan ang GCash App o i-scan ang QR code sa itaas at ipadala ang eksaktong ₱${Number(pending.grandTotal).toFixed(2)}.\n2. I-send dito ang SCREENSHOT ng GCash receipt (o 13-digit Ref No.) sa loob ng 20 minuto.\n\n⚠️ Hindi po muna ipapadala sa kusina ang order hangga't walang valid GCash receipt.`;
+  const payText = `📱 GCASH PAYMENT (Pay-First Verification)\nTotal Amount: ₱${Number(pending.grandTotal).toFixed(2)}\nGCash Name: ${gcashName}\nGCash No: ${cleanGcashDigits}\n\n1. Buksan ang GCash App o i-scan ang QR code sa itaas at ipadala ang eksaktong ₱${Number(pending.grandTotal).toFixed(2)}.\n2. I-send dito ang SCREENSHOT ng GCash receipt (o 13-digit Ref No.) sa loob ng 20 minuto.\n\n⚠️ Hindi po muna ipapadala sa kusina ang order hangga't walang valid GCash receipt.`;
 
   await sendButtonTemplate(psid, payText, [
     {

@@ -122,8 +122,12 @@ test('Personal GCash Pay-First & Anti-Flood Suite', async (t) => {
     assert.strictEqual(Number(updated.pendingGCashOrder.grandTotal), Number(sampleItem.price));
 
     const sent = getSent(psid);
-    const btnMsg = sent.find(m => m.messagePayload?.attachment?.payload?.template_type === 'button');
-    assert.ok(btnMsg, 'Must send Button Template with GCash payment portal URL');
+    const plainGcashIdx = sent.findIndex(m => typeof m.messagePayload?.text === 'string' && /GCash Number:\s*09\d{9}/i.test(m.messagePayload.text));
+    const btnIdx = sent.findIndex(m => m.messagePayload?.attachment?.payload?.template_type === 'button');
+    assert.ok(plainGcashIdx !== -1, 'Must send plain-text GCash trigger message with continuous 11-digit number');
+    assert.ok(btnIdx !== -1, 'Must send Button Template with GCash payment portal URL');
+    assert.ok(plainGcashIdx < btnIdx, 'Plain-text GCash trigger message must be sent BEFORE Button Template');
+    const btnMsg = sent[btnIdx];
     const url = btnMsg.messagePayload.attachment.payload.buttons[0].url;
     assert.ok(url.includes('/pay/gcash?'), 'Button URL must point to /pay/gcash');
     assert.ok(url.includes('mode=personal'), 'Button URL must include mode=personal');
@@ -174,7 +178,7 @@ test('Personal GCash Pay-First & Anti-Flood Suite', async (t) => {
     assert.ok(updated.pendingGCashOrder.cooldownUntil > Date.now(), 'Cooldown must engage after 3 failures');
 
     // 4th attempt should be blocked immediately by cooldown even with text/image
-    const blockedRes = await nlpEngine.handleMessageEvent(psid, 'Ref No 1009123456789');
+    const blockedRes = await nlpEngine.handleMessageEvent(psid, 'Ref No 1009123456789', null, null, fakeSelfie);
     assert.strictEqual(blockedRes.intent, 'PAYMENT_PROOF_COOLDOWN');
 
     const [orders] = await db.query(
