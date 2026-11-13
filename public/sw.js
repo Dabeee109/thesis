@@ -2,7 +2,7 @@
  * Diner's Cafe Mobile Service Worker (Network-First for Dynamic Pages)
  */
 
-const CACHE_NAME = 'diners-cafe-cache-v15';
+const CACHE_NAME = 'diners-cafe-cache-v16';
 
 self.addEventListener('install', (e) => {
   self.skipWaiting();

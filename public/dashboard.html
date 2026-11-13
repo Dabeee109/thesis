@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="required-orientation" content="landscape">
   <link rel="stylesheet" href="css/style.css">
-  <link rel="stylesheet" href="css/dashboard.css?v=20261112_02">
+  <link rel="stylesheet" href="css/dashboard.css?v=20261114_05">
   <!-- Immediate Strict Frontend Auth Guard (Requirement 4) -->
   <script>
     (function () {
@@ -64,7 +64,7 @@
 
   <div class="app-container">
     <!-- Sidebar -->
-    <aside class="sidebar">
+    <aside class="sidebar overflow-y-auto overscroll-contain" id="appSidebar">
       <div class="brand-header">
         <div class="brand-icon">☕</div>
         <div class="brand-text">
@@ -73,7 +73,7 @@
         </div>
       </div>
 
-      <ul class="nav-menu">
+      <ul class="nav-menu overflow-y-auto overscroll-contain" id="sidebarNavMenu" style="overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;">
         <li class="nav-item active" data-tab="overview">
           <button><span style="font-size: 1.2rem;">📊</span> <span>Overview</span></button>
         </li>
@@ -2185,8 +2185,8 @@
   </dialog>
 
   <!-- Scripts -->
-  <script src="js/api.js?v=20261114_04"></script>
-  <script src="js/dashboard.js?v=20261114_04"></script>
+  <script src="js/api.js?v=20261114_05"></script>
+  <script src="js/dashboard.js?v=20261114_05"></script>
   <script src="js/orientation-lock.js?v=20261109_04"></script>
 </body>
 </html>

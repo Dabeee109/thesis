@@ -90,11 +90,19 @@ function setupMenuImagePicker() {
   }
 }
 
+let isSidebarScrolling = false;
+
 // Setup sidebar tab switching
 function setupNavigation() {
   const navItems = document.querySelectorAll('.nav-item');
   navItems.forEach(item => {
-    item.addEventListener('click', () => {
+    item.addEventListener('click', (e) => {
+      if (isSidebarScrolling) {
+        e.preventDefault();
+        e.stopPropagation();
+        isSidebarScrolling = false;
+        return;
+      }
       const tabId = item.getAttribute('data-tab');
       switchTab(tabId);
     });
@@ -105,7 +113,50 @@ function setupNavigation() {
 function initSidebarToggle() {
   const toggleBtn = document.getElementById('sidebarToggle');
   const backdrop = document.getElementById('sidebarBackdrop');
+  const sidebar = document.querySelector('.sidebar');
+  const navMenu = document.querySelector('.nav-menu');
 
+  // 1. Isolate internal sidebar touch & scroll events so scrolling never closes the drawer or propagates to backdrop
+  let touchStartX = 0;
+  let touchStartY = 0;
+
+  if (sidebar) {
+    sidebar.addEventListener('touchstart', (e) => {
+      isSidebarScrolling = false;
+      if (e.touches && e.touches.length > 0) {
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+      }
+      e.stopPropagation();
+    }, { passive: true });
+
+    sidebar.addEventListener('touchmove', (e) => {
+      if (e.touches && e.touches.length > 0) {
+        const dx = Math.abs(e.touches[0].clientX - touchStartX);
+        const dy = Math.abs(e.touches[0].clientY - touchStartY);
+        if (dx > 8 || dy > 8) {
+          isSidebarScrolling = true;
+        }
+      }
+      e.stopPropagation();
+    }, { passive: true });
+
+    sidebar.addEventListener('scroll', (e) => {
+      e.stopPropagation();
+    }, { passive: true });
+  }
+
+  if (navMenu) {
+    navMenu.addEventListener('scroll', (e) => {
+      e.stopPropagation();
+    }, { passive: true });
+
+    navMenu.addEventListener('touchmove', (e) => {
+      e.stopPropagation();
+    }, { passive: true });
+  }
+
+  // 2. Explicit Hamburger Toggle Button Only
   if (toggleBtn) {
     let lastTime = 0;
     const handleToggle = (e) => {
@@ -126,42 +177,51 @@ function initSidebarToggle() {
     };
 
     toggleBtn.addEventListener('click', handleToggle);
-    toggleBtn.addEventListener('touchend', handleToggle, { passive: false });
   }
 
+  // 3. Explicit Backdrop Click Only (prevent background scroll on backdrop touchmove)
   if (backdrop) {
-    const handleClose = (e) => {
-      if (e) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
+    backdrop.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    }, { passive: false });
+
+    backdrop.addEventListener('click', (e) => {
+      if (e.target !== backdrop) return;
+      e.preventDefault();
+      e.stopPropagation();
       toggleSidebar(false);
-    };
-    backdrop.addEventListener('click', handleClose);
-    backdrop.addEventListener('touchend', handleClose, { passive: false });
+    });
   }
 
-  // Automatically close mobile/tablet drawer when any navigation tab is clicked
-  document.querySelectorAll('.nav-item').forEach(item => {
-    const closeOnNav = () => {
-      if (window.innerWidth <= 1024) {
-        toggleSidebar(false);
-      }
-    };
-    item.addEventListener('click', closeOnNav);
-    item.addEventListener('touchend', closeOnNav, { passive: true });
+  // 4. Guarded Resize Handler: Only close mobile drawer when crossing desktop width breakpoint (> 1024px),
+  // NEVER when mobile browser height changes during vertical touch scrolling.
+  let lastViewportWidth = window.innerWidth;
+  window.addEventListener('resize', () => {
+    const currentWidth = window.innerWidth;
+    if (currentWidth === lastViewportWidth) {
+      // Height-only resize (e.g. mobile URL bar collapsing/expanding while scrolling) — ignore!
+      return;
+    }
+    const crossedToDesktop = lastViewportWidth <= 1024 && currentWidth > 1024;
+    lastViewportWidth = currentWidth;
+    if (crossedToDesktop && document.body.classList.contains('sidebar-mobile-open')) {
+      document.body.classList.remove('sidebar-mobile-open');
+      document.body.style.overflow = '';
+    }
   });
 }
 
 function toggleSidebar(forceState) {
   const isMobileOrTablet = window.innerWidth <= 1024;
   if (isMobileOrTablet) {
-    if (typeof forceState === 'boolean') {
-      document.body.classList.toggle('sidebar-mobile-open', forceState);
-    } else {
-      document.body.classList.toggle('sidebar-mobile-open');
-    }
+    const isCurrentlyOpen = document.body.classList.contains('sidebar-mobile-open');
+    const nextOpenState = (typeof forceState === 'boolean') ? forceState : !isCurrentlyOpen;
+    document.body.classList.toggle('sidebar-mobile-open', nextOpenState);
+    document.body.style.overflow = nextOpenState ? 'hidden' : '';
   } else {
+    document.body.classList.remove('sidebar-mobile-open');
+    document.body.style.overflow = '';
     const isCurrentlyCollapsed = document.body.classList.contains('sidebar-collapsed');
     const newState = (typeof forceState === 'boolean') ? forceState : !isCurrentlyCollapsed;
     document.body.classList.toggle('sidebar-collapsed', newState);
