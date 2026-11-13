@@ -393,7 +393,7 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
     pendingApprovalMsg
   );
 
-  if (effectivePsid && !effectivePsid.startsWith('POS_MANUAL_')) {
+  if (!orderData.suppressDirectPush && effectivePsid && !effectivePsid.startsWith('POS_MANUAL_')) {
     await sendTextMessage(effectivePsid, pendingApprovalMsg).catch(err => {
       console.warn('[orderService] Failed to send pending approval push to Messenger:', err.message);
     });

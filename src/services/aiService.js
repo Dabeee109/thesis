@@ -501,7 +501,7 @@ ACTION DEFINITIONS:
 - VIEW_MENU: Customer asks to see the menu or list of offerings.
 - RECOMMEND_ITEM: Customer asks for suggestions, specials, or bestsellers.
 - SEND_PICTURE: Customer asks to see a photo of a specific dish/drink.
-- SET_DETAILS: Customer provides checkout details (name, phone, address, landmark, time, dining mode, payment mode, note). Extract all provided fields.
+- SET_DETAILS: Customer provides checkout details (name, phone, address, landmark, time, dining mode, payment mode, note). Extract all provided fields. NEVER say "Handa na po ang inyong order" or claim cooking is ready, as the order is still in checkout and awaiting final confirmation.
 - CONFIRM_ORDER: Customer finalizes/confirms checkout ("confirm", "proceed", "okay na").
 - CANCEL_ORDER: Customer requests cancellation of active order.
 - CHECK_STATUS: Customer inquires about order progress or tracking.
