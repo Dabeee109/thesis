@@ -255,14 +255,25 @@ function parseCustomerInfo(rawText, diningMode) {
     if (phoneInline) contact = phoneInline[1].trim();
   }
   if (!name) {
-    const naturalName = clean.match(/(?:name\s+ko\s+(?:ay|is)?|pangalan\s+ko\s+(?:ay|is)?|ako\s+(?:si|ay))\s+([A-Za-z\s.'-]{2,30}?)(?=\s*(?:,|\bang\s+number\b|\bnumber\b|\bphone\b|\bcontact\b|\bcp\b|\bcellphone\b|\bmakaka\s*dating\b|\blanding\b|\bgcash\b|\bcash\b|\.|\n|$|\d{7,}))/i);
+    const naturalName = clean.match(/(?:name\s+ko\s+(?:ay|is)?|pangalan\s+ko\s+(?:ay|is)?|ako\s+(?:si|ay)|name\s+(?:ay|is)?|pangalan\s+(?:ay|is)?)\s+([A-Za-z\s.'-]{2,30}?)(?=\s*(?:,|\bang\s+number\b|\bnumber\b|\bphone\b|\bcontact\b|\bcp\b|\bcellphone\b|\bmakaka\s*dating\b|\blanding\b|\bgcash\b|\bcash\b|\.|\n|$|\d{7,}))/i);
     if (naturalName) {
       const cand = naturalName[1].trim();
       if (!NON_NAME_FILLERS.test(cand)) name = cand;
     }
   }
+  if (!name) {
+    // Check capitalized proper name right before phone number (e.g. "Marco Santos 09171234567")
+    const nameBeforePhone = clean.match(/(?:^|[\s,;])([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\s+(?:09\d{9}|\+?639\d{9})/);
+    if (nameBeforePhone) {
+      const cand = nameBeforePhone[1].trim();
+      if (!NON_NAME_FILLERS.test(cand) && !/^(?:Bacon|Burger|Spanish|Latte|Milktea|Pizza|Coffee|Cafe|Dine|Delivery|Pickup|Cash|GCash)/i.test(cand)) {
+        name = cand;
+      }
+    }
+  }
   if (!arrivingTime) {
-    const naturalTime = clean.match(/(?:(?:makaka\s*)?dating\s*(?:ako\s*)?(?:dyan|diyan|sa\s*store)?\s*(?:ng|sa)?\s*(?:mga)?|mga|around|at)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i);
+    const naturalTime = clean.match(/(?:(?:makaka\s*)?dating\s*(?:ako\s*)?(?:dyan|diyan|sa\s*store)?\s*(?:ng|sa)?\s*(?:mga)?|mga|around)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i) ||
+      clean.match(/\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm))/i);
     if (naturalTime) arrivingTime = naturalTime[1].trim();
   }
   if (paymentMode === null && /gcash/i.test(clean)) {
@@ -6286,14 +6297,56 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
               ? `\n(Paalala: sold out na po ang ${outOfStockNotices.join(', ')}.)`
               : '';
 
-            // One-shot multi-intent: both dining_mode and payment_mode provided -> ask only remaining checkout fields
-            if (action_payload.dining_mode && action_payload.payment_mode) {
+            // One-shot multi-intent: extract provided checkout details from rawText
+            const parsedInfo = parseCustomerInfo(rawText, session.dining_mode);
+            if (parsedInfo.name && !session.customer_name) session.customer_name = parsedInfo.name;
+            if (parsedInfo.contact && !session.contact_number) session.contact_number = parsedInfo.contact;
+            if (parsedInfo.address && !session.delivery_address) session.delivery_address = parsedInfo.address;
+            if (parsedInfo.landmark && !session.delivery_landmark) session.delivery_landmark = parsedInfo.landmark;
+            if (parsedInfo.arrivingTime && !session.arriving_time) session.arriving_time = parsedInfo.arrivingTime;
+            if (parsedInfo.paymentMode && !session.payment_mode) session.payment_mode = parsedInfo.paymentMode;
+            if (parsedInfo.diningMode && !session.dining_mode) {
+              session.dining_mode = parsedInfo.diningMode;
+              session.orderType = parsedInfo.diningMode === 'Delivery' ? 'delivery' : (parsedInfo.diningMode === 'Dine In' ? 'dinein' : 'pickup');
+            }
+
+            const isDeliv = isDeliveryDiningMode(session.dining_mode);
+            const hasCompleteDetails = isDeliv
+              ? Boolean(session.customer_name && session.contact_number && session.delivery_address && session.payment_mode)
+              : Boolean(session.customer_name && session.contact_number && session.payment_mode);
+
+            // If ALL required details are already provided, proceed directly to Order Summary Confirmation Gateway
+            if (hasCompleteDetails) {
+              await saveSession(session);
+              const addedAck = `${reply_message}\n\nNaidagdag na po sa cart: ${addedSummary.join(', ')}${oosSuffix}`;
+              await sendTextMessage(psid, addedAck);
+              const summaryRes = await finalizeOrderSummaryAndPayment(psid, session);
+              return {
+                intent: 'AI_ONE_SHOT_ORDER_COMPLETE',
+                confidence: 0.99,
+                replyLog: `${addedAck}\n${summaryRes?.replyLog || ''}`,
+                aiAction: 'ADD_ITEM'
+              };
+            }
+
+            // If some details were provided in one-shot, prompt ONLY for missing fields
+            if (session.dining_mode && (action_payload.payment_mode || session.payment_mode || session.customer_name || session.contact_number || session.delivery_address)) {
               session.state = 'COLLECTING_CUSTOMER_INFO';
               session.current_step = 'COLLECTING_CUSTOMER_INFO';
               await saveSession(session);
-              const missingFieldsMsg = isDeliveryDiningMode(session.dining_mode)
-                ? `${reply_message}\n\nNaidagdag: ${addedSummary.join(', ')}${oosSuffix}\nMode: ${session.dining_mode} | Payment: ${session.payment_mode} | Subtotal: ${peso(subtotal)}\n\nPakibigay po ang natitirang detalye:\nFull Name:\nPhone number:\nAddress:\nLandmark:`
-                : `${reply_message}\n\nNaidagdag: ${addedSummary.join(', ')}${oosSuffix}\nMode: ${session.dining_mode} | Payment: ${session.payment_mode} | Subtotal: ${peso(subtotal)}\n\nPakibigay po ang natitirang detalye:\nFull Name:\nPhone number:\nArriving time:`;
+
+              const missing = [];
+              if (!session.customer_name) missing.push('Full Name:');
+              if (!session.contact_number) missing.push('Phone number (09XXXXXXXXX):');
+              if (isDeliv) {
+                if (!session.delivery_address) missing.push('Address:');
+                if (!session.delivery_landmark) missing.push('Landmark:');
+              } else {
+                if (!session.arriving_time) missing.push('Arriving time:');
+              }
+              if (!session.payment_mode) missing.push('Payment mode (Cash or GCash):');
+
+              const missingFieldsMsg = `${reply_message}\n\nNaidagdag: ${addedSummary.join(', ')}${oosSuffix}\nMode: ${session.dining_mode} | Payment: ${session.payment_mode || 'TBD'} | Subtotal: ${peso(subtotal)}\n\nPakibigay po ang natitirang detalye:\n${missing.join('\n')}`;
               await sendTextMessage(psid, missingFieldsMsg);
               return {
                 intent: 'AI_ONE_SHOT_ORDER',

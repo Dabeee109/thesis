@@ -8,6 +8,7 @@ let currentSession = null;
 document.addEventListener('DOMContentLoaded', async () => {
   // Check initial chatbot status
   checkBotStatus();
+  initPersonaSelector();
 
   // Connect to SSE for real-time bot responses & delivery notifications
   API.connectSSE((eventType, data) => {
@@ -301,5 +302,201 @@ async function testInactivity(minutes) {
     }
   } catch (err) {
     API.toast('Inactivity test error: ' + (err.message || 'Failed'), 'danger');
+  }
+}
+
+// =============================================================================
+// 🎭 13 Customer Personas AI-to-AI Simulation Harness
+// =============================================================================
+
+const PERSONAS_CONFIG = [
+  {
+    id: 1,
+    name: "Persona 1: Ang Nagmamadali / One-Shot Orderer",
+    desc: "Lahat ng detalye (pagkain, address, GCash, pangalan, phone) sa isang chat.",
+    initial: "Padeliver po ng 2 Bacon Burger sa 123 Juan Luna St Tondo tapat ng Puregold, bayad ako via GCash Marco Santos 09171234567",
+    followUps: ["Oo, tama"]
+  },
+  {
+    id: 2,
+    name: "Persona 2: Ang Gutom na Conyo / Slang & Taglish",
+    desc: "Gumagamit ng conyo Taglish at colloquial aliases (classic burger at classic milktea).",
+    initial: "Hey bro pabili naman ng 1 classic burger and 1 classic milktea with pearls please",
+    followUps: ["Pick-up po", "Pangalan ko si Carlo 09181234567, Cash bayad", "Oo, tama"]
+  },
+  {
+    id: 3,
+    name: "Persona 3: Ang Discount Seeker (PhilHealth vs Senior ID)",
+    desc: "Nagtatanong muna kung pwede PhilHealth ID, bago magbigay ng Senior ID.",
+    initial: "Magandang araw po, pwede ba ang PhilHealth ID para sa 20% discount ng lola ko?",
+    followUps: ["Senior Citizen ID na lang po: OSCA-998811"]
+  },
+  {
+    id: 4,
+    name: "Persona 4: Ang Palit-Isip / Cart Modifier",
+    desc: "Mag-o-order muna ng Bacon Burger, tapos papalitan ng 2 Hungarian Pizza.",
+    initial: "Pa-order po ng isang Bacon Burger",
+    followUps: ["Ay tanggalin mo muna yung bacon burger kanina tapos palitan mo na lang ng 2 Hungarian Pizza"]
+  },
+  {
+    id: 5,
+    name: "Persona 5: Ang Puro Tanong / Menu Inquirer",
+    desc: "Nagtatanong muna ng Wi-Fi at best sellers bago pumili ng dining mode.",
+    initial: "Hello! May high-speed Wi-Fi ba kayo sa store tsaka ano pinakamasarap na kape niyo?",
+    followUps: ["Dine-in po ako"]
+  },
+  {
+    id: 6,
+    name: "Persona 6: Ang Tipid / Budget Conscious",
+    desc: "Naghahanap ng pinakamurang pagkain sa ilalim ng ₱100 pesos.",
+    initial: "Ano po ang pinakamurang pagkain o burger ninyo na babagay sa student budget under 100 pesos?",
+    followUps: ["Sige pabili niyan 1 piece"]
+  },
+  {
+    id: 7,
+    name: "Persona 7: Ang Strict Customizer (Allergy/Oatmilk)",
+    desc: "May strict instruction na allergic sa dairy at kailangan ng oatmilk.",
+    initial: "Pabili po ng 1 Spanish Latte for Dine-in pero paki-note na allergic ako sa dairy, oatmilk only please",
+    followUps: ["Oo, tama"]
+  },
+  {
+    id: 8,
+    name: "Persona 8: Ang Out of Delivery Range (>3km)",
+    desc: "Sinusubukang magpa-deliver sa malayong lokasyon (Quezon City Circle).",
+    initial: "Pa-deliver po ng 2 Hungarian Pizza sa Quezon City Circle tapat ng City Hall",
+    followUps: ["Sige pick up na lang dadaan ako mamaya"]
+  },
+  {
+    id: 9,
+    name: "Persona 9: Ang Galit / Frustrated (Inip sa Delay)",
+    desc: "Naiinip at nagrereklamo sa delay gamit ang galit na ALL CAPS.",
+    initial: "ANG TAGAL NAMAN NG ORDER KO BAKIT WALA PA KANINA PA AKO NAGHIHINTAY!",
+    followUps: ["Salamat po sa pag-update"]
+  },
+  {
+    id: 10,
+    name: "Persona 10: Ang Picture Lover / Visual Menu",
+    desc: "Humihingi ng actual picture ng Hungarian Pizza bago bumili.",
+    initial: "Patingin nga po ng actual picture ng Hungarian Pizza ninyo kung masarap",
+    followUps: ["Ang sarap nga tignan! Pabili po ako"]
+  },
+  {
+    id: 11,
+    name: "Persona 11: Ang Cancellation Seeker",
+    desc: "Nag-cancel gamit ang natural Tagalog: 'wag na pala pa-cancel na lang'.",
+    initial: "Wait nagkamali ako ng napindot, wag na pala pa-cancel na lang ng order ko",
+    followUps: []
+  },
+  {
+    id: 12,
+    name: "Persona 12: Ang Rapid Flooder / Sunod-Sunod Mag-chat",
+    desc: "Nagpapadala ng magkakahiwalay na chat nang mabilis.",
+    initial: "Hi pabili burger at milktea",
+    followUps: ["Dine in po", "Si Alex 09170001122 cash", "Oo, tama"]
+  },
+  {
+    id: 13,
+    name: "Persona 13: Ang Unstructured Details Sender",
+    desc: "Nagbigay ng address at pangalan pero nakalimutan ang phone number.",
+    initial: "delivery na lang sa 123 Juan Luna St Tondo malapit sa 7-11 tapos maya bayad ko, ako si Mark",
+    followUps: ["09289998877", "Oo, tama"]
+  }
+];
+
+let activeSimulationTimer = null;
+let isSimulationRunning = false;
+
+function initPersonaSelector() {
+  const select = document.getElementById('sim-persona-select');
+  if (!select) return;
+  select.innerHTML = '';
+  PERSONAS_CONFIG.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = `#${p.id}: ${p.name.split(':')[1] || p.name}`;
+    select.appendChild(opt);
+  });
+  onPersonaSelected();
+}
+
+function onPersonaSelected() {
+  const select = document.getElementById('sim-persona-select');
+  const goalBox = document.getElementById('sim-persona-goal');
+  if (!select || !goalBox) return;
+  const p = PERSONAS_CONFIG.find(x => x.id === parseInt(select.value, 10)) || PERSONAS_CONFIG[0];
+  goalBox.innerHTML = `<strong>Tunguhin:</strong> ${escapeHtml(p.desc)}<br><span style="color: var(--brand-crema, #d4a373);">Mensahe: "${escapeHtml(p.initial)}"</span>`;
+}
+
+function fillPersonaPrompt() {
+  const select = document.getElementById('sim-persona-select');
+  const input = document.getElementById('chat-input-text');
+  if (!select || !input) return;
+  const p = PERSONAS_CONFIG.find(x => x.id === parseInt(select.value, 10)) || PERSONAS_CONFIG[0];
+  input.value = p.initial;
+  input.focus();
+}
+
+async function startAiSimulation() {
+  if (isSimulationRunning) return;
+  const select = document.getElementById('sim-persona-select');
+  const p = PERSONAS_CONFIG.find(x => x.id === parseInt(select.value, 10)) || PERSONAS_CONFIG[0];
+
+  isSimulationRunning = true;
+  document.getElementById('btn-play-sim').style.display = 'none';
+  document.getElementById('btn-stop-sim').style.display = 'block';
+  const badge = document.getElementById('ai-sim-badge');
+  if (badge) {
+    badge.className = 'badge badge-warning';
+    badge.textContent = 'Playing...';
+  }
+
+  // Clear chat window and reset session state
+  document.getElementById('chat-messages').innerHTML = '';
+  await sendSimulatedPayload('RESET_SESSION');
+  await new Promise(r => setTimeout(r, 600));
+
+  API.toast(`Starting simulation: ${p.name}...`, 'info');
+
+  // Turn 1: Initial message
+  await handleChatText(p.initial);
+
+  // Play remaining follow-up turns sequentially
+  let followUpIdx = 0;
+  const runNextFollowUp = async () => {
+    if (!isSimulationRunning) return;
+    if (followUpIdx < p.followUps.length) {
+      const msg = p.followUps[followUpIdx++];
+      activeSimulationTimer = setTimeout(async () => {
+        if (!isSimulationRunning) return;
+        await handleChatText(msg);
+        runNextFollowUp();
+      }, 3000);
+    } else {
+      activeSimulationTimer = setTimeout(() => {
+        stopAiSimulation(true);
+      }, 2500);
+    }
+  };
+
+  runNextFollowUp();
+}
+
+function stopAiSimulation(completed = false) {
+  isSimulationRunning = false;
+  if (activeSimulationTimer) {
+    clearTimeout(activeSimulationTimer);
+    activeSimulationTimer = null;
+  }
+  const btnPlay = document.getElementById('btn-play-sim');
+  const btnStop = document.getElementById('btn-stop-sim');
+  const badge = document.getElementById('ai-sim-badge');
+  if (btnPlay) btnPlay.style.display = 'block';
+  if (btnStop) btnStop.style.display = 'none';
+  if (badge) {
+    badge.className = completed ? 'badge badge-success' : 'badge badge-secondary';
+    badge.textContent = completed ? 'Completed ✅' : 'Stopped';
+  }
+  if (completed) {
+    API.toast('🎉 AI Simulation finished successfully!', 'success');
   }
 }

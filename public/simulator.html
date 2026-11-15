@@ -59,6 +59,32 @@
         Test conversational order flows, NLP intents, GCash amount validations, and post-delivery feedback prompts in real-time.
       </p>
 
+      <!-- 13 Personas AI-to-AI Simulation Harness -->
+      <div style="background: rgba(212, 163, 115, 0.12); padding: 12px; border-radius: 8px; border: 1px solid rgba(212, 163, 115, 0.35); margin-bottom: 14px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+          <label class="form-label" style="font-size: 0.82rem; font-weight: 700; color: var(--brand-crema, #d4a373); text-transform: uppercase; margin: 0;">
+            🎭 13 Customer Personas
+          </label>
+          <span id="ai-sim-badge" class="badge badge-success" style="font-size: 0.68rem;">Ready</span>
+        </div>
+        <select id="sim-persona-select" class="form-control" style="width: 100%; padding: 6px 10px; font-size: 0.82rem; background: #23201d; color: #fff; border: 1px solid #555; border-radius: 6px; margin-bottom: 8px;" onchange="onPersonaSelected()">
+        </select>
+        <div id="sim-persona-goal" style="font-size: 0.75rem; color: #ccc; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px; margin-bottom: 10px; line-height: 1.4;">
+          Loading persona details...
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button id="btn-play-sim" class="btn btn-primary btn-sm" style="flex: 1;" onclick="startAiSimulation()">
+            ▶️ Watch Auto-Play
+          </button>
+          <button id="btn-stop-sim" class="btn btn-danger btn-sm" style="display: none; flex: 1;" onclick="stopAiSimulation()">
+            ⏹️ Stop
+          </button>
+          <button class="btn btn-secondary btn-sm" style="flex: 1;" onclick="fillPersonaPrompt()" title="Fill chat input with this persona's message">
+            💬 Fill Input
+          </button>
+        </div>
+      </div>
+
       <div>
         <label class="form-label" style="font-size: 0.8rem; text-transform: uppercase;">Quick Test Actions:</label>
         <div style="display: flex; flex-direction: column; gap: 8px;">
