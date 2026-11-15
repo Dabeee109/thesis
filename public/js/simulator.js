@@ -88,16 +88,34 @@ async function sendSimulatedPayload(payload) {
   }
 }
 
-function appendUserMessage(text) {
+function appendUserMessage(text, label = null) {
   const container = document.getElementById('chat-messages');
   const div = document.createElement('div');
   div.className = 'chat-msg user';
-  div.innerHTML = `<div class="bubble">${escapeHtml(text)}</div>`;
+  const labelHtml = label ? `<div style="font-size: 0.72rem; opacity: 0.9; margin-bottom: 4px; font-weight: 700; color: #120904;">${escapeHtml(label)}</div>` : '';
+  div.innerHTML = `<div class="bubble">${labelHtml}${escapeHtml(text)}</div>`;
   container.appendChild(div);
   scrollToBottom();
 }
 
+function showTypingIndicator(speaker, text) {
+  const container = document.getElementById('chat-messages');
+  removeTypingIndicator();
+  const ind = document.createElement('div');
+  ind.id = 'typing-indicator-msg';
+  ind.className = speaker === 'user' ? 'chat-msg user' : 'chat-msg bot';
+  ind.innerHTML = `<div class="bubble" style="opacity: 0.8; font-size: 0.78rem; font-style: italic; background: rgba(212,163,115,0.25); border: 1px dashed rgba(212,163,115,0.4);">${escapeHtml(text)}</div>`;
+  container.appendChild(ind);
+  scrollToBottom();
+}
+
+function removeTypingIndicator() {
+  const ind = document.getElementById('typing-indicator-msg');
+  if (ind) ind.remove();
+}
+
 function renderBotPayload(message) {
+  removeTypingIndicator();
   const container = document.getElementById('chat-messages');
 
   // 1. Text Message
@@ -440,6 +458,7 @@ async function startAiSimulation() {
   if (isSimulationRunning) return;
   const select = document.getElementById('sim-persona-select');
   const p = PERSONAS_CONFIG.find(x => x.id === parseInt(select.value, 10)) || PERSONAS_CONFIG[0];
+  const personaShortName = (p.name.split(':')[1] || p.name).trim();
 
   isSimulationRunning = true;
   document.getElementById('btn-play-sim').style.display = 'none';
@@ -457,8 +476,18 @@ async function startAiSimulation() {
 
   API.toast(`Starting simulation: ${p.name}...`, 'info');
 
+  const executeTurn = async (text) => {
+    if (!isSimulationRunning) return;
+    showTypingIndicator('user', `✍️ ${personaShortName} is typing...`);
+    await new Promise(r => setTimeout(r, 900));
+    removeTypingIndicator();
+    appendUserMessage(text, `👤 ${personaShortName}`);
+    showTypingIndicator('bot', '☕ DinerBot is typing...');
+    await handleChatText(text);
+  };
+
   // Turn 1: Initial message
-  await handleChatText(p.initial);
+  await executeTurn(p.initial);
 
   // Play remaining follow-up turns sequentially
   let followUpIdx = 0;
@@ -468,9 +497,9 @@ async function startAiSimulation() {
       const msg = p.followUps[followUpIdx++];
       activeSimulationTimer = setTimeout(async () => {
         if (!isSimulationRunning) return;
-        await handleChatText(msg);
+        await executeTurn(msg);
         runNextFollowUp();
-      }, 3000);
+      }, 3500);
     } else {
       activeSimulationTimer = setTimeout(() => {
         stopAiSimulation(true);
