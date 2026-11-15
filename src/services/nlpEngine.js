@@ -1501,6 +1501,7 @@ async function handlePaymentProofTextInput(psid, session, rawText) {
  */
 function isCancelTriggerWord(norm = '', rawText = '', eventPayload = '') {
   if (eventPayload === 'ACTION_CANCEL_ORDER' || eventPayload === 'CANCEL_ORDER' || (typeof eventPayload === 'string' && eventPayload.startsWith('CANCEL_ORDER_'))) return true;
+  const combined = `${norm || ''} ${rawText || ''}`.trim();
   const triggerPhrases = [
     'cancel',
     'cancel order',
@@ -1517,16 +1518,20 @@ function isCancelTriggerWord(norm = '', rawText = '', eventPayload = '') {
     'ayaw ko na nito',
     'ayoko na',
     'kanselahin',
+    'wag na pala',
+    'huwag na pala',
+    'wag na po',
+    'huwag na po',
     'refund',
     'pa refund',
     'pa-refund',
     'parefund'
   ];
-  if (triggerPhrases.some(p => norm === p || norm.includes(p))) return true;
-  if (/\b(?:pa[-\s]?cancel|i[-\s]?cancel|kanselahin|ayaw\s+ko\s+na|ayoko\s+na)\b/i.test(rawText)) return true;
-  if (/\b(?:wag\s+na|hayss?\s*wag\s*na)\b.*?\bcancel\b/i.test(rawText)) return true;
-  if (/\bcancel\b.*?\b(?:order|food|delivery|kape|drink|ko)\b/i.test(rawText)) return true;
-  if (/\b(?:order|food|delivery)\b.*?\bcancel\b/i.test(rawText)) return true;
+  if (triggerPhrases.some(p => combined === p || combined.includes(p))) return true;
+  if (/\b(?:pa[-\s]?cancel|i[-\s]?cancel|kanselahin|ayaw\s+ko\s+na|ayoko\s+na)\b/i.test(combined)) return true;
+  if (/\b(?:wag\s+na|hayss?\s*wag\s*na)\b.*?\bcancel\b/i.test(combined)) return true;
+  if (/\bcancel\b.*?\b(?:order|food|delivery|kape|drink|ko)\b/i.test(combined)) return true;
+  if (/\b(?:order|food|delivery)\b.*?\bcancel\b/i.test(combined)) return true;
   return false;
 }
 

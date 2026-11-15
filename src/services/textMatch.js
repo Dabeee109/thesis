@@ -405,5 +405,6 @@ module.exports = {
   validateName,
   normalizePhone,
   validateAddress,
-  peso
+  peso,
+  COLLOQUIAL_MENU_ALIASES
 };
