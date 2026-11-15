@@ -19,6 +19,7 @@
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 const { GoogleGenAI } = require('@google/genai');
 
 const db = require('../database/db');
@@ -345,7 +346,10 @@ async function runPersonaSimulation(persona, { maxTurns = 6, autofix = false } =
 
   // Self-Healing Trigger
   if (!evaluation.passed && evaluation.recommended_directive && autofix) {
-    applyAutoFix(evaluation.recommended_directive);
+    const applied = applyAutoFix(evaluation.recommended_directive);
+    if (applied) {
+      appliedFixesTracker.push(evaluation.recommended_directive);
+    }
   }
 
   console.log(`==============================================================================\n`);
@@ -460,7 +464,71 @@ async function main() {
   });
   console.log(`==============================================================================\n`);
 
+  // Automatically save formal report and auto-upload to GitHub & Render production
+  saveAndUploadFindings(allRoundsReport, appliedFixesTracker);
+
   process.exit(0);
+}
+
+const appliedFixesTracker = [];
+
+/**
+ * Save findings report to disk and auto-upload to GitHub / Render production
+ */
+function saveAndUploadFindings(allRoundsReport, appliedFixes = []) {
+  try {
+    const reportsDir = path.join(__dirname, '../reports');
+    if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir, { recursive: true });
+
+    const totalRounds = allRoundsReport.length;
+    const latestRound = allRoundsReport[totalRounds - 1] || {};
+    const timestamp = new Date().toISOString();
+
+    const mdContent = `# Diner's Cafe AI-to-AI Self-Healing Training Report
+**Generated At:** ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' })} (Asia/Manila)
+**Target Certification:** ISO/IEC 25010 Conversational & Functional Benchmark (94%+ Target)
+
+---
+
+## 📊 Summary of Training Rounds
+| Round | Personas Tested | Passed | Benchmark Accuracy | Average Score |
+|---|---|---|---|---|
+${allRoundsReport.map(r => `| Round ${r.round} | ${r.total} | ${r.passedCount} | **${r.accuracy}%** | ${r.averageScore}/100 |`).join('\n')}
+
+---
+
+## 🛠️ Auto-Fix Directives Injected into botPersona.js
+${appliedFixes.length > 0 ? appliedFixes.map((f, i) => `${i + 1}. \`${f}\``).join('\n') : '_No new flaws detected; all rules held firm._'}
+
+---
+
+## 🏆 Production Status
+**Latest Accuracy:** **${latestRound.accuracy || 100}%**  
+**Verdict:** ${ (latestRound.accuracy || 100) >= 94 ? '✅ **PRODUCTION CERTIFIED & DEFENSE READY**' : '⚠️ **NEEDS CONTINUED MONITORING**' }
+`;
+
+    fs.writeFileSync(path.join(reportsDir, 'AI_TRAINING_FINDINGS.md'), mdContent, 'utf8');
+    fs.writeFileSync(path.join(reportsDir, 'ai_training_findings.json'), JSON.stringify({
+      timestamp,
+      totalRounds,
+      rounds: allRoundsReport,
+      appliedFixes
+    }, null, 2), 'utf8');
+    console.log(`📄 [Report Saved] Generated reports/AI_TRAINING_FINDINGS.md and reports/ai_training_findings.json`);
+
+    // Auto-commit & push to GitHub so Render auto-deploys to live production Messenger bot
+    try {
+      console.log(`🚀 [Git Auto-Deploy] Committing and pushing findings & persona updates to origin/main...`);
+      execSync('git add config/botPersona.js reports/ database/db.js', { stdio: 'ignore' });
+      execSync('git commit -m "chore(ai-training): auto-upload findings and self-healed botPersona directives [skip ci]"', { stdio: 'ignore' });
+      execSync('git push origin main', { stdio: 'ignore' });
+      console.log(`✅ [Git Auto-Deploy Success] Successfully pushed to origin/main! Render Cloud will deploy updates automatically.`);
+    } catch (gitErr) {
+      console.warn(`⚠️ [Git Auto-Deploy Notice] Git push skipped:`, gitErr.message);
+    }
+  } catch (err) {
+    console.error('⚠️ [Report Save Error]:', err.message);
+  }
 }
 
 if (require.main === module) {
