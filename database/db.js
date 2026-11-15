@@ -527,6 +527,8 @@ function initSqliteFallback() {
             dining_mode TEXT DEFAULT 'Delivery',
             arriving_time TEXT DEFAULT NULL,
             note TEXT DEFAULT NULL,
+            cancel_requested INTEGER DEFAULT 0,
+            cancel_requested_at DATETIME DEFAULT NULL,
             discount_type TEXT DEFAULT 'NONE',
             discount_amount REAL DEFAULT 0.00,
             discount_id_number TEXT DEFAULT NULL,
@@ -541,6 +543,7 @@ function initSqliteFallback() {
             distance_km, customer_notes, cancellation_reason, feedback_requested_at, gcash_ref, receipt_url,
             void_status, void_requested_by, void_reason, void_requested_at, customer_lat, customer_lng,
             is_preorder, landmark, dining_mode, arriving_time, note,
+            cancel_requested, cancel_requested_at,
             discount_type, discount_amount, discount_id_number, discount_id_name, discount_id_image_url,
             created_at, updated_at
           )
@@ -550,6 +553,7 @@ function initSqliteFallback() {
             distance_km, customer_notes, cancellation_reason, feedback_requested_at, gcash_ref, receipt_url,
             void_status, void_requested_by, void_reason, void_requested_at, customer_lat, customer_lng,
             COALESCE(is_preorder, 0), landmark, COALESCE(dining_mode, 'Delivery'), arriving_time, note,
+            0, NULL,
             'NONE', 0.00, NULL, NULL, NULL,
             created_at, updated_at
           FROM orders;
@@ -564,7 +568,9 @@ function initSqliteFallback() {
       try { sqliteDb.pragma('foreign_keys = ON'); } catch (_) {}
     }
 
-    // Always ensure discount columns exist in SQLite orders table
+    // Always ensure discount and cancellation columns exist in SQLite orders table
+    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN cancel_requested INTEGER DEFAULT 0;`); } catch (e) { }
+    try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN cancel_requested_at DATETIME DEFAULT NULL;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN discount_type TEXT DEFAULT 'NONE';`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN discount_amount REAL DEFAULT 0.00;`); } catch (e) { }
     try { sqliteDb.exec(`ALTER TABLE orders ADD COLUMN discount_id_number TEXT DEFAULT NULL;`); } catch (e) { }
