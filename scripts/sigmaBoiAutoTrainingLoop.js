@@ -42,8 +42,8 @@ const PERSONAS = [
     id: 1,
     name: "Ang Nagmamadali / One-Shot Orderer",
     description: "Gusto lahat agad: pagkain, delivery address, phone, at mode of payment sa iisang mensahe.",
-    goal: "Umorder ng 2 Bacon Burger at 1 Spanish Latte for Delivery sa 123 Juan Luna St Tondo tapat ng Puregold, bayad via GCash, pangalan Marco Santos 09171234567.",
-    initialMessage: "Padeliver po ng 2 Bacon Burger at 1 Spanish Latte sa 123 Juan Luna St Tondo tapat ng Puregold, bayad ako via GCash Marco Santos 09171234567",
+    goal: "Umorder ng 2 Bacon Burger at 1 Classic Milktea for Delivery sa 123 Juan Luna St Tondo tapat ng Puregold, bayad via GCash, pangalan Marco Santos 09171234567.",
+    initialMessage: "Padeliver po ng 2 Bacon Burger at 1 Classic Milktea sa 123 Juan Luna St Tondo tapat ng Puregold, bayad ako via GCash Marco Santos 09171234567",
     systemPrompt: `Ikaw ay isang customer na nagmamadali. Nais mong ma-deliver ang iyong pagkain sa lalong madaling panahon. Lahat ng detalye ay ibinigay mo na sa simula. Kapag humingi ang bot ng kumpirmasyon ng order summary, kumpirmahin mo ito agad gamit ang 'Oo, tama'. Kapag tapos na ang order o naibigay na ang detalye, sabihin ang '[GOAL_REACHED]'.`
   },
   {
@@ -90,8 +90,8 @@ const PERSONAS = [
     id: 7,
     name: "Ang Strict Customizer / Allergic & Special Instructions",
     description: "May maselan na dietary requirement (lactose intolerance/allergy) at naglalagay ng mahigpit na instruction.",
-    goal: "Umorder ng Spanish Latte pero may bilin na bawal ang dairy milk, oatmilk strictly.",
-    initialMessage: "Pabili po ng 1 Spanish Latte for Dine-in pero paki-note na allergic ako sa dairy, oatmilk only please",
+    goal: "Umorder ng Caramel Macchiato pero may bilin na bawal ang dairy milk, oatmilk strictly.",
+    initialMessage: "Pabili po ng 1 Caramel Macchiato for Dine-in pero paki-note na allergic ako sa dairy, oatmilk only please",
     systemPrompt: `Ikaw ay may dairy allergy. Sinisigurado mong naitala ng bot sa special instructions ang iyong allergy. Kapag kinumpirma ng bot na noted ang allergy note, sabihin ang '[GOAL_REACHED]'.`
   },
   {
@@ -367,10 +367,37 @@ async function main() {
   const personaArg = (args.find(a => a.startsWith('--persona=')) || '--persona=1').split('=')[1];
   const maxTurnsArg = parseInt((args.find(a => a.startsWith('--turns=')) || '--turns=6').split('=')[1], 10);
   const autofixArg = args.includes('--autofix');
+  const hoursArg = parseFloat((args.find(a => a.startsWith('--hours=')) || '--hours=0').split('=')[1]);
+  const untilArg = (args.find(a => a.startsWith('--until=')) || '').split('=')[1];
+
+  let endTime = 0;
+  if (untilArg) {
+    const now = new Date();
+    const match = untilArg.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+    if (match) {
+      let h = parseInt(match[1], 10);
+      const m = parseInt(match[2], 10);
+      const ampm = (match[4] || '').toUpperCase();
+      if (ampm === 'PM' && h < 12) h += 12;
+      if (ampm === 'AM' && h === 12) h = 0;
+      const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0, 0);
+      if (target.getTime() <= now.getTime()) {
+        target.setDate(target.getDate() + 1);
+      }
+      endTime = target.getTime();
+    }
+  } else if (hoursArg > 0) {
+    endTime = Date.now() + (hoursArg * 3600 * 1000);
+  }
+  const durationMs = endTime > Date.now() ? (endTime - Date.now()) : 0;
 
   console.log(`\n==============================================================================`);
   console.log(`🚀 Diner's Cafe 3-Bot AI-to-AI Automated Testing & Self-Healing Pipeline`);
   console.log(`⚡ Model: ${SIMULATOR_MODEL} | Auto-Fix: ${autofixArg ? 'ENABLED' : 'DISABLED'}`);
+  if (endTime > 0) {
+    const remMin = Math.round((endTime - Date.now()) / 60000);
+    console.log(`⏳ Target End Time: ${new Date(endTime).toLocaleTimeString()} (${remMin} mins remaining)`);
+  }
   console.log(`==============================================================================`);
 
   let targetPersonas = [];
@@ -386,24 +413,51 @@ async function main() {
     targetPersonas = [matched];
   }
 
-  const results = [];
-  for (const p of targetPersonas) {
-    const res = await runPersonaSimulation(p, { maxTurns: maxTurnsArg, autofix: autofixArg });
-    results.push({ persona: p, evaluation: res });
-  }
+  let round = 1;
+  const allRoundsReport = [];
 
-  const total = results.length;
-  const passedCount = results.filter(r => r.evaluation.passed).length;
-  const averageScore = Math.round(results.reduce((acc, r) => acc + (r.evaluation.score || 0), 0) / total);
-  const accuracy = Math.round((passedCount / total) * 100);
+  do {
+    console.log(`\n==============================================================================`);
+    console.log(`🔄 [ROUND ${round}] Starting full persona cycle at ${new Date().toLocaleTimeString()}...`);
+    if (durationMs > 0) {
+      const remainingMin = Math.round((endTime - Date.now()) / 60000);
+      console.log(`⏱️ Remaining Training Time: ${remainingMin} minutes`);
+    }
+    console.log(`==============================================================================`);
+
+    const roundResults = [];
+    for (const p of targetPersonas) {
+      const res = await runPersonaSimulation(p, { maxTurns: maxTurnsArg, autofix: autofixArg });
+      roundResults.push({ persona: p, evaluation: res });
+      // Brief breathing gap between personas to avoid API rate limit spikes
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    const total = roundResults.length;
+    const passedCount = roundResults.filter(r => r.evaluation.passed).length;
+    const averageScore = Math.round(roundResults.reduce((acc, r) => acc + (r.evaluation.score || 0), 0) / total);
+    const accuracy = Math.round((passedCount / total) * 100);
+
+    allRoundsReport.push({ round, passedCount, total, accuracy, averageScore });
+
+    console.log(`\n==============================================================================`);
+    console.log(`📊 [ROUND ${round} SUMMARY] Passed: ${passedCount}/${total} (${accuracy}%) | Avg Score: ${averageScore}/100`);
+    console.log(`==============================================================================`);
+
+    round++;
+    if (durationMs > 0 && Date.now() < endTime) {
+      console.log(`\n💤 Waiting 10 seconds before next training round...\n`);
+      await new Promise(r => setTimeout(r, 10000));
+    }
+  } while (durationMs > 0 && Date.now() < endTime);
 
   console.log(`\n==============================================================================`);
-  console.log(`🎯 SIGMABOITRAINING FINAL PIPELINE REPORT`);
+  console.log(`🎯 SIGMABOITRAINING CONTINUOUS RUN REPORT`);
   console.log(`==============================================================================`);
-  console.log(`Personas Tested: ${total}`);
-  console.log(`Passed:          ${passedCount}/${total} (${accuracy}%)`);
-  console.log(`Average Score:   ${averageScore}/100`);
-  console.log(`Status:          ${accuracy >= 94 ? '🏆 94%+ TARGET ACHIEVED! (PRODUCTION CERTIFIED)' : '⚠️ BELOW 94% TARGET'}`);
+  console.log(`Total Rounds Executed: ${allRoundsReport.length}`);
+  allRoundsReport.forEach(r => {
+    console.log(`- Round ${r.round}: ${r.passedCount}/${r.total} passed (${r.accuracy}%) | Avg: ${r.averageScore}/100`);
+  });
   console.log(`==============================================================================\n`);
 
   process.exit(0);
