@@ -137,7 +137,19 @@ function parseQuantity(text) {
 }
 
 // 4. matchItems (Fuzzy menu item matching)
-const STOPWORDS = new Set(['the', 'a', 'an', 'po', 'please', 'pls', 'yung', 'ung', 'ang', 'ng', 'sa', 'my', 'item']);
+const STOPWORDS = new Set([
+  'the', 'a', 'an', 'po', 'please', 'pls', 'yung', 'ung', 'ang', 'ng', 'sa', 'my', 'item',
+  'nga', 'ano', 'ba', 'un', 'yun', 'yan', 'pa', 'na', 'lang', 'ko', 'mo', 'ka', 'pabili', 'paorder',
+  'tsaka', 'saka', 'tapos', 'pati'
+]);
+
+const COLLOQUIAL_MENU_ALIASES = {
+  'classic milktea': ['boba milktea', 'boba milk tea', 'boba milkte', 'plain milktea', 'regular milktea', 'milktea', 'milk tea'],
+  'classic burger': ['burger', 'regular burger', 'beef burger', 'hamburger'],
+  'caramel macchiato': ['iced coffee', 'cold brew'],
+  "chic'n bowl (with rice)": ['chicken silog', 'chiken silog', 'chicksilog', 'chiksilog', 'chicken rice'],
+  'nachos with toppings (regular)': ['beef nachos', 'beef nachoz', 'nachos', 'nachoz']
+};
 
 function cleanQueryTokens(str) {
   return normalize(str)
@@ -254,12 +266,21 @@ function matchItems(query, candidates, cfg = {}) {
     let bestScore = scoreCandidateName(queryTokens, queryStr, cand.name);
 
     // Check aliases / synonyms
-    const aliases = Array.isArray(cand.aliases) ? cand.aliases :
+    const baseAliases = Array.isArray(cand.aliases) ? cand.aliases :
       typeof cand.synonyms === 'string' ? cand.synonyms.split(',').map(s => s.trim()) : [];
+    const fallbackAliases = (!cand.synonyms && !cand.aliases && cand.name)
+      ? (COLLOQUIAL_MENU_ALIASES[String(cand.name).toLowerCase()] || [])
+      : [];
+    const aliases = [...baseAliases, ...fallbackAliases];
 
+    let aliasExact = false;
     for (const alias of aliases) {
       if (alias) {
-        const s = scoreCandidateName(queryTokens, queryStr, alias);
+        let s = scoreCandidateName(queryTokens, queryStr, alias);
+        if (s >= 0.99 && fallbackAliases.includes(alias)) {
+          s = 1.0;
+          aliasExact = true;
+        }
         if (s > bestScore) bestScore = s;
       }
     }
@@ -268,6 +289,7 @@ function matchItems(query, candidates, cfg = {}) {
       scored.push({
         item: cand,
         ...cand,
+        aliasExact,
         score: Math.round(bestScore * 1000) / 1000
       });
     }
@@ -281,6 +303,11 @@ function matchItems(query, candidates, cfg = {}) {
 
   const top = scored[0];
   const second = scored[1];
+
+  // Colloquial exact alias (e.g. "burger" -> Classic Burger) wins outright over partial-token matches
+  if (top.aliasExact && top.score >= 1 && (!second || second.score < 1)) {
+    return { status: 'accept', matches: scored };
+  }
 
   // Ambiguous: two or more within gap and >= fuzzyConfirm
   if (second && (top.score - second.score) <= gap && second.score >= fuzzyConfirm) {
@@ -301,7 +328,7 @@ function matchItems(query, candidates, cfg = {}) {
 }
 
 // 5. Validators
-const NON_NAME_PHRASE_REGEX = /\b(?:binigay|ibinigay|nasabi|sinabi|kanina|kasi|naman|bakit|paano|pano|ano|anong|kelan|saan|san|hindi|ayoko|ayaw|wala|meron|mayroon|paulit|ulit|sayo|iyo|ninyo|nyo|ko\s+na|mo\s+na|na\s+po|ba\s+yan|haha+|lol|order|menu|cart|gcash|cash|delivery|pickup|take\s*out|cancel|teka|sandali|wait|none|skip)\b/i;
+const NON_NAME_PHRASE_REGEX = /\b(?:binigay|ibinigay|nasabi|sinabi|kanina|kasi|naman|bakit|paano|pano|ano|anong|kelan|saan|san|hindi|ayoko|ayaw|wala|meron|mayroon|paulit|ulit|sayo|iyo|ninyo|nyo|ko\s+na|mo\s+na|na\s+po|ba\s+yan|haha+|lol|order|menu|cart|gcash|cash|delivery|pickup|take\s*out|cancel|teka|sandali|wait|none|skip|secret|sikreto|basta|ewan|pake|pakialam|sabihin|malapit|tindahan|kanto|street|barangay|brgy|tondo|manila|anonymous|unknown)\b/i;
 
 function validateName(s) {
   if (!s || typeof s !== 'string') return { ok: false };

@@ -31,10 +31,10 @@ describe('Mobile UI Redesign: Spacious & Modern Mobile Rider View', () => {
     assert.ok(html.includes('onclick="loadRiderDeliveries()"'));
   });
 
-  it('3. Renders horizontal tabs for 🚴 Active Queue, 📜 History, and compact 👤 Profile', () => {
+  it('3. Renders horizontal tabs for Active Queue, History, and compact Profile', () => {
     assert.ok(html.includes('class="rider-tabs-bar"'));
-    assert.ok(html.includes('🚴 Active Queue'));
-    assert.ok(html.includes('📜 History'));
+    assert.ok(html.includes('Active Queue'));
+    assert.ok(html.includes('History'));
     assert.ok(html.includes('id="tab-profile"'));
   });
 

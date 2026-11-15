@@ -49,6 +49,22 @@
         sessionStorage.removeItem('diners_user');
         window.location.replace('/login.html?redirect=' + encodeURIComponent(window.location.pathname));
       }
+
+      // Auto-bust stale mobile PWA / service worker caches
+      const RIDER_CLIENT_V = '2.4.0';
+      if (localStorage.getItem('diners_rider_v') !== RIDER_CLIENT_V) {
+        localStorage.setItem('diners_rider_v', RIDER_CLIENT_V);
+        if ('caches' in window) {
+          caches.keys().then(names => {
+            for (const name of names) caches.delete(name);
+          });
+        }
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.getRegistrations().then(regs => {
+            for (const reg of regs) reg.update();
+          });
+        }
+      }
     })();
   </script>
   <style>
@@ -400,7 +416,7 @@
     <!-- 1. Ultra-Compact Top Rider Profile Header -->
     <header class="rider-header">
       <div class="rider-profile-bar" onclick="setRiderView('profile')" style="cursor: pointer;" title="View Rider Profile">
-        <div class="rider-avatar-circle">☕</div>
+        <div class="rider-avatar-circle">🛵</div>
         <div style="min-width: 0;">
           <h2 style="font-size: 1.06rem; font-weight: 800; margin: 0; line-height: 1.2; color: #fbf6f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" id="rider-name-display">Marco Santos</h2>
           <span style="font-size: 0.76rem; color: #c89f74; font-weight: 600; display: block; margin-top: 2px; opacity: 0.92;" id="rider-vehicle-display">MC-7890-PH</span>
@@ -439,13 +455,13 @@
     <!-- 3. Top Horizontal Tabs for Active Views -->
     <nav class="rider-tabs-bar" role="tablist" aria-label="Rider Portal Views">
       <button id="tab-active" type="button" class="rider-tab-btn active" role="tab" aria-selected="true" onclick="setRiderView('active')">
-        <span>🚴 Active Queue</span>
+        <span>🛵 Active Queue</span>
       </button>
       <button id="tab-history" type="button" class="rider-tab-btn" role="tab" aria-selected="false" onclick="setRiderView('history')">
-        <span>📜 History</span>
+        <span>📜 Delivered History</span>
       </button>
       <button id="tab-profile" type="button" class="rider-tab-btn compact-tab" role="tab" aria-selected="false" onclick="setRiderView('profile')" title="My Profile">
-        <span>👤 Profile</span>
+        <span>👤 My Profile</span>
       </button>
     </nav>
 

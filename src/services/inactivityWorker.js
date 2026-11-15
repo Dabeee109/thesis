@@ -103,29 +103,6 @@ async function checkInactivity(deps = {}) {
     // 30 Minutes: Complete Session Purge & Abandoned Cart Cleanup (Issue 4)
     else if (elapsedMinutes >= 30) {
       if (!session.purged30Sent) {
-        session.name = null;
-        session.phone_number = null;
-        session.address = null;
-        session.dining_mode = null;
-        session.cart = [];
-        session.ordered_items = [];
-        session.discount = null;
-        session.discount_info = null;
-        session.state = 'INITIAL_GREETING';
-        session.current_step = 'INITIAL_GREETING';
-        session.orderType = null;
-        session.order_type = null;
-        session.pendingStage5 = null;
-        session.pendingItem = null;
-        session.pending_suggestion = null;
-        session.details = null;
-        session.customer_name = null;
-        session.contact_number = null;
-        session.delivery_address = null;
-        session.quote = null;
-        session.checkout = null;
-        session.order_subtotal = null;
-        session.order_total = null;
         session.warning20Sent = false;
         session.warning25Sent = false;
         session.purged30Sent = true;
@@ -134,7 +111,9 @@ async function checkInactivity(deps = {}) {
         const msg = hasCart ? INACTIVITY_MESSAGES.RESET_30M : INACTIVITY_MESSAGES.RESET_30M_NOCART;
         console.log(`[InactivityWorker] Dispatching 30M purge/reset to ${psid} (elapsed: ${elapsedMinutes.toFixed(1)}m, hadCart: ${hasCart})`);
         await sendFn(psid, msg, { messagingType: 'UPDATE' }).catch(e => console.warn('[Inactivity Purge Err]', e.message));
-        await saveSession(session);
+
+        const { resetUserSession } = require('./sessionManager');
+        await resetUserSession(psid, { targetState: 'IDLE' });
       }
     }
   }

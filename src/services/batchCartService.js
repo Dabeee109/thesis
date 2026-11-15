@@ -28,6 +28,12 @@ function isBatchRemoveIntent(text) {
   return BATCH_REMOVE_REGEX.test(text.toLowerCase());
 }
 
+function isMixedAddAndRemoveIntent(text) {
+  if (!text || typeof text !== 'string') return false;
+  const lower = text.toLowerCase();
+  return BATCH_REMOVE_REGEX.test(lower) && BATCH_ADD_REGEX.test(lower);
+}
+
 /**
  * Detect multi-item ordering queries (comma separated items, conjunctions like "and", "tsaka",
  * or multiple quantity markers)
@@ -107,7 +113,11 @@ function executeBatchAdd(cart, text, menuItems = []) {
       itemQuery = (qtyMatch[2] || '').trim();
     }
 
-    itemQuery = itemQuery.replace(/\b(?:po|ng|yung|mga|ko|na)\b/gi, ' ').replace(/\s+/g, ' ').trim();
+    itemQuery = itemQuery
+      .replace(/[.?!…]+/g, ' ')
+      .replace(/\b(?:po|ng|yung|ung|mga|ko|na|nga|ano|ba|un|yun|yan|wait|lang|pala|ay|ka|pa|kanina|ulit|patingin|cart|kart)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (!itemQuery) continue;
 
     // Direct fuzzy match against menuItems
@@ -179,12 +189,37 @@ function formatUpdatedCartResponse(cart) {
   };
 }
 
+function executeMixedCartMutation(cart, text, menuItems = []) {
+  if (!Array.isArray(cart) || !text) return { addedItems: [], removedItems: [] };
+  const clauses = String(text)
+    .split(/(?:,\s*|\s+\b(?:tapos|tsaka|saka|and)\b\s*)/i)
+    .map(c => c.trim())
+    .filter(Boolean);
+
+  const addedItems = [];
+  const removedItems = [];
+
+  for (const clause of clauses) {
+    if (BATCH_REMOVE_REGEX.test(clause)) {
+      const rem = executeMultiItemRemoval(cart, clause);
+      if (Array.isArray(rem)) removedItems.push(...rem);
+    } else if (BATCH_ADD_REGEX.test(clause)) {
+      const add = executeBatchAdd(cart, clause, menuItems);
+      if (Array.isArray(add)) addedItems.push(...add);
+    }
+  }
+
+  return { addedItems, removedItems };
+}
+
 module.exports = {
   isBatchAddIntent,
   isBatchRemoveIntent,
+  isMixedAddAndRemoveIntent,
   isMultiItemOrderText,
   executeBatchAdd,
   executeBatchRemove: executeMultiItemRemoval,
+  executeMixedCartMutation,
   formatUpdatedCartResponse
 };
 

@@ -151,7 +151,7 @@ function parseRemovalRequests(text, cart = []) {
     }
 
     // Clean up filler words from itemQuery
-    itemQuery = itemQuery.replace(/\b(?:po|ng|yung|mga|ko|na)\b/gi, ' ').replace(/\s+/g, ' ').trim();
+    itemQuery = itemQuery.replace(/\b(?:po|ng|yung|ung|mga|ko|mo|na|kanina|muna|pala|ulit)\b/gi, ' ').replace(/\s+/g, ' ').trim();
 
     if (!itemQuery && cart.length === 1) {
       results.push({ name: cart[0].name, item: cart[0], qty });

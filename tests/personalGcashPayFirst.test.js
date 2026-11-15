@@ -106,7 +106,7 @@ test('Personal GCash Pay-First & Anti-Flood Suite', async (t) => {
     );
     assert.strictEqual(beforeOrders.length, 0);
 
-    const result = await nlpEngine.finalizeOrderSummaryAndPayment(psid, session);
+    const result = await nlpEngine.finalizeOrderSummaryAndPayment(psid, session, { skipConfirmation: true });
     assert.strictEqual(result.intent, 'AWAITING_PAYMENT_PROOF');
 
     // Critical anti-flood verification: zero DB orders inserted yet!

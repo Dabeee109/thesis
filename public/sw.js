@@ -2,7 +2,7 @@
  * Diner's Cafe Mobile Service Worker (Network-First for Dynamic Pages)
  */
 
-const CACHE_NAME = 'diners-cafe-cache-v18';
+const CACHE_NAME = 'diners-cafe-cache-v21';
 
 self.addEventListener('install', (e) => {
   self.skipWaiting();
@@ -24,10 +24,12 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  // Never intercept non-GET requests, API routes, SSE streams, or dynamic payment uploads
+  // Never intercept non-GET requests, API routes, SSE streams, rider portal, or dynamic payment uploads
   if (
     e.request.method !== 'GET' ||
     e.request.url.includes('/api/') ||
+    e.request.url.includes('/rider') ||
+    e.request.url.includes('/rider-portal') ||
     e.request.url.includes('/uploads/payments/')
   ) {
     return;
