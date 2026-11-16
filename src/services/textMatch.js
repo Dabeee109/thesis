@@ -354,6 +354,22 @@ function validateName(s) {
 
 function normalizePhone(s) {
   if (!s || typeof s !== 'string') return null;
+  // Check for line-contained or delimited Philippine phone numbers (e.g. 0927 384 4028, 0927-384-4028, +63 927 384 4028)
+  const matches = s.matchAll(/(?:^|[^\d+])((?:09|\+?63[\s.-]?9|9)[0-9 .-]{7,16}[0-9])(?=[^\d]|$)/g);
+  for (const m of matches) {
+    const digits = m[1].replace(/\D/g, '');
+    if (digits.length === 11 && digits.startsWith('09')) {
+      return `+63${digits.substring(1)}`;
+    }
+    if (digits.length === 12 && digits.startsWith('639')) {
+      return `+${digits}`;
+    }
+    if (digits.length === 10 && digits.startsWith('9')) {
+      return `+63${digits}`;
+    }
+  }
+
+  // Fallback: strip non-digits if entire string is just the number
   const digitsOnly = s.replace(/[^0-9]/g, '');
   // Philippines mobile numbers:
   // 09XXXXXXXXX (11 digits)

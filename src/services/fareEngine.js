@@ -123,6 +123,29 @@ async function queryNominatim(q, options = {}) {
   return null;
 }
 
+const KNOWN_NCR_AREAS = [
+  { pattern: /\b(?:mandaluyong|addition\s*hills|bencel|shaw|boni|pioneer)\b/i, lat: 14.5888, lng: 121.0336, name: 'Mandaluyong City' },
+  { pattern: /\b(?:quezon\s*city|qc|cubao|diliman|novaliches|commonwealth|katipunan)\b/i, lat: 14.6760, lng: 121.0437, name: 'Quezon City' },
+  { pattern: /\b(?:makati|ayala|poblacion|bel-?air|guadalupe|buendia)\b/i, lat: 14.5547, lng: 121.0244, name: 'Makati City' },
+  { pattern: /\b(?:pasay|moa|mall\s*of\s*asia|baclaran|airport|taft)\b/i, lat: 14.5378, lng: 120.9994, name: 'Pasay City' },
+  { pattern: /\b(?:taguig|bgc|bonifacio|market\s*market)\b/i, lat: 14.5547, lng: 121.0509, name: 'Taguig City' },
+  { pattern: /\b(?:pasig|ortigas|kapitolyo|rosario)\b/i, lat: 14.5764, lng: 121.0851, name: 'Pasig City' },
+  { pattern: /\b(?:marikina)\b/i, lat: 14.6507, lng: 121.1029, name: 'Marikina City' },
+  { pattern: /\b(?:paranaque|parañaque|bf\s*homes|sucat)\b/i, lat: 14.4793, lng: 121.0198, name: 'Parañaque City' },
+  { pattern: /\b(?:las\s*pi[nñ]as|almanza)\b/i, lat: 14.4445, lng: 120.9939, name: 'Las Piñas City' },
+  { pattern: /\b(?:muntinlupa|alabang)\b/i, lat: 14.4081, lng: 121.0415, name: 'Muntinlupa City' },
+  { pattern: /\b(?:caloocan|monumento|bagong\s*barrio)\b/i, lat: 14.6500, lng: 120.9830, name: 'Caloocan City' },
+  { pattern: /\b(?:malabon)\b/i, lat: 14.6625, lng: 120.9570, name: 'Malabon City' },
+  { pattern: /\b(?:navotas)\b/i, lat: 14.6667, lng: 120.9417, name: 'Navotas City' },
+  { pattern: /\b(?:valenzuela)\b/i, lat: 14.7011, lng: 120.9830, name: 'Valenzuela City' },
+  { pattern: /\b(?:san\s*juan|greenhills)\b/i, lat: 14.6019, lng: 121.0355, name: 'San Juan City' },
+  { pattern: /\b(?:tondo|gagalangin|pritil|tayuman|moriones|tutuban|herbosa|vela)\b/i, lat: 14.6143, lng: 120.9642, name: 'Tondo, Manila' },
+  { pattern: /\b(?:sampaloc|ust|espa[nñ]a|morayta)\b/i, lat: 14.6080, lng: 120.9940, name: 'Sampaloc, Manila' },
+  { pattern: /\b(?:binondo|chinatown|divisoria|ongpin)\b/i, lat: 14.6000, lng: 120.9750, name: 'Binondo, Manila' },
+  { pattern: /\b(?:sta\.?\s*cruz|santa\s*cruz|avenida)\b/i, lat: 14.6050, lng: 120.9820, name: 'Santa Cruz, Manila' },
+  { pattern: /\b(?:ermita|malate|robinsons\s*manila)\b/i, lat: 14.5760, lng: 120.9850, name: 'Ermita/Malate, Manila' }
+];
+
 /**
  * Geocode destination using Nominatim multi-tier landmark precision strategy:
  *  1. "{address}, near {landmark}, Philippines"
@@ -181,6 +204,18 @@ async function geocodeAddressWithLandmark(address, landmark = '', options = {}) 
       // Continue to next fallback query attempt
       console.warn(`[fareEngine] Nominatim query failed for "${queryStr}":`, reqErr.message);
     }
+  }
+
+  // Fallback: If Nominatim cannot resolve or network is unavailable, match known NCR districts / cities
+  const combinedText = `${cleanAddr} ${cleanLandmark}`.trim();
+  const matchedArea = KNOWN_NCR_AREAS.find(a => a.pattern.test(combinedText));
+  if (matchedArea) {
+    return {
+      latitude: matchedArea.lat,
+      longitude: matchedArea.lng,
+      displayName: `${cleanAddr || matchedArea.name} (${matchedArea.name})`,
+      queryUsed: `fallback:${matchedArea.name}`
+    };
   }
 
   const err = new Error(
