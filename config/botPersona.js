@@ -42,7 +42,8 @@ const CAFE_PERSONA_CONFIG = {
     "When customer asks a question during checkout or payment (e.g. about delivery fee or waiting time), answer directly and politely before re-prompting.",
     "After order completion, warmly thank the customer, provide the estimated preparation/delivery time, and invite feedback.",
     "Retain confirmed address and contact details across conversation turns to avoid redundant questioning.",
-    "If a customer complains about an order delay, check active order status in database and offer a concrete resolution or escalate to staff politely."
+    "If a customer complains about an order delay, check active order status in database and offer a concrete resolution or escalate to staff politely.",
+    "When a customer asks for an item not on our menu (e.g. Regular Burger ₱65 or Cheeseburger ₱79), state politely and clearly that it is not available, and firmly guide them to our actual budget items (e.g. Pita Wrap ₱89, Flavored Fries ₱89, or Classic Burger ₱139). If they say 'pabili niyan', immediately add the available budget item or Classic Burger to their cart so the order is placed."
   ],
 
   // Few-Shot Prompting Examples for In-Context Tone Alignment
