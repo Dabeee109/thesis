@@ -538,6 +538,10 @@ function formatPlaintextOrderSummary(params = {}) {
   const formattedDeliveryFee = Number(isDelivery ? (deliveryFee || 0) : 0).toFixed(2);
   const formattedTotal = Number(total || 0).toFixed(2);
 
+  const displayPaymentMode = /gcash/i.test(paymentMode)
+    ? `GCash (Store Account: 0928 176 2895)`
+    : (paymentMode || 'Cash');
+
   if (isDelivery) {
     return `--- ORDER SUMMARY ---
 Name: ${name || 'Customer'}
@@ -546,7 +550,7 @@ Dining-mode: Delivery
 Address: ${formattedAddress || ''}
 Landmark: ${effectiveLandmark}
 Discount: ${discountType || 'None'}
-Payment Mode: ${paymentMode || 'Cash'}
+Payment Mode: ${displayPaymentMode}
 
 Orders:
 ${orderLines}
@@ -564,7 +568,7 @@ Phone number: ${phone || ''}
 Dining-mode: ${formattedDiningMode}
 Address: ${formattedAddress}
 Discount: ${discountType || 'None'}
-Payment Mode: ${paymentMode || 'Cash'}
+Payment Mode: ${displayPaymentMode}
 
 Orders:
 ${orderLines}
@@ -695,7 +699,7 @@ async function dispatchPersonalGcashCheckout(psid, session, draftData = {}) {
   }
 
   const gcashPortalUrl = `${baseUrl}/pay/gcash?psid=${encodeURIComponent(psid)}&amount=${Number(pending.grandTotal).toFixed(2)}&mode=personal`;
-  const payText = `📱 GCASH PAYMENT (Pay-First Verification)\nTotal Amount: ₱${Number(pending.grandTotal).toFixed(2)}\nGCash Name: ${gcashName}\nGCash No: ${cleanGcashDigits}\n\n1. Buksan ang GCash App o i-scan ang QR code sa itaas at ipadala ang eksaktong ₱${Number(pending.grandTotal).toFixed(2)}.\n2. I-send dito ang SCREENSHOT ng GCash receipt (o 13-digit Ref No.) sa loob ng 20 minuto.\n\n⚠️ Hindi po muna ipapadala sa kusina ang order hangga't walang valid GCash receipt.`;
+  const payText = `📱 GCASH PAYMENT (Pay-First Verification)\nTotal Amount: ₱${Number(pending.grandTotal).toFixed(2)}\nGCash Name: ${gcashName}\n\n1. Buksan ang GCash App o i-scan ang QR code sa itaas at ipadala ang eksaktong ₱${Number(pending.grandTotal).toFixed(2)}.\n2. I-send dito ang SCREENSHOT ng GCash receipt (o 13-digit Ref No.) sa loob ng 20 minuto.\n\n⚠️ Hindi po muna ipapadala sa kusina ang order hangga't walang valid GCash receipt.`;
 
   await sendButtonTemplate(psid, payText, [
     {
@@ -788,7 +792,7 @@ async function finalizeOrderSummaryAndPayment(psid, session, options = {}) {
     { title: '✅ Oo, tama', payload: 'CONFIRM_ORDER_SUMMARY_YES' },
     { title: '✏️ May babaguhin', payload: 'CONFIRM_ORDER_SUMMARY_EDIT' }
   ]);
-  return { intent: 'AWAITING_ORDER_SUMMARY_CONFIRM', confidence: 1.0, replyLog: confirmPrompt };
+  return { intent: 'AWAITING_ORDER_SUMMARY_CONFIRM', confidence: 1.0, replyLog: `${summaryReceipt}\n\n${confirmPrompt}` };
 }
 
 /**
@@ -4156,6 +4160,12 @@ async function handleTextInput(psid, session, rawText) {
       await sendTextMessage(psid, prompt);
       return { intent: 'ORDER_SUMMARY_EDIT', confidence: 1.0, replyLog: editMsg };
     } else {
+      const isSummaryViewInquiry = /\b(?:patingin|tingin|pakita|show|view|ano|summary|resibo|details|order|cart|kart)\b/i.test(norm) ||
+        /\b(?:patingin|tingin|pakita|show|view|summary|resibo)\b/i.test(rawText);
+      if (isSummaryViewInquiry) {
+        return await finalizeOrderSummaryAndPayment(psid, session);
+      }
+
       const isDeliveryFeeInquiry = /\b(?:delivery\s*fee|bakit\s*wala|walang\s*delivery|magkano\s*ang\s*delivery|libreng\s*delivery|free\s*delivery)\b/i.test(norm);
       if (isDeliveryFeeInquiry) {
         let feeExplanation = '';
@@ -4373,6 +4383,15 @@ async function handleTextInput(psid, session, rawText) {
       return await handleCancellationRequest(psid, session, rawText);
     }
     return await handleClearCartAction(psid, session);
+  }
+
+  // 3c. VIEW_ORDER_SUMMARY (patingin ulit ng summary / resibo / order summary)
+  if (
+    /\b(?:patingin|tingin|pakita|show|view)\b/i.test(norm) && /\b(?:summary|resibo|order\s*summary)\b/i.test(norm) &&
+    session.customer_name && (session.contact_number || session.phone_number) &&
+    session.cart && session.cart.length > 0
+  ) {
+    return await finalizeOrderSummaryAndPayment(psid, session);
   }
 
   // 4. VIEW_CART (check BEFORE menu & SEND_PICTURE so "patingin ng cart" / "ano laman ng cart ko" never collides!)
@@ -6713,8 +6732,12 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
             const rawAddon = (isDrink && reqEntry.addon) ? String(reqEntry.addon).trim() : null;
             const resolvedAddon = rawAddon ? (detectAddonInText(rawAddon) || rawAddon) : null;
 
-            // Single-item Drinks & Milktea with no add-on triggers AWAITING_DRINK_ADDON upsell
-            if (requestedList.length === 1 && ambiguousItems.length === 0 && isDrink && !resolvedAddon) {
+            // Check if user is correcting/setting the quantity of an existing item (e.g. "Isa lang ang order kong biscoff", "gawing 1 na lang")
+            const isQuantityCorrection = /\b(?:isa|dalawa|tatlo|\d+)\s*(?:lang|na\s*lang)\b|\bgawing\s*(\d+|isa|dalawa|tatlo)\b|\bpalitan\s*(?:mo\s*)?(?:ng|sa)\s*(\d+|isa|dalawa|tatlo)\b/i.test(rawText);
+            const isInCheckoutOrSummary = ['AWAITING_ORDER_SUMMARY_CONFIRM', 'COLLECTING_CUSTOMER_INFO', 'AWAITING_DISCOUNT_CONFIRMATION'].includes(session.state);
+
+            // Single-item Drinks & Milktea with no add-on triggers AWAITING_DRINK_ADDON upsell only if NOT a correction and NOT in checkout/summary
+            if (requestedList.length === 1 && ambiguousItems.length === 0 && isDrink && !resolvedAddon && !isQuantityCorrection && !isInCheckoutOrSummary) {
               await sendTextMessage(psid, reply_message);
               await promptDrinkAddons(psid, session, dbItem, qty);
               promptedSingleUpsell = true;
@@ -6730,8 +6753,19 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
               }
               : dbItem;
 
-            addToCart(session.cart, itemToCart, qty);
-            addedSummary.push(`${qty}x ${itemToCart.name}`);
+            if (isQuantityCorrection) {
+              const existingIdx = session.cart.findIndex(c => (c.menuItemId === dbItem.id || c.id === dbItem.id || String(c.name || '').toLowerCase().includes(dbItem.name.toLowerCase())));
+              if (existingIdx >= 0) {
+                session.cart[existingIdx].quantity = qty;
+                addedSummary.push(`${qty}x ${session.cart[existingIdx].name}`);
+              } else {
+                addToCart(session.cart, itemToCart, qty);
+                addedSummary.push(`${qty}x ${itemToCart.name}`);
+              }
+            } else {
+              addToCart(session.cart, itemToCart, qty);
+              addedSummary.push(`${qty}x ${itemToCart.name}`);
+            }
           }
 
           if (promptedSingleUpsell) {
@@ -6864,6 +6898,11 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
               };
             }
 
+            if (session.state === 'AWAITING_ORDER_SUMMARY_CONFIRM' || (isQuantityCorrection && session.customer_name && (session.contact_number || session.phone_number))) {
+              await sendTextMessage(psid, reply_message);
+              return await finalizeOrderSummaryAndPayment(psid, session);
+            }
+
             session.state = 'AWAITING_CHECKOUT_CONFIRM';
             await saveSession(session);
             const cartText = `${reply_message}\n\nNaidagdag: ${addedSummary.join(', ')}${oosSuffix}\nCart subtotal: ${peso(subtotal)}. Nais na po ba ninyong mag-checkout o magdagdag pa?`;
@@ -6989,6 +7028,8 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
 
         if (itemsToOrder.length > 0) {
           if (!session.cart) session.cart = [];
+          const isInitialCartEmpty = session.cart.length === 0;
+          const rawLower = String(rawText || '').toLowerCase();
           const [candidates] = await db.query(`
             SELECT m.id, m.name, m.price, m.synonyms, m.is_available,
                    COALESCE(m.stock_quantity, i.stock_quantity, 0) AS stock_quantity,
@@ -7007,15 +7048,20 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
             if (matched) {
               const qty = parseInt(itemReq.quantity || 1, 10) || 1;
               const existing = session.cart.find(ci => ci.id === matched.id || ci.name.toLowerCase() === matched.name.toLowerCase());
-              if (existing) {
+              const isMentionedInText = rawLower.includes(matched.name.toLowerCase()) ||
+                (matched.synonyms && matched.synonyms.split(',').some(s => rawLower.includes(s.trim().toLowerCase())));
+
+              if (!existing) {
+                if (isInitialCartEmpty || isMentionedInText) {
+                  session.cart.push({
+                    id: matched.id,
+                    name: matched.name,
+                    price: parseFloat(matched.price || 0),
+                    quantity: qty
+                  });
+                }
+              } else if (isMentionedInText && /\b(?:pa[- ]?dagdag|dagdag|padagdag|another|isa\s*pa|more|plus)\b/i.test(rawLower)) {
                 existing.quantity = (existing.quantity || 1) + qty;
-              } else {
-                session.cart.push({
-                  id: matched.id,
-                  name: matched.name,
-                  price: parseFloat(matched.price || 0),
-                  quantity: qty
-                });
               }
             }
           }
