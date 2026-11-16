@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-11-16T18:21:32.828Z",
+  "timestamp": "2026-11-16T18:21:55.421Z",
   "totalRounds": 1,
   "rounds": [
     {
@@ -7,7 +7,7 @@
       "passedCount": 1,
       "total": 1,
       "accuracy": 100,
-      "averageScore": 95
+      "averageScore": 90
     }
   ],
   "appliedFixes": []
