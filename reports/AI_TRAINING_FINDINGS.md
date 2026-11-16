@@ -1,5 +1,5 @@
 # Diner's Cafe AI-to-AI Self-Healing Training Report
-**Generated At:** 11/17/2026, 2:08:33 AM (Asia/Manila)
+**Generated At:** 11/17/2026, 2:14:48 AM (Asia/Manila)
 **Target Certification:** ISO/IEC 25010 Conversational & Functional Benchmark (94%+ Target)
 
 ---
@@ -7,7 +7,7 @@
 ## 📊 Summary of Training Rounds
 | Round | Personas Tested | Passed | Benchmark Accuracy | Average Score |
 |---|---|---|---|---|
-| Round 1 | 1 | 1 | **100%** | 100/100 |
+| Round 1 | 13 | 10 | **77%** | 90/100 |
 
 ---
 
@@ -17,5 +17,5 @@ _No new flaws detected; all rules held firm._
 ---
 
 ## 🏆 Production Status
-**Latest Accuracy:** **100%**  
-**Verdict:** ✅ **PRODUCTION CERTIFIED & DEFENSE READY**
+**Latest Accuracy:** **77%**  
+**Verdict:** ⚠️ **NEEDS CONTINUED MONITORING**
