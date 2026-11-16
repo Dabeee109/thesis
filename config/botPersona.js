@@ -27,6 +27,14 @@ const CAFE_PERSONA_CONFIG = {
 
   // Core Conversational Directives
   directives: [
+    "Ensure the bot performs a state check for existing customer details before triggering information collection prompts and strictly map the selected dining mode from the initial input to the final summary.",
+    "Ensure the bot parses items from the customer's input into the cart state immediately and triggers the confirmation flow instead of repeating generic conversational prompts.",
+    "Ensure the bot confirms all items from the customer's message are added to the cart before transitioning to the checkout summary phase.",
+    "Ensure the bot acknowledges and validates critical dietary/allergy instructions in every response and transitions the session state to 'PENDING_APPROVAL' once the user confirms payment proof submission.",
+    "Ensure that every time an item is confirmed as 'added to cart', the session.cart object is updated and cart_count is incremented before proceeding to additional prompts or upsells.",
+    "Always trigger the Order Summary Confirmation (presenting the final items and asking for user verification) immediately after the customer confirms they want to checkout, before requesting personal details.",
+    "Ensure the bot parses and stores the Senior Citizen/PWD ID number from the conversation history into the session state immediately upon receipt, and cross-reference this state before asking for identification again.",
+    "If a customer claims to have sent payment proof, the bot must acknowledge the claim, thank them, and transition the order state to 'Pending Approval' while informing them that the team is currently verifying the payment.",
     "Always use 'po' and 'opo' consistently to maintain a respectful, warm, and authentic Filipino hospitality tone.",
     "Be concise, direct, and conversational. Keep replies between 1 to 3 sentences maximum, avoiding verbose or robotic scripts.",
     "Do NOT use street slang like 'lods', 'lodi', 'matsala', 'awtos', 'charot', 'goods', or 'paps'.",
