@@ -222,7 +222,7 @@ function parseCustomerInfo(rawText, diningMode) {
 
   const clean = String(rawText || '').trim();
   const isDelivery = diningMode ? isDeliveryDiningMode(diningMode) : true;
-  const NON_NAME_FILLERS = /^(?:nice|ok|okay|sige|sige\s*po|cge|geh|ge|yes|yep|opo|oo|salamat|thanks|thank\s*you|ty|k|noted|copy|alright|good|ayos|g|wala|walaw|walaa|wla|meron|mayroon|none|patingin|hi|hello|hey|yo|pakibigay|note|notes)$/i;
+  const NON_NAME_FILLERS = /^(?:nice|ok|okay|sige|sige\s*po|cge|geh|ge|yes|yep|opo|oo|salamat|thanks|thank\s*you|ty|k|noted|copy|alright|good|ayos|g|wala|walaw|walaa|wla|meron|mayroon|none|patingin|hi|hello|hey|yo|pakibigay|note|notes|oo[,.]?\s*tama(?:\s*po)?|tama(?:\s*po)?|may\s*babaguhin|proceed|confirm|done)$/i;
 
   // 1. Labeled pattern matching
   const addressMatch = clean.match(/(?:address|tirahan|location|table|counter)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\blandmark\b|\barriving(?:\s*time)?\b|\barrival\b|\bname\b|\bpangalan\b|\bcontact\b|\bphone\b|\bmobile\b|\bpayment\b|\bmode\b|\bnote\b|\bnotes\b|$))/i);
@@ -6696,6 +6696,57 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
         session.details.address = session.address;
         session.details.landmark = session.landmark;
         session.details.paymentMode = session.payment_mode;
+
+        // One-shot ordering with details: add requested items to cart if not already present
+        const itemsToOrder = (Array.isArray(action_payload.items) && action_payload.items.length > 0)
+          ? action_payload.items
+          : (action_payload.item_name ? [{ name: action_payload.item_name, quantity: action_payload.quantity || 1 }] : []);
+
+        if (itemsToOrder.length > 0) {
+          if (!session.cart) session.cart = [];
+          const [candidates] = await db.query(`
+            SELECT m.id, m.name, m.price, m.synonyms, m.is_available,
+                   COALESCE(m.stock_quantity, i.stock_quantity, 0) AS stock_quantity,
+                   COALESCE(c.name, m.category, 'Cafe') AS category_name, m.category
+            FROM menu_items m
+            LEFT JOIN categories c ON c.id = m.category_id
+            LEFT JOIN inventory i ON i.menu_item_id = m.id
+            WHERE COALESCE(m.is_deleted, 0) = 0
+          `);
+          for (const itemReq of itemsToOrder) {
+            const matched = candidates.find(c => {
+              const cNorm = c.name.toLowerCase();
+              const reqNorm = (itemReq.name || '').toLowerCase();
+              return cNorm === reqNorm || cNorm.includes(reqNorm) || reqNorm.includes(cNorm);
+            });
+            if (matched) {
+              const qty = parseInt(itemReq.quantity || 1, 10) || 1;
+              const existing = session.cart.find(ci => ci.id === matched.id || ci.name.toLowerCase() === matched.name.toLowerCase());
+              if (existing) {
+                existing.quantity = (existing.quantity || 1) + qty;
+              } else {
+                session.cart.push({
+                  id: matched.id,
+                  name: matched.name,
+                  price: parseFloat(matched.price || 0),
+                  quantity: qty
+                });
+              }
+            }
+          }
+        } else if (isBatchAddIntent(rawText)) {
+          const [candidates] = await db.query(`
+            SELECT m.id, m.name, m.price, m.synonyms, m.is_available,
+                   COALESCE(m.stock_quantity, i.stock_quantity, 0) AS stock_quantity,
+                   COALESCE(c.name, m.category, 'Cafe') AS category_name, m.category
+            FROM menu_items m
+            LEFT JOIN categories c ON c.id = m.category_id
+            LEFT JOIN inventory i ON i.menu_item_id = m.id
+            WHERE COALESCE(m.is_deleted, 0) = 0
+          `);
+          if (!session.cart) session.cart = [];
+          executeBatchAdd(session.cart, rawText, candidates);
+        }
 
         if (session.address && isDeliveryDiningMode(session.dining_mode)) {
           try {

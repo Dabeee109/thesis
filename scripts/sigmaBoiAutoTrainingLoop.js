@@ -268,8 +268,8 @@ Evaluate this conversation strictly and return JSON:`;
  */
 function applyAutoFix(newDirective) {
   if (!newDirective || typeof newDirective !== 'string') return false;
-  // Guard against toxic loop directives that harm conversational fluidity
-  if (/(?:suppress.*menu|before.*menu.*prompt.*phone|prompt.*phone.*before.*menu|mandatory.*data\s*collection.*before)/i.test(newDirective)) {
+  // Guard against toxic, rigid, or conflicting directives that harm conversational fluidity
+  if (/(?:suppress.*menu|before.*menu.*prompt.*phone|prompt.*phone.*before.*menu|mandatory.*data\s*collection.*before|immediately.*after.*initial\s*order|before.*asking.*additional\s*items)/i.test(newDirective)) {
     console.log(`⚠️ [Auto-Fix Filtered] Skipped rigid directive to preserve conversational fluidity: "${newDirective}"`);
     return false;
   }
@@ -277,6 +277,13 @@ function applyAutoFix(newDirective) {
   try {
     let content = fs.readFileSync(personaPath, 'utf8');
     if (content.includes(newDirective)) return false;
+
+    // Check directives length to avoid prompt bloat (keep capped at 25)
+    const { CAFE_PERSONA_CONFIG } = require('../config/botPersona');
+    if (CAFE_PERSONA_CONFIG && CAFE_PERSONA_CONFIG.directives && CAFE_PERSONA_CONFIG.directives.length >= 25) {
+      console.log(`⚠️ [Auto-Fix Skipped] Directives array is already fully optimized (25 rules).`);
+      return false;
+    }
 
     // Inject into directives array
     content = content.replace(

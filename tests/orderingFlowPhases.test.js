@@ -1,6 +1,7 @@
 const { describe, it, beforeEach } = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
+const db = require('../database/db');
 
 process.env.DB_FORCE_SQLITE = 'true';
 process.env.NODE_ENV = 'test';
@@ -161,6 +162,9 @@ note: extra napkins`);
 
   describe('Phase 4: Inactivity Watchdog Lifecycle (20m warning, 25m warning, 30m reset)', () => {
     it('Dispatches 20-min warning (10m remaining), 25-min warning (5m remaining), and 30-min auto-reset', async () => {
+      const { clearMemorySessions } = require('../src/services/sessionManager');
+      if (clearMemorySessions) clearMemorySessions();
+      await db.query("DELETE FROM customers").catch(() => {});
       const psid = `PSID_INACTIVITY_${Date.now()}`;
       const session = await getSession(psid);
       session.cart = [{ menuItemId: 1, name: 'Cold Brew', price: 130, quantity: 1 }];
