@@ -74,10 +74,21 @@ function parseReceiptText(rawText = '') {
   }
 
   if (amount === null) {
-    // Fallback pattern from prompt: /(?:PHP|Php|₱)?\s?(\d+(?:\.\d{2})?)/
-    const fallbackMatch = text.match(/(?:PHP|Php|₱)?\s?(\d+(?:\.\d{2})?)/);
-    if (fallbackMatch && fallbackMatch[1]) {
-      const num = parseFloat(fallbackMatch[1].replace(/,/g, ''));
+    // Look for explicit decimal currency amount (e.g. 20.00, 169.00, 338.00)
+    const decimalMatch = text.match(/\b(\d+[\d,]*\.\d{2})\b/);
+    if (decimalMatch && decimalMatch[1]) {
+      const num = parseFloat(decimalMatch[1].replace(/,/g, ''));
+      if (!isNaN(num) && num > 0) {
+        amount = num;
+      }
+    }
+  }
+
+  if (amount === null) {
+    // Fallback pattern with currency prefix: /(?:PHP|Php|₱|£)\s*(\d+(?:\.\d{2})?)/
+    const currencyPrefixMatch = text.match(/(?:PHP|Php|₱|£)\s*(\d+(?:\.\d{2})?)/i);
+    if (currencyPrefixMatch && currencyPrefixMatch[1]) {
+      const num = parseFloat(currencyPrefixMatch[1].replace(/,/g, ''));
       if (!isNaN(num) && num > 0) {
         amount = num;
       }

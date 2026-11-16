@@ -114,4 +114,57 @@ describe('Late Payment Recovery & Underpayment Guard Test Suite', () => {
     assert.strictEqual(session.state, 'AWAITING_PAYMENT_PROOF');
     assert.ok(session.pendingGCashOrder, 'Pending order must be revived upon paid signal');
   });
+
+  it('6. "P20.00 transfer completed" automatically detects transfer and creates order in Pending Approval', async () => {
+    const psid = `TEST_TRANSFER_COMPLETED_${Date.now()}`;
+    const session = await getSession(psid);
+    session.customer_name = 'Francis';
+    session.contact_number = '09281762895';
+    session.pendingGCashOrder = {
+      grandTotal: 169.00,
+      customerName: 'Francis',
+      contactNumber: '09281762895',
+      address: "Diner's Cafe, Tondo, Manila",
+      items: [{ menuItemId: 10003, name: 'Biscoff Cheesecake', price: 169.00, quantity: 1 }],
+      expiresAt: Date.now() + (20 * 60 * 1000)
+    };
+    session.state = 'AWAITING_PAYMENT_PROOF';
+    session.checkout_step = 'AWAITING_PAYMENT_PROOF';
+
+    const res = await nlpEngine.handleTextInput(psid, session, '₱20.00 transfer completed');
+    assert.strictEqual(res.intent, 'PAYMENT_TRANSFER_COMPLETED');
+    assert.match(res.replyLog, /Pending Approval/i);
+    assert.ok(session.activeOrderNumber, 'Order number must be assigned');
+    assert.strictEqual(session.state, 'AWAITING_DELIVERY');
+  });
+
+  it('7. Uploading receipt screenshot with Buffer automatically submits order to Pending Approval', async () => {
+    const psid = `TEST_SCREENSHOT_BUFFER_${Date.now()}`;
+    const session = await getSession(psid);
+    session.customer_name = 'Francis';
+    session.contact_number = '09281762895';
+    session.pendingGCashOrder = {
+      grandTotal: 169.00,
+      customerName: 'Francis',
+      contactNumber: '09281762895',
+      address: "Diner's Cafe, Tondo, Manila",
+      items: [{ menuItemId: 10003, name: 'Biscoff Cheesecake', price: 169.00, quantity: 1 }],
+      expiresAt: Date.now() + (20 * 60 * 1000)
+    };
+    session.state = 'AWAITING_PAYMENT_PROOF';
+    session.checkout_step = 'AWAITING_PAYMENT_PROOF';
+
+    // Mock valid 1x1 PNG image attachment Buffer
+    const fakeImgBuffer = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+    const imgAttachment = {
+      type: 'image',
+      payload: { url: 'https://example.com/mock-receipt.png' },
+      buffer: fakeImgBuffer
+    };
+
+    const res = await nlpEngine.handlePaymentProofUpload(psid, session, imgAttachment);
+    assert.ok(session.activeOrderNumber, 'Order must be created and assigned');
+    assert.match(res.replyLog, /Pending Approval|kusina|cashier/i);
+    assert.strictEqual(session.state, 'IDLE');
+  });
 });

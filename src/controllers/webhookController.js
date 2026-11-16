@@ -113,6 +113,12 @@ async function processMetaEntries(entries = []) {
         } else if (webhookEvent.postback) {
           const postback = webhookEvent.postback;
           await handleMessageEvent(senderPsid, postback.title || '', postback.payload);
+        } else if (webhookEvent.payment) {
+          const pay = webhookEvent.payment;
+          const payAmt = pay?.amount?.amount || pay?.payment_credential?.amount || '';
+          const text = payAmt ? `₱${payAmt} transfer completed` : 'transfer completed';
+          console.log(`[Webhook Payment Event] sender=${senderPsid} amount=${payAmt}`);
+          await handleMessageEvent(senderPsid, text, 'PAYMENT_TRANSFER_COMPLETED');
         }
       } catch (eventErr) {
         console.error(`[Webhook Async Event Error] sender=${senderPsid}:`, eventErr.message);
