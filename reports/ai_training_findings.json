@@ -1,91 +1,14 @@
 {
-  "timestamp": "2026-11-16T03:15:30.837Z",
-  "totalRounds": 5,
+  "timestamp": "2026-11-16T04:21:25.875Z",
+  "totalRounds": 1,
   "rounds": [
     {
       "round": 1,
-      "passedCount": 4,
-      "total": 13,
-      "accuracy": 31,
-      "averageScore": 78
-    },
-    {
-      "round": 2,
-      "passedCount": 4,
-      "total": 13,
-      "accuracy": 31,
-      "averageScore": 75
-    },
-    {
-      "round": 3,
-      "passedCount": 4,
-      "total": 13,
-      "accuracy": 31,
-      "averageScore": 75
-    },
-    {
-      "round": 4,
-      "passedCount": 3,
-      "total": 13,
-      "accuracy": 23,
-      "averageScore": 76
-    },
-    {
-      "round": 5,
       "passedCount": 2,
       "total": 13,
       "accuracy": 15,
-      "averageScore": 70
+      "averageScore": 69
     }
   ],
-  "appliedFixes": [
-    "Strictly enforce the Order Summary Confirmation protocol by presenting the calculated total and requiring a [1] Oo, tama / [2] May babaguhin response before finalizing any order state.",
-    "Ensure the system captures the user's selected dining_mode accurately from the conversation flow and update the database state immediately upon user confirmation.",
-    "Ensure NLP entity extraction only populates the 'customer_name' field with valid names and verify order fulfillment instructions align strictly with the selected dining mode.",
-    "When a customer requests a cart modification, you must explicitly perform the calculation update, state the new items clearly, and trigger the mandatory order confirmation flow ([1] Oo, tama / [2] May babaguhin) before finalizing the order.",
-    "If a customer expresses interest in a recommended item, immediately ask if they would like to add it to their cart and guide them to confirm the order before simply showing the full menu.",
-    "Maintain cart state when the user switches dining mode and immediately confirm the existing cart items before proceeding to additional orders.",
-    "If a user requests an image and the system cannot provide one, acknowledge the limitation politely and offer a text-based description of the menu item instead of repeating a canned error message.",
-    "Ensure that the bot maintains a persistent cart state across rapid messages and does not prematurely close the order flow until all required attributes (flavor, quantity, etc.) for selected items are collected and confirmed.",
-    "Ensure the system strictly validates all mandatory fields (Name, Phone, Address, Payment) before proceeding and MUST present the final order summary with [1] Oo, tama / [2] May babaguhin options before finalizing any transaction.",
-    "When user submits payment proof, immediately validate the input, transition state to ORDER_PROCESSED, and express warm empathy regarding the customer's hunger while providing an estimated delivery time.",
-    "Ensure the bot calculates the 20% discount when a valid Senior Citizen ID is provided and strictly adhere to the [1] Oo, tama / [2] May babaguhin confirmation format before finalizing any order.",
-    "Ensure the bot parses cart modification requests by clearing previous items and accurately updating the subtotal before proceeding to the checkout confirmation flow.",
-    "If a customer expresses interest in a recommended item, immediately offer to add it to their cart and initiate the order summary process.",
-    "Only trigger the 'Dining Mode' inquiry after a valid item has been successfully added to the cart, and avoid repeating the exact same menu refusal script multiple times; instead, provide a concise summary of the menu or ask if they would like to see the full menu list.",
-    "Ensure the bot triggers the order summary verification step ([1] Oo, tama / [2] May babaguhin) immediately after the user confirms their final order selection, and verify cart synchronization before finalizing the database state.",
-    "If a user requests a photo or a menu, provide a formatted text-based list of available items and their prices, or provide a link to the visual catalog instead of repeatedly stating that the item was not found.",
-    "Ensure that the bot maintains a persistent cart state and triggers the mandatory Order Summary Confirmation sequence only after all items are clearly identified and validated.",
-    "Ensure the bot retains and utilizes previously confirmed address data in the session memory instead of triggering an address re-validation loop when the customer provides additional required details like phone number.",
-    "Strictly enforce the order summary confirmation step ([1] Oo, tama / [2] May babaguhin) before finalizing any delivery or pickup request, and ensure internal cart state is updated upon order acknowledgement.",
-    "Ensure the bot persists user-provided ID numbers in the session state and validates them immediately upon receipt to avoid redundant questioning; always trigger the order confirmation prompt (Oo, tama / May babaguhin) before finalizing any order.",
-    "When receiving a request to modify the cart, explicitly perform the removal or addition of items and immediately trigger the Order Summary Confirmation response containing the updated cart items and the [1] / [2] options.",
-    "After a customer expresses interest in a recommended item, immediately ask if they would like to add it to their cart and initiate the order summary confirmation process once items are selected.",
-    "Always add selected items to the cart object and trigger the Order Summary Confirmation ([1] Oo, tama / [2] May babaguhin) immediately after a customer confirms their choice.",
-    "Ensure that once the user agrees to proceed, the bot must execute the cart addition logic and trigger the mandatory '[1] Oo, tama / [2] May babaguhin' confirmation prompt before finalizing the session.",
-    "If you cannot provide images, you must provide a text-based description of the menu items or a direct link to the digital menu when a user asks for visuals, rather than repeating the same error message.",
-    "Ensure that every menu item requested is explicitly parsed, added to the cart object, and triggers the Order Summary Confirmation step before asking if the user needs further assistance.",
-    "Ensure that once all delivery/payment details are collected, the bot MUST provide a summary of the cart and ask for confirmation using the [1] Oo, tama / [2] May babaguhin options before proceeding to additional prompts like discounts.",
-    "You must trigger the Order Summary Confirmation (1: Oo, tama / 2: May babaguhin) before finalizing any order, ensuring all items are correctly committed to the cart object.",
-    "Ensure the name validation logic is permissive enough to accept standard full names and prioritize progression once the data is provided to avoid trapping users in a validation loop.",
-    "Ensure the bot parses and saves entity data (ID numbers and names) into the session state immediately upon provision, rather than re-requesting information already present in the chat history.",
-    "When a user requests a change to their cart, explicitly confirm the removal of the old item and the addition of the new items by recalculating the subtotal and presenting the updated cart summary before asking for final confirmation.",
-    "If the user explicitly agrees to order a recommended item, immediately add the item to the cart and present the order summary with the [1] Oo, tama / [2] May babaguhin confirmation options.",
-    "If the customer explicitly declines an order or expresses an intention to leave, immediately terminate the order-taking sequence and do not prompt for dining mode or order details.",
-    "If a customer expresses a dietary restriction that the menu cannot accommodate, do not prompt for dining mode or menu browsing; instead, prioritize acknowledging the safety concern and offer to assist with other non-allergic items or close the session gracefully.",
-    "Ensure the bot identifies intent keywords (e.g., 'Menu', 'Picture') and triggers the corresponding data fetch or display function immediately instead of defaulting to a generic closing greeting.",
-    "Always validate the complete order list and trigger the [1] Oo, tama / [2] May babaguhin confirmation prompt before finalizing any transaction, regardless of how fragmented the user's input messages are.",
-    "Ensure that all user-provided contact information is extracted and saved to the session state immediately upon receipt, and verify that the cart state persists throughout the interaction until checkout is finalized.",
-    "You must strictly follow the order confirmation flow by presenting the order summary and requiring the user to choose between '[1] Oo, tama' or '[2] May babaguhin' before finalizing any transaction.",
-    "Ensure the input validation for 'customer_name' is flexible enough to accept standard full names and prioritize progression to the confirmation step once a name is provided, rather than blocking the user with repetitive error prompts.",
-    "Ensure the system recognizes and applies the 20% Senior Citizen discount upon validation of a valid OSCA ID and trigger the mandatory [1] Oo, tama / [2] May babaguhin confirmation step before requesting customer personal details.",
-    "Ensure the cart object is updated in real-time upon modification requests and strictly trigger the order summary confirmation block before finalizing any session.",
-    "Always trigger the Order Summary Confirmation (presenting options [1] Oo, tama / [2] May babaguhin) immediately after a customer confirms their initial order, before asking for additional items or proceeding to checkout.",
-    "Always trigger the mandatory Order Summary Confirmation ([1] Oo, tama / [2] May babaguhin) immediately after adding an item to the cart or before proceeding to checkout.",
-    "Ensure the order summary confirmation (Oo, tama / May babaguhin) is strictly invoked before finalizing any transaction and verify that the cart state is updated to non-zero before proceeding to checkout.",
-    "Always ensure that the items discussed are programmatically added to the cart state before transitioning to collection of customer details.",
-    "If a customer complains about an order delay, the bot must check the backend order status database for active records before suggesting that no order exists, and must offer a concrete resolution or escalate to a human agent instead of defaulting to an IDLE state.",
-    "If an item is not found, do not repeat the same error message; instead, display a clear, formatted text-based menu summary or link to help the user navigate available options effectively.",
-    "Always parse and store the full address string from the initial customer message in the session state to avoid redundant location requests later in the conversation."
-  ]
+  "appliedFixes": []
 }
