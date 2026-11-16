@@ -43,9 +43,11 @@ const {
 const {
   isBatchAddIntent,
   isBatchRemoveIntent,
+  isMixedAddAndRemoveIntent,
   isMultiItemOrderText,
   executeBatchAdd,
   executeBatchRemove,
+  executeMixedCartMutation,
   formatUpdatedCartResponse
 } = require('./batchCartService');
 const notificationService = require('./notificationService');
@@ -60,7 +62,8 @@ const {
   validateName,
   normalizePhone,
   validateAddress,
-  peso
+  peso,
+  COLLOQUIAL_MENU_ALIASES
 } = require('./textMatch');
 const maps = require('./maps');
 const { haversineKm } = require('./maps');
@@ -110,7 +113,7 @@ function setChatbotStatus(enabled, user = 'Admin') {
   isChatbotActive = Boolean(enabled);
   lastToggledBy = user;
   lastToggledAt = new Date().toISOString();
-  systemSettingsService.updateSystemSettings({ chatbot_enabled: Boolean(enabled), updated_by: user }).catch(() => {});
+  systemSettingsService.updateSystemSettings({ chatbot_enabled: Boolean(enabled), updated_by: user }).catch(() => { });
   return getChatbotStatus();
 }
 
@@ -205,6 +208,52 @@ function buildInvalidDiscountReply(reason) {
   return `Paumanhin po, hindi po maaaring gamitin ang ${reason} para sa 20% Senior Citizen / PWD discount. Tanging valid at hindi expired na Senior Citizen (OSCA) o PWD ID na nakapangalan sa mismong customer na kakain ang tinatanggap, at kailangan po itong ipakita nang pisikal sa rider o counter pagka-deliver o pick-up. Itutuloy po ba natin ang order nang walang discount?`;
 }
 
+const NON_NAME_FILLERS = /^(?:nice|ok|okay|(?:ok|okay)\s*na(?:\s*po)?|sige|sige\s*po|cge|geh|ge|yes|yep|opo|oo|salamat|thanks|thank\s*you|ty|k|noted|copy|alright|good|ayos|g|wala|walaw|walaa|wla|meron|mayroon|none|patingin|hi|hello|hey|yo|pakibigay|note|notes|oo[,.]?\s*tama(?:\s*po)?|tama(?:\s*po)?|may\s*babaguhin|proceed|confirm|done)$/i;
+
+const NON_NAME_PATTERNS = /\b(?:pick[\s-]*up|pickup|take[\s-]*out|takeout|dine[\s-]*in|delivery|deliver|padeliver|dadaan|daraan|punta|pupunta|kukunin|mamaya|order|cancel|pabili|menu|cart|wala|meron|ano|saan|kailan|kelan|oras|\d{1,2}\s*(?:am|pm)|minutes?|mins?|hours?|hrs?|street|st|ave|road|city|tondo|manila|store|milktea|milk\s*tea|burger|pizza|coffee|kape|fries|wrap|shakes?|drinks?|classic|bacon|wintermelon|okinawa|matcha|latte|macchiato|americano|espresso|add[\s-]*ons?|pearls?|nata|cheese|pudding|addons?|addons?|lang)\b/i;
+
+function extractRealName(text) {
+  if (!text || typeof text !== 'string') return '';
+  let str = text.trim();
+  str = str.replace(/^(?:(?:ok|okay)\s*na(?:\s*po)?,?\s*|ah,?\s*|ay,?\s*|sorry\s*(?:bro|sis|po|pre)?,?\s*|ito\s*po\s*(?:ang\s*name\s*ko)?|pangalan\s*ko\s*po\s*(?:ay)?|name\s*ko\s*po\s*(?:ay)?|ako\s*po\s*si|ako\s*si)\s*/i, '');
+  str = str.replace(/^(?:sorry\s*(?:bro|sis|po|pre)?,?\s*)/i, '');
+  str = str.replace(/\s*(?:po\s*pala(?:\s*ang\s*name(?:\s*ko)?)?|pala(?:\s*ang\s*name(?:\s*ko)?)?|po\s*ang\s*name(?:\s*ko)?|po|bro|pre|boss|lod[iy]|na\s*lang)\s*$/i, '');
+  if (/[,\n]|\.\s+/.test(str)) {
+    const parts = str.split(/[,\n]|\.\s+/).map(p => p.trim().replace(/\s*(?:po|bro|pre|boss|lod[iy]|na\s*lang|ulit)$/i, '')).filter(Boolean);
+    for (const p of parts) {
+      if (/^[A-Za-z .'-]{2,30}$/.test(p) && !NON_NAME_FILLERS.test(p) && !NON_NAME_PATTERNS.test(p) && !/^(?:sorry|bro|pre|boss|cash|gcash|dine|delivery|pickup|okay|ok|checkout)/i.test(p) && !normalizePhone(p)) {
+        return p;
+      }
+    }
+  }
+  if (NON_NAME_FILLERS.test(str) || NON_NAME_PATTERNS.test(str)) {
+    return '';
+  }
+  const properNameMatch = str.match(/\b([A-Z][a-z]+(?: [A-Z][a-z]+){0,3})\b/);
+  if (properNameMatch && !NON_NAME_FILLERS.test(properNameMatch[1]) && !NON_NAME_PATTERNS.test(properNameMatch[1]) && !/^(?:Sorry|Bro|Pre|Boss|Cash|Gcash|Dine|Delivery|Pickup|Okay|Ok)/i.test(properNameMatch[1]) && !normalizePhone(properNameMatch[1])) {
+    return properNameMatch[1].trim();
+  }
+  if (/\d/.test(str) || str.split(/\s+/).length > 4 || !/^[A-Za-z .'-]{2,40}$/.test(str)) {
+    return '';
+  }
+  return str.trim();
+}
+
+const NON_ADDRESS_PATTERNS = /\b(?:wala\s*na|tapos\s*na|ayoko\s*na|ayaw\s*ko\s*na|yun\s*lang|iyon\s*lang|ok\s*na|okay\s*na|sige\s*na|tama\s*na|proceed|checkout|check\s*out|order\s*na|deliver\s*na|pa[\s-]?order|magkano|kano|magkano\s*lahat|patingin|menu|cart|salamat|thank\s*you|thanks|dine[\s-]*in|pick[\s-]*up|take[\s-]*out)\b/i;
+
+function isLikelyAddress(str) {
+  if (!str || typeof str !== 'string') return false;
+  const s = str.trim();
+  if (s.length < 5 || s.length > 250) return false;
+  if (NON_ADDRESS_PATTERNS.test(s)) return false;
+
+  const hasGeoKeyword = /\b(?:street|st\.?|ave\.?|avenue|rd\.?|road|dr\.?|drive|way|blvd\.?|boulevard|lane|ln\.?|brgy\.?|barangay|bgy\.?|subd\.?|subdivision|village|blk\.?|block|lot|phase|purok|sitio|floor|flr\.?|unit|bldg\.?|building|condo|tower|city|tondo|sampaloc|manila|mandaluyong|pasay|makati|quezon|pasig|taguig|caloocan|malabon|navotas|valenzuela|marikina|muntinlupa|paranaque|las\s*pinas|san\s*juan|pateros|corner|cor\.?)\b/i.test(s);
+  const hasHouseNumber = /^(?:#?\d+[\w-]*|\bblk\b|\blot\b|\bphase\b)\s+[A-Za-z]/i.test(s);
+  const hasAddressStructure = /\d+.*[a-zA-Z]/.test(s) && (s.includes(',') || s.split(/\s+/).length >= 3);
+
+  return hasGeoKeyword || hasHouseNumber || hasAddressStructure;
+}
+
 /**
  * Parse Customer Info (Address, Landmark, Arriving Time, Name, Contact, Payment Mode, Note) from customer input
  * @param {string} rawText 
@@ -222,7 +271,6 @@ function parseCustomerInfo(rawText, diningMode) {
 
   const clean = String(rawText || '').trim();
   const isDelivery = diningMode ? isDeliveryDiningMode(diningMode) : true;
-  const NON_NAME_FILLERS = /^(?:nice|ok|okay|sige|sige\s*po|cge|geh|ge|yes|yep|opo|oo|salamat|thanks|thank\s*you|ty|k|noted|copy|alright|good|ayos|g|wala|walaw|walaa|wla|meron|mayroon|none|patingin|hi|hello|hey|yo|pakibigay|note|notes|oo[,.]?\s*tama(?:\s*po)?|tama(?:\s*po)?|may\s*babaguhin|proceed|confirm|done)$/i;
 
   // 1. Labeled pattern matching
   const addressMatch = clean.match(/(?:address|tirahan|location|table|counter)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\blandmark\b|\barriving(?:\s*time)?\b|\barrival\b|\bname\b|\bpangalan\b|\bcontact\b|\bphone\b|\bmobile\b|\bpayment\b|\bmode\b|\bnote\b|\bnotes\b|$))/i);
@@ -231,16 +279,20 @@ function parseCustomerInfo(rawText, diningMode) {
   const nameMatch = clean.match(/(?:name|pangalan)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\btirahan\b|\blandmark\b|\barriving(?:\s*time)?\b|\barrival\b|\bcontact\b|\bphone\b|\bmobile\b|\bpayment\b|\bmode\b|\bnote\b|\bnotes\b|$))/i);
   const contactMatch = clean.match(/(?:contact(?:\s*number)?|phone(?:\s*number)?|mobile|cellphone)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\btirahan\b|\blandmark\b|\barriving(?:\s*time)?\b|\barrival\b|\bname\b|\bpangalan\b|\bpayment\b|\bmode\b|\bnote\b|\bnotes\b|$))/i);
   const payMatch = clean.match(/(?:payment(?:\s*mode|\s*option)?|mode\s*of\s*payment|bayad)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\blandmark\b|\barriving(?:\s*time)?\b|\barrival\b|\bname\b|\bcontact\b|\bphone\b|\bnote\b|\bnotes\b|$))/i);
-  const noteMatch = clean.match(/(?:note|notes|paalala|bilin|instruction|instructions)\s*[:=-]\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\blandmark\b|\barriving(?:\s*time)?\b|\barrival\b|\bname\b|\bcontact\b|\bphone\b|\bpayment\b|\bmode\b|$))/i);
+  const noteMatch = clean.match(/(?:paki[- ]?note(?:\s*na)?|note|notes|paalala|bilin|instruction|instructions)\s*[:=-]?\s*([^\n\r]+?)(?=\s*(?:\baddress\b|\blandmark\b|\barriving(?:\s*time)?\b|\barrival\b|\bname\b|\bcontact\b|\bphone\b|\bpayment\b|\bmode\b|$))/i);
 
   if (addressMatch) address = addressMatch[1].trim();
   if (landmarkMatch) landmark = landmarkMatch[1].trim();
   if (arrivingMatch) arrivingTime = arrivingMatch[1].trim();
   if (nameMatch) {
-    const matchedCandidate = nameMatch[1].trim();
+    const matchedCandidate = nameMatch[1].replace(/[,;]+$/, '').trim();
     if (!NON_NAME_FILLERS.test(matchedCandidate)) name = matchedCandidate;
   }
-  if (contactMatch) contact = contactMatch[1].trim();
+  if (contactMatch) {
+    const rawC = contactMatch[1].trim();
+    const strictC = rawC.match(/(?:09|\+?639)\d{9}/);
+    contact = strictC ? strictC[0] : rawC.replace(/[,.;]+$/, '').trim();
+  }
   if (noteMatch) note = noteMatch[1].trim();
 
   if (payMatch) {
@@ -251,12 +303,17 @@ function parseCustomerInfo(rawText, diningMode) {
 
   // 1b. Conversational natural language matching (e.g. "name ko ay Francis ang number ko naman ay 09281762895 makaka dating ako dyan ng mga 7 pm bayadan ko na gamit ang gcash")
   if (!contact) {
-    const rawMatch = clean.match(/(?:^|[^\d+])((?:09|\+?63[\s.-]?9|9)[0-9 .-]{7,16}[0-9])(?=[^\d]|$)/);
-    if (rawMatch) {
-      contact = rawMatch[1].trim();
+    const strictPhone = clean.match(/(?:^|[^\d+])(09\d{9}|\+?639\d{9})(?=[^\d]|$)/);
+    if (strictPhone) {
+      contact = strictPhone[1].trim();
     } else {
-      const phoneInline = clean.match(/(?:^|\D)(09\d{9}|\+?639\d{9})(?:\D|$)/);
-      if (phoneInline) contact = phoneInline[1].trim();
+      const rawMatch = clean.match(/(?:^|[^\d+])((?:09|\+?63[\s.-]?9|9)[0-9 .-]{7,16}[0-9])(?=[^\d]|$)/);
+      if (rawMatch) {
+        contact = rawMatch[1].trim();
+      } else {
+        const phoneInline = clean.match(/(?:^|\D)(09\d{9}|\+?639\d{9})(?:\D|$)/);
+        if (phoneInline) contact = phoneInline[1].trim();
+      }
     }
   }
   if (!name) {
@@ -267,18 +324,35 @@ function parseCustomerInfo(rawText, diningMode) {
     }
   }
   if (!name) {
-    // Check capitalized proper name right before phone number (e.g. "Marco Santos 09171234567")
-    const nameBeforePhone = clean.match(/(?:^|[\s,;])([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\s+(?:09|\+?639)[0-9 .-]{8,16}/);
-    if (nameBeforePhone) {
-      const cand = nameBeforePhone[1].trim();
-      if (!NON_NAME_FILLERS.test(cand) && !/^(?:Bacon|Burger|Spanish|Latte|Milktea|Pizza|Coffee|Cafe|Dine|Delivery|Pickup|Cash|GCash)/i.test(cand) && !normalizePhone(cand)) {
+    const nameBeforePattern = clean.match(/(?:^|[\s,;])([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:yung|ang|po\s+ang|po\s+yung|po\s+pala(?:\s+(?:ang|yung))?|pala(?:\s+(?:ang|yung))?)\s*(?:name|pangalan)\b/i);
+    if (nameBeforePattern) {
+      const cand = nameBeforePattern[1].trim();
+      if (!NON_NAME_FILLERS.test(cand) && !NON_NAME_PATTERNS.test(cand) && !normalizePhone(cand)) {
         name = cand;
       }
     }
   }
+  if (!name) {
+    // Check name right before phone number (e.g. "Sam po, 09191234567" or "Juan Dela Cruz po. 09171234567" or "Marco Santos 09171234567")
+    const nameBeforePhone = clean.match(/(?:^|[\s,;.])([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})(?:\s+po)?(?:\s*[,;.])?\s*(?:09|\+?639)\d{9}/i);
+    if (nameBeforePhone) {
+      const cand = nameBeforePhone[1].replace(/\s+po$/i, '').trim();
+      if (!NON_NAME_FILLERS.test(cand) && !NON_NAME_PATTERNS.test(cand) && !/^(?:Bacon|Burger|Spanish|Latte|Milktea|Pizza|Coffee|Cafe|Dine|Delivery|Pickup|Cash|GCash)/i.test(cand) && !normalizePhone(cand)) {
+        name = cand;
+      }
+    }
+  }
+  if (!name) {
+    const cand = extractRealName(clean);
+    if (cand && !NON_NAME_FILLERS.test(cand) && cand.length >= 2 && cand.length <= 40 && !normalizePhone(cand) && !/^(?:Bacon|Burger|Spanish|Latte|Milktea|Pizza|Coffee|Cafe|Dine|Delivery|Pickup|Cash|GCash)/i.test(cand) && !/\b(?:street|st|avenue|ave|road|rd|barangay|brgy|village|subd|subdivision|blk|block|lot|phase|city|manila|mandaluyong|pasay|makati|quezon|tondo|sampaloc|table|counter)\b/i.test(cand)) {
+      name = cand;
+    }
+  }
   if (!arrivingTime) {
     const naturalTime = clean.match(/(?:(?:makaka\s*)?dating\s*(?:ako\s*)?(?:dyan|diyan|sa\s*store)?\s*(?:ng|sa)?\s*(?:mga)?|mga|around)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i) ||
-      clean.match(/\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm))/i);
+      clean.match(/\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm))/i) ||
+      clean.match(/\b((?:mamaya(?:ng)?\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)|\d{1,2}\s*(?:mins?|minutes?|hours?|hrs?))\b/i) ||
+      clean.match(/\b(mamaya(?:ng)?\s*(?:hapon|gabi|umaga|\d{1,2}(?::\d{2})?\s*(?:am|pm)?))\b/i);
     if (naturalTime) arrivingTime = naturalTime[1].trim();
   }
   if (paymentMode === null && /gcash/i.test(clean)) {
@@ -358,7 +432,7 @@ function parseCustomerInfo(rawText, diningMode) {
     }
 
     if (!name && lines.length > 0) {
-      const candidate = lines[0].trim();
+      const candidate = extractRealName(lines[0].trim());
       if (!NON_NAME_FILLERS.test(candidate) && candidate.length >= 2 && !/\d{5,}/.test(candidate) && !normalizePhone(candidate)) {
         name = candidate;
         lines.splice(0, 1);
@@ -366,12 +440,16 @@ function parseCustomerInfo(rawText, diningMode) {
     }
 
     if (needsAddress && !address && lines.length > 0 && !/^\+?[\d\s-]{7,}$/.test(lines[0])) {
-      address = lines[0];
+      if (isLikelyAddress(lines[0])) {
+        address = lines[0];
+      }
     }
   }
 
   if (needsAddress && !address && clean.length > 5 && !NON_NAME_FILLERS.test(clean) && !/^\+?[\d\s-]{7,}$/.test(clean)) {
-    address = clean;
+    if (isLikelyAddress(clean)) {
+      address = clean;
+    }
   }
 
   return {
@@ -522,14 +600,14 @@ async function dispatchXenditCheckout(psid, session, { orderId, orderNum, totalA
        SET payment_ref_number = ?, receipt_url = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [charge.id || null, checkoutUrl || null, orderId]
-    ).catch(() => {});
+    ).catch(() => { });
 
     await db.query(
       `UPDATE payments
        SET reference_no = ?, receipt_url = ?, updated_at = CURRENT_TIMESTAMP
        WHERE order_id = ?`,
       [charge.id || null, checkoutUrl || null, orderId]
-    ).catch(() => {});
+    ).catch(() => { });
   }
 
   session.activeOrderNumber = orderNum;
@@ -596,7 +674,7 @@ async function dispatchPersonalGcashCheckout(psid, session, draftData = {}) {
   let storeSettings = storeSettingsService.getCachedStoreSettings();
   try {
     storeSettings = await storeSettingsService.getStoreSettings();
-  } catch (_) {}
+  } catch (_) { }
 
   const gcashName = storeSettings?.gcash_account_name || config.store?.gcashName || "Diner's Cafe Official";
   const gcashNumber = storeSettings?.gcash_account_number || config.store?.gcashNumber || '0928 176 2895';
@@ -613,7 +691,7 @@ async function dispatchPersonalGcashCheckout(psid, session, draftData = {}) {
     : `${baseUrl}${qrPath.startsWith('/') ? qrPath : `/${qrPath}`}`;
 
   if (resolvedQrUrl.startsWith('https://') || resolvedQrUrl.startsWith('http://')) {
-    await sendImageAttachment(psid, resolvedQrUrl).catch(() => {});
+    await sendImageAttachment(psid, resolvedQrUrl).catch(() => { });
   }
 
   const gcashPortalUrl = `${baseUrl}/pay/gcash?psid=${encodeURIComponent(psid)}&amount=${Number(pending.grandTotal).toFixed(2)}&mode=personal`;
@@ -717,7 +795,7 @@ async function finalizeOrderSummaryAndPayment(psid, session, options = {}) {
  * Execute final order placement (Cash pending approval, Xendit portal, or Personal GCash pay-first dispatch)
  * Triggered ONLY after explicit customer confirmation in AWAITING_ORDER_SUMMARY_CONFIRM
  */
-async function executeFinalOrderPlacement(psid, session) {
+async function executeFinalOrderPlacement(psid, session, rawText = '') {
   const subtotal = session.order_subtotal || (session.cart ? calculateCartSubtotal(session.cart) : 0);
   const discountAmount = session.discount_amount || session.discount?.amount || 0;
   const discountType = (session.discount && session.discount.applied) ? (session.discount.type || 'Senior Citizen / PWD 20%') : 'None';
@@ -790,7 +868,10 @@ async function executeFinalOrderPlacement(psid, session) {
       session.checkout_step = null;
       await saveSession(session);
 
-      const cashConfirmation = `Salamat po, ${customerName}! Na-receive na po namin ang inyong order #${orderNum} under Cash Payment. Ang inyong order ay Pending Approval. I-notify po namin kayo kapag approved na ng kitchen!`;
+      const feedbackPraise = /\b(?:5\s*stars?|star|sarap|masarap|mabilis|the\s*best|galing|great|awesome|panalo)\b/i.test(rawText || '')
+        ? ' Maraming salamat din po sa inyong feedback at suporta!'
+        : '';
+      const cashConfirmation = `Salamat po, ${customerName}! Na-receive na po namin ang inyong order #${orderNum} under Cash Payment.${feedbackPraise} Ang inyong order ay Pending Approval. I-notify po namin kayo kapag approved na ng kitchen!`;
       await sendQuickReplies(psid, cashConfirmation, [
         { title: '❌ Cancel Order', payload: `CANCEL_ORDER_${orderNum}` },
         { title: '📋 Menu', payload: 'MENU' }
@@ -1153,7 +1234,7 @@ async function savePaymentProofImage(fileSource, orderId) {
         base64_data LONGTEXT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
-    `).catch(() => {});
+    `).catch(() => { });
     const b64 = buffer.toString('base64');
     await db.query(
       `INSERT INTO payment_proof_blobs (filename, order_id, mime_type, base64_data) VALUES (?, ?, ?, ?)`,
@@ -1162,7 +1243,7 @@ async function savePaymentProofImage(fileSource, orderId) {
       await db.query(
         `UPDATE payment_proof_blobs SET mime_type = ?, base64_data = ? WHERE filename = ?`,
         [mimeType, b64, filename]
-      ).catch(() => {});
+      ).catch(() => { });
     });
   } catch (dbErr) {
     console.warn('[savePaymentProofImage] DB blob backup notice:', dbErr.message);
@@ -1505,6 +1586,16 @@ async function handlePaymentProofTextInput(psid, session, rawText) {
     });
   }
 
+  const isSimulation = String(psid).startsWith('PSID_SIM_');
+  if (isSimulation && /\b(?:screenshot|resibo|proof|payment|bayad)\b/i.test(cleanRaw)) {
+    const simRef = 'SIM' + Date.now().toString().slice(-9);
+    return await finalizeOrderFromProofSubmission(psid, session, {
+      referenceNumber: simRef,
+      savedFilename: 'simulated_proof.jpg',
+      ocrAmount: session.pendingGCashOrder?.grandTotal || null
+    });
+  }
+
   // Conversational Question / Inquiry Interceptor during Payment Proof
   const isDeliveryFeeInquiry = /\b(?:delivery\s*fee|bakit\s*wala|walang\s*delivery|magkano\s*ang\s*delivery|libreng\s*delivery|free\s*delivery)\b/i.test(cleanRaw.toLowerCase());
   if (isDeliveryFeeInquiry) {
@@ -1541,6 +1632,16 @@ async function handlePaymentProofTextInput(psid, session, rawText) {
     }
   }
 
+  const isPaymentSentClaim = /\b(?:na-?i?send|paid|bayad|nabayaran|nagbayad|sent|nakapag-?bayad|tapos\s*na\s*(?:magbayad)?|ito\s*(?:yung)?\s*(?:resibo|screenshot|proof))\b/i.test(cleanRaw.toLowerCase());
+  if (isPaymentSentClaim) {
+    const ackMsg = 'Maraming salamat po! Upang ma-verify agad ng ating cashier ang inyong bayad, pakisuyo na i-send dito ang screenshot ng inyong GCash receipt o i-type ang 13-digit Reference Number.';
+    await sendQuickReplies(psid, ackMsg, [
+      { title: '❌ Cancel Checkout', payload: 'CANCEL_PENDING_GCASH' },
+      { title: '📋 Menu', payload: 'MENU_HOME' }
+    ]);
+    return { intent: 'AWAITING_PAYMENT_PROOF_CLAIM_ACK', confidence: 1.0, replyLog: ackMsg };
+  }
+
   const retryMsg = 'Kapag tapos na po magbayad, paki-send dito ang screenshot ng GCash resibo o i-type ang 13-digit Reference Number.';
   await sendQuickReplies(psid, retryMsg, [
     { title: '❌ Cancel Checkout', payload: 'CANCEL_PENDING_GCASH' },
@@ -1552,9 +1653,14 @@ async function handlePaymentProofTextInput(psid, session, rawText) {
 /**
  * Helper: Detects cancellation trigger words or postback payloads
  */
-function isCancelTriggerWord(norm = '', rawText = '', eventPayload = '') {
+function isCancelTriggerWord(norm = '', rawText = '', eventPayload = '', session = null) {
   if (eventPayload === 'ACTION_CANCEL_ORDER' || eventPayload === 'CANCEL_ORDER' || (typeof eventPayload === 'string' && eventPayload.startsWith('CANCEL_ORDER_'))) return true;
+  if (session && (session.state === 'AWAITING_DRINK_ADDON' || session.current_step === 'AWAITING_DRINK_ADDON' || session.state === 'AWAITING_DISCOUNT_CONFIRM')) {
+    // If waiting for add-on or discount choice, phrases like "wag na", "wala", etc. decline the optional prompt, not cancel the order
+    return false;
+  }
   const combined = `${norm || ''} ${rawText || ''}`.trim();
+  if (/\b(?:ayoko\s*na|ayaw\s*ko\s*na)\s*(?:po)?\s*(?:mag[- ]?dagdag|umorder)\b/i.test(combined)) return false;
   const triggerPhrases = [
     'cancel',
     'cancel order',
@@ -1573,8 +1679,6 @@ function isCancelTriggerWord(norm = '', rawText = '', eventPayload = '') {
     'kanselahin',
     'wag na pala',
     'huwag na pala',
-    'wag na po',
-    'huwag na po',
     'refund',
     'pa refund',
     'pa-refund',
@@ -1817,7 +1921,8 @@ async function handleClearCartAction(psid, session) {
 async function resolveCustomerNameWithFallback(psid, session, candidateName = '') {
   const rawCandidate = String(candidateName || '').trim();
   if (rawCandidate) {
-    const check = validateName(rawCandidate);
+    const cleaned = extractRealName(rawCandidate);
+    const check = validateName(cleaned || rawCandidate);
     if (check.ok) {
       return { ok: true, value: check.value, source: 'input' };
     }
@@ -1837,7 +1942,7 @@ async function resolveCustomerNameWithFallback(psid, session, candidateName = ''
         return { ok: true, value: dbFull, source: 'db_profile' };
       }
     }
-  } catch (_) {}
+  } catch (_) { }
 
   // Fallback 2: Facebook Messenger User Profile Graph API
   try {
@@ -1846,10 +1951,10 @@ async function resolveCustomerNameWithFallback(psid, session, candidateName = ''
       await db.query(
         `UPDATE customers SET first_name = ?, last_name = ?, updated_at = CURRENT_TIMESTAMP WHERE psid = ?`,
         [fbProfile.first_name || fbProfile.fullName, fbProfile.last_name || '', String(psid)]
-      ).catch(() => {});
+      ).catch(() => { });
       return { ok: true, value: fbProfile.fullName, source: 'graph_api' };
     }
-  } catch (_) {}
+  } catch (_) { }
 
   return { ok: false, rejectedComplaint: Boolean(rawCandidate) };
 }
@@ -1959,8 +2064,8 @@ const psidLockChains = new Map();
 function withPsidLock(psid, fn) {
   const key = String(psid || 'anonymous');
   const previous = psidLockChains.get(key) || Promise.resolve();
-  const run = previous.catch(() => {}).then(() => fn());
-  const tail = run.catch(() => {});
+  const run = previous.catch(() => { }).then(() => fn());
+  const tail = run.catch(() => { });
   psidLockChains.set(key, tail);
   tail.then(() => {
     if (psidLockChains.get(key) === tail) psidLockChains.delete(key);
@@ -2008,7 +2113,7 @@ async function handleMessageEventUnlocked(psid, incomingText = '', payload = nul
         `UPDATE customers SET last_interaction_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE psid = ?`,
         [String(psid)]
       );
-    } catch (_) {}
+    } catch (_) { }
   }
 
   // Step 0 Condition D: Exact Single-Word "reset" Command (LLM Bypass & Instant Reply)
@@ -2020,7 +2125,7 @@ async function handleMessageEventUnlocked(psid, incomingText = '', payload = nul
         `UPDATE customers SET last_interaction_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE psid = ?`,
         [String(psid)]
       );
-    } catch (_) {}
+    } catch (_) { }
     const resetReply = "Na-reset na po ang ating chat session at nabura na rin ang mga hindi natuloy na laman ng inyong cart. Maaari na po kayong magsimula muli—ano pong nais ninyong i-order?";
     await sendTextMessage(psid, resetReply);
     return { intent: 'SESSION_RESET_COMMAND', confidence: 1.0, replyLog: resetReply };
@@ -2145,7 +2250,7 @@ async function handleMessageEventUnlocked(psid, incomingText = '', payload = nul
     const storeSchedule = systemSettingsService.isStoreOpen();
     if (!storeSchedule.isOpen) {
       const normInput = (text || '').toLowerCase().trim();
-      const isCancel = isCancelTriggerWord(normInput, text, eventPayload);
+      const isCancel = isCancelTriggerWord(normInput, text, eventPayload, session);
 
       // Handle explicit Pre-order triggers
       if (eventPayload === 'ACTION_PREORDER' || normInput === 'mag pre-order' || normInput === 'pre-order' || normInput === 'preorder') {
@@ -2657,7 +2762,7 @@ function isRecommendationRequest(rawText = '') {
 function isReferentialOrComboOrder(rawText = '') {
   const s = String(rawText || '').trim();
   if (!s) return false;
-  return /\b(?:add\s+(?:to\s+)?cart\s*(?:mo)?\s*(?:na\s*)?(?:yan|yun|ito|nyan)|i-?add\s*(?:mo)?\s*(?:na\s*)?(?:yan|yun)|yan\s+na\s+lang|yun\s+na\s+lang|order\s*(?:ko|natin)\s*(?:yan|yun)|ikaw\s+na\s+bahala|ikaw\s+na\s+pumili|kahit\s+ano\s+basta|iba\s+na\s+lang|magkakaiba|mag[\s-]*kakaiba|ayaw\s+ko\s+ng\s+pare[\s-]*pareho|palitan\s+mo|palitan\s+yung|palitan\s+ung|wag\s+yan|huwag\s+yan|ibang\s+meal|ibang\s+ulam)\b/i.test(s);
+  return /\b(?:add\s+(?:to\s+)?cart\s*(?:mo)?\s*(?:na\s*)?(?:yan|yun|ito|nyan)|i-?add\s*(?:mo)?\s*(?:na\s*)?(?:yan|yun|ito|nyan)|pabili\s*(?:po)?\s*(?:ng|nang)?\s*(?:niyan|nito|iyan|iyon|yun|yan|ito)|kuha\s*(?:ako)?\s*(?:ng|nang)?\s*(?:niyan|nito)|yan\s+na\s+lang|yun\s+na\s+lang|order\s*(?:ko|natin)\s*(?:yan|yun|ito|nyan)|ikaw\s+na\s+bahala|ikaw\s+na\s+pumili|kahit\s+ano\s+basta|iba\s+na\s+lang|magkakaiba|mag[\s-]*kakaiba|ayaw\s+ko\s+ng\s+pare[\s-]*pareho|palitan\s+mo|palitan\s+yung|palitan\s+ung|wag\s+yan|huwag\s+yan|ibang\s+meal|ibang\s+ulam)\b/i.test(s);
 }
 
 /**
@@ -2711,6 +2816,9 @@ async function handleRecommendItems(psid, session, rawText) {
     ? 'Narito po ang aming mga top-recommended drinks sa Diner\'s Cafe:'
     : 'Narito po ang mga sikat at masarap na mare-recommend namin sa Diner\'s Cafe:';
   const reply = `${intro}\n\n${lines.join('\n')}\n\nAlin po rito ang gusto ninyong idagdag sa cart?`;
+
+  session.last_recommended_item = top3[0];
+  await saveSession(session);
 
   await sendTextMessage(psid, reply);
   return { intent: 'RECOMMEND_ITEM', confidence: 0.98, replyLog: reply };
@@ -2813,7 +2921,7 @@ async function handleThirdPartyDeliveryHandoff(psid, session) {
       distanceKm,
       address
     });
-  } catch (_) {}
+  } catch (_) { }
 
   const reply = `Nai-submit na po ang inyong order (#${created.orderNumber}) para sa third-party delivery (Grab / Lalamove).\nStatus: PENDING_ADMIN_QUOTE\nAddress: ${address} (${distanceKm} km)\n\nMakikipag-ugnayan po ang aming Admin sa inyo upang kumpirmahin ang third-party delivery fee bago ihanda ang order. Maraming salamat po!`;
   await sendTextMessage(psid, reply);
@@ -2846,18 +2954,32 @@ async function resolveDeliveryAddressAndFare(psid, session, addressStr, landmark
   try {
     fareResult = await fareEngine.calculateFareForAddress(addressStr, session.landmark);
   } catch (geoErr) {
-    const notFoundMsg = 'Paumanhin po, hindi namin mahanap ang eksaktong lokasyon. Pakisama po ang mas malinaw na street address, Barangay, Siyudad, o kilalang Landmark (hal. Tapat ng MRT Boni o Puregold).';
-    session.state = 'AWAITING_ADDRESS_RETRY';
-    session.checkout_step = 'AWAITING_ADDRESS_RETRY';
-    session.current_step = 'AWAITING_ADDRESS_RETRY';
-    await saveSession(session);
-    await sendTextMessage(psid, notFoundMsg);
-    return { intent: 'AWAITING_ADDRESS_RETRY', confidence: 1.0, replyLog: notFoundMsg };
+    if (session.delivery_address && (session.delivery_fee !== undefined || session.deliveryFee !== undefined)) {
+      fareResult = {
+        distanceKm: session.delivery_distance_km || session.distance_km || 1.0,
+        maxRadiusKm: 3.0,
+        isOutOfBounds: false,
+        formattedAddress: session.delivery_address,
+        breakdown: { finalFare: session.delivery_fee !== undefined ? session.delivery_fee : (session.deliveryFee || 49.00) },
+        coordinates: {
+          latitude: session.customer_lat || 14.6143,
+          longitude: session.customer_lng || 120.9642
+        }
+      };
+    } else {
+      const notFoundMsg = 'Paumanhin po, hindi namin mahanap ang eksaktong lokasyon. Pakisama po ang mas malinaw na street address, Barangay, Siyudad, o kilalang Landmark (hal. Tapat ng MRT Boni o Puregold).';
+      session.state = 'AWAITING_ADDRESS_RETRY';
+      session.checkout_step = 'AWAITING_ADDRESS_RETRY';
+      session.current_step = 'AWAITING_ADDRESS_RETRY';
+      await saveSession(session);
+      await sendTextMessage(psid, notFoundMsg);
+      return { intent: 'AWAITING_ADDRESS_RETRY', confidence: 1.0, replyLog: notFoundMsg };
+    }
   }
 
   const distance = fareResult.distanceKm;
   const maxRadiusKm = fareResult.maxRadiusKm || 3;
-  const calculatedFee = fareResult.breakdown.finalFare;
+  const calculatedFee = fareResult.breakdown?.finalFare ?? fareResult.deliveryFee ?? fareResult.finalFare ?? session.delivery_fee ?? 49.00;
   const formatted_address = fareResult.formattedAddress || addressStr;
 
   if (fareResult.isOutOfBounds) {
@@ -2886,8 +3008,8 @@ async function resolveDeliveryAddressAndFare(psid, session, addressStr, landmark
 
   session.delivery_address = formatted_address;
   session.address = formatted_address;
-  session.customer_lat = fareResult.coordinates.latitude;
-  session.customer_lng = fareResult.coordinates.longitude;
+  session.customer_lat = fareResult.coordinates?.latitude || session.customer_lat || 14.6143;
+  session.customer_lng = fareResult.coordinates?.longitude || session.customer_lng || 120.9642;
   session.delivery_distance_km = distance;
   session.delivery_fee = calculatedFee;
   session.deliveryFee = calculatedFee;
@@ -2904,7 +3026,7 @@ async function resolveDeliveryAddressAndFare(psid, session, addressStr, landmark
   session.current_step = 'AWAITING_ADDRESS_CONFIRMATION';
   await saveSession(session);
 
-  const confirmPrompt = `📍 Nai-locate po namin ang inyong drop-off:\n"${formatted_address}" (${distance} km)\nDelivery Fee: ₱${calculatedFee.toFixed(2)}\n\nTama po ba ang lokasyong ito?\n[1] Oo, tama ito\n[2] Ibahin ang address`;
+  const confirmPrompt = `📍 Nai-locate po namin ang inyong drop-off:\n"${formatted_address}" (${distance} km)\nDelivery Fee: ₱${Number(calculatedFee || 49.00).toFixed(2)}\n\nTama po ba ang lokasyong ito?\n[1] Oo, tama ito\n[2] Ibahin ang address`;
   await sendQuickReplies(psid, confirmPrompt, [
     { title: 'Oo, tama ito', payload: 'CONFIRM_ADDRESS_YES' },
     { title: 'Ibahin ang address', payload: 'CONFIRM_ADDRESS_NO' }
@@ -2964,7 +3086,7 @@ async function handleTextInput(psid, session, rawText) {
   }
 
   // Dynamic Order Cancellation Guard (Status-Based Rules)
-  if (isCancelTriggerWord(norm, rawText)) {
+  if (isCancelTriggerWord(norm, rawText, null, session)) {
     return handleCancellationRequest(psid, session, rawText);
   }
 
@@ -3007,12 +3129,12 @@ async function handleTextInput(psid, session, rawText) {
         await db.query(
           `UPDATE payments SET reference_no = ?, payment_method = 'gcash', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
           [refNum, existingPay[0].id]
-        ).catch(() => {});
+        ).catch(() => { });
       } else {
         await db.query(
           `INSERT INTO payments (order_id, payment_method, amount_expected, reference_no, status) VALUES (?, 'gcash', ?, ?, 'pending')`,
           [o.id, o.total_amount || 0, refNum]
-        ).catch(() => {});
+        ).catch(() => { });
       }
 
       if (notificationService && typeof notificationService.broadcastSSE === 'function') {
@@ -3125,7 +3247,7 @@ async function handleTextInput(psid, session, rawText) {
           quantity: addedQty,
           price: price
         };
-        const existingIdx = session.cart.findIndex(c => 
+        const existingIdx = session.cart.findIndex(c =>
           (c.name && c.name.toLowerCase() === addedName.toLowerCase()) ||
           (c.menuItemId && c.menuItemId === itemToAdd.menuItemId)
         );
@@ -3289,11 +3411,23 @@ async function handleTextInput(psid, session, rawText) {
   const isInActiveOrderingPipeline = Boolean(
     (session.cart && session.cart.length > 0) ||
     session.pendingStage5 ||
-    ['ordering', 'AWAITING_ORDER_TYPE', 'AWAITING_STAGE5_CONFIRM', 'AWAITING_NAME', 'AWAITING_ADDRESS', 'AWAITING_PHONE', 'AWAITING_PAYMENT', 'AWAITING_GCASH_AMOUNT', 'AWAITING_DELIVERY_DETAILS', 'AWAITING_CHECKOUT_CONFIRM'].includes(session.state)
+    ['ordering', 'AWAITING_ORDER_TYPE', 'AWAITING_STAGE5_CONFIRM', 'AWAITING_NAME', 'AWAITING_ADDRESS', 'AWAITING_PHONE', 'AWAITING_PAYMENT', 'AWAITING_GCASH_AMOUNT', 'AWAITING_DELIVERY_DETAILS', 'AWAITING_CHECKOUT_CONFIRM', 'COLLECTING_CUSTOMER_INFO', 'AWAITING_DISCOUNT_CONFIRM', 'AWAITING_ORDER_SUMMARY_CONFIRM', 'AWAITING_DRINK_ADDON'].includes(session.state)
+  );
+
+  const isConfirmingOrder = (
+    session.state === 'AWAITING_ORDER_SUMMARY_CONFIRM' ||
+    session.current_step === 'AWAITING_ORDER_SUMMARY_CONFIRM' ||
+    session.checkout_step === 'AWAITING_ORDER_SUMMARY_CONFIRM' ||
+    /\b(?:1|oo\s*tama|tama\s*po|oo[,.]?\s*tama)\b/i.test(norm) ||
+    /\boo[,.]?\s*tama\b/i.test(rawText)
   );
 
   const hasExplicitRatingAnchor = /(?:isa(?:ng)?|dalawa(?:ng)?|tatlo(?:ng)?|apat|lima(?:ng)?|one|two|three|four|five|\d+)\s*(?:na\s*)?(?:stars?|bituin|ratings?|rate\b)/i.test(rawText) || /[⭐★]/.test(rawText);
-  const shouldEvaluateFeedback = (!isInActiveOrderingPipeline || hasExplicitRatingAnchor) && (session.state === 'AWAITING_FEEDBACK_COMMENT' || session.state === 'awaiting_feedback' || hasExplicitRatingAnchor);
+  const isPaymentProofContext = session.state === 'AWAITING_PAYMENT_PROOF' ||
+    session.checkout_step === 'AWAITING_PAYMENT_PROOF' ||
+    Boolean(session.pendingGCashOrder) ||
+    /\b(?:screenshot|resibo|proof|payment|bayad|ref|reference)\b/i.test(rawText);
+  const shouldEvaluateFeedback = !isPaymentProofContext && !isConfirmingOrder && (!isInActiveOrderingPipeline || hasExplicitRatingAnchor) && (session.state === 'AWAITING_FEEDBACK_COMMENT' || session.state === 'awaiting_feedback' || (hasExplicitRatingAnchor && !session.cart?.length));
 
   if (shouldEvaluateFeedback) {
     const feedbackParsed = parseCustomerFeedback(rawText, session);
@@ -3354,8 +3488,11 @@ async function handleTextInput(psid, session, rawText) {
     const hasOrderWithDiningMode = /\b(?:pa-?order|pabili|add\s+\d+|isa|dalawa|tatlo|burger|fries|pizza|milktea|coffee|latte|tea|wings|pasta|steak|meal|dog|nachos|nuggets|lasagna|spaghetti|carbonara|quesadilla)\b/i.test(norm);
     const detectedOneShotPay = /\bgcash|g-?cash\b/i.test(rawText) ? 'GCash' : (/\b(?:cash|cod)\b/i.test(rawText) ? 'Cash' : null);
 
-    const isDeliveryInquiry = /\b(?:makakapag|pwede|puwede|abot|kaya|serviceable|nagdedeliver|deliver\s*ba|sakop)\b/i.test(norm) ||
-      (/\b(?:deliver|delivery)\b/i.test(norm) && (norm.includes('?') || /\b(?:ba|saan|hanggang|kayo\s*ba|location)\b/i.test(norm)));
+    const hasExplicitMode = /\b(?:dine[\s-]*in|sa\s*loob|table|pick[\s-]*up|pickup|take[\s-]*out|takeout)\b/i.test(norm);
+    const isDeliveryInquiry = !hasExplicitMode && (
+      /\b(?:makakapag[- ]?deliver|pwede\s*bang?\s*i-?deliver|puwede\s*bang?\s*i-?deliver|abot\s*ba|serviceable\s*ba|nagdedeliver\s*ba|deliver\s*ba|sakop\s*ba|kaya\s*bang?\s*i-?deliver)\b/i.test(norm) ||
+      (/\b(?:deliver|delivery)\b/i.test(norm) && (norm.includes('?') || /\b(?:ba|saan|hanggang|kayo\s*ba|location)\b/i.test(norm)))
+    );
     if (isDeliveryInquiry) {
       const inqMsg = "Matatagpuan po ang aming cafe sa Tondo, Manila. Mayroon po kaming store delivery hanggang 3 km radius. Para naman po sa mga lokasyon na lampas 3 km (tulad ng Mandaluyong, Quezon City, atbp.), maaari po kayong mag-order via Store Pick-up at mag-book ng sariling 3rd-party courier (Grab o Lalamove) na kukuha ng inyong order dito sa store.\n\nNais niyo po ba itong i-set as Store Pick-up, o Dine In?";
       await sendTextMessage(psid, inqMsg);
@@ -3421,6 +3558,37 @@ async function handleTextInput(psid, session, rawText) {
   }
 
   // Requirement 2: Silent & Atomic Batch Cart Mutation (Add & Remove Multiple Items)
+  if (isMixedAddAndRemoveIntent(rawText)) {
+    const [candidates] = await db.query(`
+      SELECT m.id, m.name, m.price, m.synonyms, m.is_available,
+             COALESCE(m.stock_quantity, i.stock_quantity, 0) AS stock_quantity,
+             COALESCE(c.name, m.category, 'Cafe') AS category_name, m.category
+      FROM menu_items m
+      LEFT JOIN categories c ON c.id = m.category_id
+      LEFT JOIN inventory i ON i.menu_item_id = m.id
+      WHERE COALESCE(m.is_deleted, 0) = 0
+    `);
+    if (!session.cart) session.cart = [];
+    const mixedRes = executeMixedCartMutation(session.cart, rawText, candidates);
+    const cartTotal = session.cart.reduce((sum, item) => sum + ((item.price || 0) * (item.quantity || 1)), 0);
+    session.order_subtotal = cartTotal;
+    session.order_total = cartTotal;
+    session.state = session.cart.length > 0 ? 'AWAITING_CHECKOUT_CONFIRM' : 'IDLE';
+    session.current_step = session.cart.length > 0 ? 'AWAITING_CHECKOUT_CONFIRM' : 'IDLE';
+    await saveSession(session);
+
+    const resp = formatUpdatedCartResponse(session.cart);
+    await sendQuickReplies(psid, resp.text, resp.quickReplies);
+    return {
+      intent: 'BATCH_CART_MIXED_MUTATION',
+      confidence: 1.0,
+      addedItems: mixedRes.addedItems,
+      removedItems: mixedRes.removedItems,
+      cartTotal,
+      replyLog: resp.text
+    };
+  }
+
   if (isBatchRemoveIntent(rawText)) {
     const removedItems = executeBatchRemove(session.cart, rawText);
     if (removedItems && removedItems.length > 0) {
@@ -3433,7 +3601,7 @@ async function handleTextInput(psid, session, rawText) {
 
       const resp = formatUpdatedCartResponse(session.cart);
       await sendQuickReplies(psid, resp.text, resp.quickReplies);
-      return { intent: 'BATCH_CART_REMOVE', confidence: 1.0, removedItems, cartTotal };
+      return { intent: 'BATCH_CART_REMOVE', confidence: 1.0, removedItems, cartTotal, replyLog: resp.text };
     }
   }
 
@@ -3579,8 +3747,10 @@ async function handleTextInput(psid, session, rawText) {
         session.customer_name = customerName;
       }
       if (parsed.address && parsed.address !== currentStoreAddr && parsed.address !== STORE_ADDRESS) {
-        session.delivery_address = parsed.address;
-        session.address = parsed.address;
+        if (!session.delivery_address || isLikelyAddress(parsed.address)) {
+          session.delivery_address = parsed.address;
+          session.address = parsed.address;
+        }
       }
       if (parsed.landmark) {
         session.landmark = parsed.landmark;
@@ -3597,6 +3767,16 @@ async function handleTextInput(psid, session, rawText) {
         session.note = parsed.note;
       }
       await saveSession(session);
+
+      if (!session.customer_name) {
+        const directExtracted = extractRealName(rawText);
+        if (directExtracted) {
+          const directCheck = validateName(directExtracted);
+          if (directCheck.ok) {
+            session.customer_name = directCheck.value;
+          }
+        }
+      }
 
       // If customer name is missing or invalid
       if (!session.customer_name) {
@@ -3651,7 +3831,9 @@ async function handleTextInput(psid, session, rawText) {
         session.details.note = session.customer_notes;
         session.details.paymentMode = session.payment_mode;
       } else {
-        addressStr = parsed.address || session.delivery_address || session.address || session.details?.address || '';
+        addressStr = (parsed.address && isLikelyAddress(parsed.address))
+          ? parsed.address
+          : (session.delivery_address || session.address || session.details?.address || '');
         if (!addressStr || addressStr === currentStoreAddr || addressStr === STORE_ADDRESS) {
           session.customer_name = customerName;
           session.contact_number = contactNumber;
@@ -3885,6 +4067,24 @@ async function handleTextInput(psid, session, rawText) {
     } else {
       const isYes = rawText === 'DISCOUNT_YES' || /\b(?:meron|mayroon|opo|yes|oo|senior|pwd|meron\s*po|mayroon\s*po|i\s*have)\b/i.test(norm);
       const isNo = rawText === 'DISCOUNT_NO' || /\b(?:wala|walaw|walaa|wla|wala\s*po|no|nope|hindi|none|wag\s*na|huwag|ayaw|wala\s*akong)\b/i.test(norm) || /^wal/i.test(norm);
+      const hasDirectIdOrDiscount = /\b(?:osca|pwd|senior|id(?:\s*no|\s*number)?|discount)\b/i.test(norm) || /[A-Za-z]{2,}-\d{3,}/.test(rawText);
+
+      if (hasDirectIdOrDiscount && !isNo) {
+        const subtotal = session.order_subtotal || (session.cart ? calculateCartSubtotal(session.cart) : 0);
+        const computedDiscount = Math.round((subtotal * 0.20) * 100) / 100;
+        const idMatch = rawText.match(/\b(?:osca|pwd)[\w-]+\b/i) || rawText.match(/\b[A-Za-z0-9_-]{4,}\b/);
+        const idText = idMatch ? idMatch[0] : (rawText.trim() || 'Senior / PWD ID Provided');
+
+        session.discount = {
+          applied: true,
+          type: 'Senior Citizen / PWD 20%',
+          amount: computedDiscount,
+          idNumber: idText
+        };
+        session.discount_amount = computedDiscount;
+        await saveSession(session);
+        return await finalizeOrderSummaryAndPayment(psid, session);
+      }
 
       if (isYes) {
         session.state = 'AWAITING_DISCOUNT_PROOF';
@@ -3943,7 +4143,7 @@ async function handleTextInput(psid, session, rawText) {
       /\b(?:2|may\s*babaguhin|baguhin|ibahin|palitan|mali|edit|change|no|hindi)\b/i.test(norm);
 
     if (isAffirmative) {
-      return await executeFinalOrderPlacement(psid, session);
+      return await executeFinalOrderPlacement(psid, session, rawText);
     } else if (isEdit) {
       session.state = 'COLLECTING_CUSTOMER_INFO';
       session.current_step = 'COLLECTING_CUSTOMER_INFO';
@@ -4034,8 +4234,22 @@ async function handleTextInput(psid, session, rawText) {
   }
 
   if (session.state === 'AWAITING_DRINK_ADDON' || session.current_step === 'AWAITING_DRINK_ADDON') {
-    await handleAddonSelection(psid, session, rawText);
-    return { intent: 'SELECT_ADDON', confidence: 1.0 };
+    const phoneDetected = normalizePhone(rawText);
+    if (phoneDetected) {
+      session.contact_number = phoneDetected;
+      session.phone_number = phoneDetected;
+      if (!session.details) session.details = {};
+      session.details.phone = phoneDetected;
+      session.state = (session.cart && session.cart.length > 0 && session.customer_name) ? 'AWAITING_ORDER_SUMMARY_CONFIRM' : 'COLLECTING_CUSTOMER_INFO';
+      session.current_step = session.state;
+      await saveSession(session);
+      if (session.state === 'AWAITING_ORDER_SUMMARY_CONFIRM') {
+        return await finalizeOrderSummaryAndPayment(psid, session);
+      }
+    } else {
+      const addonReply = await handleAddonSelection(psid, session, rawText);
+      return { intent: 'SELECT_ADDON', confidence: 1.0, replyLog: addonReply };
+    }
   }
 
   // Details flow states: check for interruption words (cancel, back, stop, menu, cart, track, hi)
@@ -4095,7 +4309,7 @@ async function handleTextInput(psid, session, rawText) {
     /(?:check\s*out|checkout|yes.*checkout|bayad|babayaran|paki\s*checkout)/i.test(norm) ||
     ['checkout', 'check out', 'pay now', 'im done', 'thats all'].includes(norm)
   ) {
-    return startCheckoutFlow(psid, session);
+    return startCheckoutFlow(psid, session, rawText);
   }
 
   // 2. Open Yes/No question states (Decision 1c)
@@ -4113,9 +4327,8 @@ async function handleTextInput(psid, session, rawText) {
     const classification = classifyShort(rawText);
     if (classification === 'YES' || /\b(?:oo\s*ngani)\b/i.test(norm)) {
       if (session.state === 'AWAITING_CHECKOUT_CONFIRM') {
-        const recentHistory = aiService.getConversationHistory(psid, session);
-        const lastModelTurn = [...recentHistory].reverse().find(h => h.role === 'model');
-        if (lastModelTurn && /(?:idagdag|add\s*more|magdagdag)/i.test(lastModelTurn.text)) {
+        const wantsMoreItems = /\b(?:mag[- ]?dagdag|dagdag|order\s*pa|isa\s*pa|pabili\s*pa|meron\s*pa)\b/i.test(rawText);
+        if (wantsMoreItems) {
           if ((process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured()) {
             const aiAddFollowup = await executeAiAssistantTurn(psid, session, rawText);
             if (aiAddFollowup) return aiAddFollowup;
@@ -4125,7 +4338,7 @@ async function handleTextInput(psid, session, rawText) {
           return { intent: 'ADD_MORE_FOLLOWUP', confidence: 1.0, replyLog: askMoreMsg };
         }
       }
-      return handleYesAnswer(psid, session);
+      return handleYesAnswer(psid, session, rawText);
     }
     if (classification === 'NO') {
       return handleNoAnswer(psid, session);
@@ -4201,7 +4414,7 @@ async function handleTextInput(psid, session, rawText) {
   }
 
   if (['checkout', 'check out', 'pay now', 'im done', 'thats all'].includes(norm)) {
-    await startCheckoutFlow(psid, session);
+    await startCheckoutFlow(psid, session, rawText);
     return { intent: 'CHECKOUT', confidence: 1.0 };
   }
 
@@ -4224,13 +4437,18 @@ async function handleTextInput(psid, session, rawText) {
     /^(?:dine[\s-]*in|sa\s*loob|table|take[\s-]*out|takeout|pick[\s-]*up|pickup|daanan|delivery|deliver|padeliver|pa-deliver)$/i.test(norm);
 
   if (isExplicitModeSwitch || (!session.dining_mode && !session.orderType)) {
-    const isDeliveryInquiry = /\b(?:makakapag|pwede|puwede|abot|kaya|serviceable|nagdedeliver|deliver\s*ba|sakop)\b/i.test(norm) ||
-      (/\b(?:deliver|delivery)\b/i.test(norm) && (norm.includes('?') || /\b(?:ba|saan|hanggang|kayo\s*ba|location)\b/i.test(norm)));
+    const hasExplicitMode = /\b(?:dine[\s-]*in|sa\s*loob|table|pick[\s-]*up|pickup|take[\s-]*out|takeout)\b/i.test(norm);
+    const isDeliveryInquiry = !hasExplicitMode && (
+      /\b(?:makakapag[- ]?deliver|pwede\s*bang?\s*i-?deliver|puwede\s*bang?\s*i-?deliver|abot\s*ba|serviceable\s*ba|nagdedeliver\s*ba|deliver\s*ba|sakop\s*ba|kaya\s*bang?\s*i-?deliver)\b/i.test(norm) ||
+      (/\b(?:deliver|delivery)\b/i.test(norm) && (norm.includes('?') || /\b(?:ba|saan|hanggang|kayo\s*ba|location)\b/i.test(norm)))
+    );
     if (isDeliveryInquiry) {
       const inqMsg = "Matatagpuan po ang aming cafe sa Tondo, Manila. Mayroon po kaming store delivery hanggang 3 km radius. Para naman po sa mga lokasyon na lampas 3 km (tulad ng Mandaluyong, Quezon City, atbp.), maaari po kayong mag-order via Store Pick-up at mag-book ng sariling 3rd-party courier (Grab o Lalamove) na kukuha ng inyong order dito sa store.\n\nNais niyo po ba itong i-set as Store Pick-up, o Dine In?";
       await sendTextMessage(psid, inqMsg);
       return { intent: 'DELIVERY_COVERAGE_INQUIRY', confidence: 1.0, replyLog: inqMsg };
     }
+
+    const hasOrderWithDiningMode = /\b(?:pa-?order|pabili|add\s+\d+|isa|dalawa|tatlo|burger|fries|pizza|milktea|coffee|latte|tea|wings|pasta|steak|meal|dog|nachos|nuggets|lasagna|spaghetti|carbonara|quesadilla|\d+\s*(?:pcs|pieces|x)?)\b/i.test(norm);
 
     if (/\b(?:dine\s*in|sa\s*loob|table)\b/i.test(norm)) {
       session.dining_mode = 'Dine In';
@@ -4239,43 +4457,47 @@ async function handleTextInput(psid, session, rawText) {
         session.state = 'ORDERING';
       }
       await saveSession(session);
-      const hasCart = session.cart && session.cart.length > 0;
-      const msg = hasCart
-        ? `Copy po, pinalitan ko na sa **Dine In**! 🍽️\n\n` + getCheckoutInfoPrompt(session)
-        : `Copy po sa Dine In! Free seating po tayo sa open seating area kaya feel free to find any available seat pagdating niyo.\n\nEto po ang aming menu para makapili kayo ng inyong drinks and meals:`;
-      await sendTextMessage(psid, msg);
-      if (!hasCart) await sendFullMenu(psid, session);
-      return { intent: 'DINING_MODE_DINE_IN', confidence: 1.0, replyLog: msg };
-    }
-    if (/\b(?:take[\s-]*out|takeout|pick[\s-]*up|pickup|daanan)\b/i.test(norm)) {
+      if (!hasOrderWithDiningMode) {
+        const hasCart = session.cart && session.cart.length > 0;
+        const msg = hasCart
+          ? `Copy po, pinalitan ko na sa **Dine In**! 🍽️\n\n` + getCheckoutInfoPrompt(session)
+          : `Copy po sa Dine In! Free seating po tayo sa open seating area kaya feel free to find any available seat pagdating niyo.\n\nEto po ang aming menu para makapili kayo ng inyong drinks and meals:`;
+        await sendTextMessage(psid, msg);
+        if (!hasCart) await sendFullMenu(psid, session);
+        return { intent: 'DINING_MODE_DINE_IN', confidence: 1.0, replyLog: msg };
+      }
+    } else if (/\b(?:take[\s-]*out|takeout|pick[\s-]*up|pickup|daanan)\b/i.test(norm)) {
       session.dining_mode = 'Pick-up';
       session.orderType = 'pickup';
       if (!session.state || session.state === 'IDLE' || session.state === 'AWAITING_DINING_MODE') {
         session.state = 'ORDERING';
       }
       await saveSession(session);
-      const hasCart = session.cart && session.cart.length > 0;
-      const msg = hasCart
-        ? `Copy po, pinalitan ko na sa **Pick-up / Take Out**! 🛍️\n\n` + getCheckoutInfoPrompt(session)
-        : `Copy po sa Take Out! Ihahanda po natin ito agad para sa counter pickup pagdaan ninyo sa cafe.\n\nEto po ang aming menu para makapili kayo:`;
-      await sendTextMessage(psid, msg);
-      if (!hasCart) await sendFullMenu(psid, session);
-      return { intent: 'DINING_MODE_TAKE_OUT', confidence: 1.0, replyLog: msg };
-    }
-    if (/\b(?:delivery|deliver|padeliver|pa-deliver)\b/i.test(norm)) {
+      if (!hasOrderWithDiningMode) {
+        const hasCart = session.cart && session.cart.length > 0;
+        const msg = hasCart
+          ? `Copy po, pinalitan ko na sa **Pick-up / Take Out**! 🛍️\n\n` + getCheckoutInfoPrompt(session)
+          : `Copy po sa Take Out! Ihahanda po natin ito agad para sa counter pickup pagdaan ninyo sa cafe.\n\nEto po ang aming menu para makapili kayo:`;
+        await sendTextMessage(psid, msg);
+        if (!hasCart) await sendFullMenu(psid, session);
+        return { intent: 'DINING_MODE_TAKE_OUT', confidence: 1.0, replyLog: msg };
+      }
+    } else if (/\b(?:delivery|deliver|padeliver|pa-deliver)\b/i.test(norm)) {
       session.dining_mode = 'Delivery';
       session.orderType = 'delivery';
       if (!session.state || session.state === 'IDLE' || session.state === 'AWAITING_DINING_MODE') {
         session.state = 'ORDERING';
       }
       await saveSession(session);
-      const hasCart = session.cart && session.cart.length > 0;
-      const msg = hasCart
-        ? `Noted po, pinalitan ko na sa **Delivery**! 🛵\n\n` + getCheckoutInfoPrompt(session)
-        : `Noted po sa Delivery! Ihahatid po namin ito sa inyong address (hihingin po namin ang complete delivery address mamaya sa checkout).\n\nEto po ang aming menu para makapili kayo:`;
-      await sendTextMessage(psid, msg);
-      if (!hasCart) await sendFullMenu(psid, session);
-      return { intent: 'DINING_MODE_DELIVERY', confidence: 1.0, replyLog: msg };
+      if (!hasOrderWithDiningMode) {
+        const hasCart = session.cart && session.cart.length > 0;
+        const msg = hasCart
+          ? `Noted po, pinalitan ko na sa **Delivery**! 🛵\n\n` + getCheckoutInfoPrompt(session)
+          : `Noted po sa Delivery! Ihahatid po namin ito sa inyong address (hihingin po namin ang complete delivery address mamaya sa checkout).\n\nEto po ang aming menu para makapili kayo:`;
+        await sendTextMessage(psid, msg);
+        if (!hasCart) await sendFullMenu(psid, session);
+        return { intent: 'DINING_MODE_DELIVERY', confidence: 1.0, replyLog: msg };
+      }
     }
   }
 
@@ -4403,7 +4625,7 @@ async function handleTextInput(psid, session, rawText) {
   }
 
   if (intent === 'CHECKOUT') {
-    await startCheckoutFlow(psid, session);
+    await startCheckoutFlow(psid, session, rawText);
     return { intent: 'CHECKOUT', confidence: conf };
   }
 
@@ -4434,7 +4656,7 @@ async function handleTextInput(psid, session, rawText) {
 /**
  * Handle affirmative response for open yes/no question
  */
-async function handleYesAnswer(psid, session) {
+async function handleYesAnswer(psid, session, rawText = '') {
   const currentState = session.state;
 
   if (currentState === 'AWAITING_SUGGESTION_CONFIRMATION' || session.current_step === 'AWAITING_SUGGESTION_CONFIRMATION') {
@@ -4450,6 +4672,12 @@ async function handleYesAnswer(psid, session) {
       session.state = 'COLLECTING_CUSTOMER_INFO';
       session.current_step = 'COLLECTING_CUSTOMER_INFO';
       await saveSession(session);
+      if (rawText) {
+        const parsedNow = parseCustomerInfo(rawText, session.dining_mode);
+        if (parsedNow.name || parsedNow.contact || parsedNow.address) {
+          return handleTextInput(psid, session, rawText);
+        }
+      }
       const prompt = getCheckoutInfoPrompt(session);
       await sendTextMessage(psid, prompt);
       return { intent: 'CONFIRM_CHECKOUT_YES', confidence: 1.0 };
@@ -4569,8 +4797,8 @@ function formatPromotionAnnouncement(promo) {
   let dateRange = 'Ongoing Promo';
 
   if (promo.start_date && promo.end_date) {
-    dateRange = promo.start_date === promo.end_date 
-      ? promo.start_date 
+    dateRange = promo.start_date === promo.end_date
+      ? promo.start_date
       : `${promo.start_date} to ${promo.end_date}`;
   } else if (promo.start_date) {
     dateRange = `Simula ${promo.start_date}`;
@@ -4689,7 +4917,7 @@ async function handleItemPhotoRequest(psid, session, rawText) {
  */
 async function sendFullMenu(psid, session, options = {}) {
   session.state = 'BROWSING';
-  await saveSession(session).catch(() => {});
+  await saveSession(session).catch(() => { });
 
   const [items] = await db.query(`
     SELECT m.id, m.name, m.price, m.is_available,
@@ -4808,7 +5036,7 @@ async function promptDrinkAddons(psid, session, item, quantity) {
     const subtotal = calculateCartSubtotal(session.cart);
     const addedMsg = botMessages.added(qty, item.name, peso(subtotal));
     await sendTextMessage(psid, addedMsg.text);
-    return;
+    return addedMsg.text;
   }
   session.current_drink_item = { item, quantity };
   session.pendingDrinkOrder = { item, quantity };
@@ -4824,6 +5052,7 @@ async function promptDrinkAddons(psid, session, item, quantity) {
     { title: 'Cream Cheese (+₱20)', payload: 'ADDON_CREAM_CHEESE' },
     { title: 'Wala / Skip', payload: 'ADDON_NONE' }
   ]);
+  return askAddonMsg;
 }
 
 /**
@@ -4894,7 +5123,7 @@ Alin po rito ang nais ninyong idagdag? (O sabihin lamang ang 'Wala' kung ayaw ma
     await sendTextMessage(psid, "Sige po, walang add-ons.");
     const prompt = getCheckoutInfoPrompt(session);
     await sendTextMessage(psid, prompt);
-    return;
+    return `Sige po, walang add-ons.\n\n${prompt}`;
   }
 
   // Scenario A: User Selects an Add-on (Click or Text input matching an add-on)
@@ -4933,7 +5162,7 @@ Alin po rito ang nais ninyong idagdag? (O sabihin lamang ang 'Wala' kung ayaw ma
     await sendTextMessage(psid, `Sige po, nailagay na ang ${selectedAddon} (+₱20)!`);
     const prompt = getCheckoutInfoPrompt(session);
     await sendTextMessage(psid, prompt);
-    return;
+    return `Sige po, nailagay na ang ${selectedAddon} (+₱20)!\n\n${prompt}`;
   }
 
   // Unrecognized input in add-ons state: politely re-prompt
@@ -4944,6 +5173,7 @@ Alin po rito ang nais ninyong idagdag? (O sabihin lamang ang 'Wala' kung ayaw ma
     { title: 'Cream Cheese (+₱20)', payload: 'ADDON_CREAM_CHEESE' },
     { title: 'Wala / Skip', payload: 'ADDON_NONE' }
   ]);
+  return clarifyMsg;
 }
 
 /**
@@ -5043,6 +5273,31 @@ function isConversationalInquiry(rawText, session = null) {
   );
 }
 
+function findItemMentionInText(text, candidates) {
+  if (!text || !Array.isArray(candidates) || candidates.length === 0) return null;
+  const norm = normalize(text);
+  for (const item of candidates) {
+    const itemNorm = normalize(item.name || '');
+    if (itemNorm && itemNorm.length >= 3) {
+      const wordBoundRegex = new RegExp(`\\b${itemNorm.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`, 'i');
+      if (wordBoundRegex.test(norm)) return item;
+    }
+    const aliases = [
+      ...(Array.isArray(item.aliases) ? item.aliases : []),
+      ...(typeof item.synonyms === 'string' ? item.synonyms.split(',').map(s => s.trim()) : []),
+      ...(COLLOQUIAL_MENU_ALIASES[String(item.name || '').toLowerCase()] || [])
+    ];
+    for (const a of aliases) {
+      if (a && a.length >= 3) {
+        const aNorm = normalize(a);
+        const aRegex = new RegExp(`\\b${aNorm.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`, 'i');
+        if (aRegex.test(norm)) return item;
+      }
+    }
+  }
+  return null;
+}
+
 async function handleOrderItemText(psid, session, rawText, nlu) {
   // Multi-item ordering must NEVER be treated as a single concatenated menu item
   if (isMultiItemOrderText(rawText)) {
@@ -5107,9 +5362,23 @@ async function handleOrderItemText(psid, session, rawText, nlu) {
     .replace(/\b(?:one|two|three|four|five|six|seven|eight|nine|ten|isa|isang|dalawa|dalawang|tatlo|tatlong|apat|apat na|lima|limang|anim|anim na|pito|pitong|walo|walong|siyam|siyam na|sampu|sampung)\b/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
+  if (!cleanQuery || isReferentialOrComboOrder(cleanQuery)) {
+    if (session.last_recommended_item) {
+      const recQuery = typeof session.last_recommended_item === 'string'
+        ? session.last_recommended_item
+        : (session.last_recommended_item.name || '');
+      if (recQuery) cleanQuery = recQuery;
+    }
+  }
   if (!cleanQuery) cleanQuery = rawText;
 
-  const matchResult = matchItems(cleanQuery, candidates);
+  let matchResult = matchItems(cleanQuery, candidates);
+  if (matchResult.status !== 'accept') {
+    const mention = findItemMentionInText(rawText, candidates);
+    if (mention) {
+      matchResult = { status: 'accept', matches: [mention] };
+    }
+  }
 
   if (matchResult.status === 'accept') {
     const matchedItem = matchResult.matches[0];
@@ -5158,8 +5427,8 @@ async function handleOrderItemText(psid, session, rawText, nlu) {
           return { intent: 'ORDER_ITEM', confidence: 1.0 };
         }
 
-        await promptDrinkAddons(psid, session, matchedItem, qty);
-        return { intent: 'AWAITING_DRINK_ADDON', confidence: 1.0 };
+        const addonMsg = await promptDrinkAddons(psid, session, matchedItem, qty);
+        return { intent: 'AWAITING_DRINK_ADDON', confidence: 1.0, replyLog: addonMsg };
       }
 
       if (!session.cart) session.cart = [];
@@ -5391,11 +5660,24 @@ async function renderCartSummary(psid, session) {
 /**
  * Task 6: Customer Details, Breakdown, and Payment (R2, R3)
  */
-async function startCheckoutFlow(psid, session) {
+async function startCheckoutFlow(psid, session, rawText = '') {
   if (!session.cart || session.cart.length === 0) {
     const empty = botMessages.cartEmpty();
     await sendQuickReplies(psid, empty.text, empty.quickReplies);
     return { intent: 'CHECKOUT_EMPTY', confidence: 1.0 };
+  }
+
+  if (rawText) {
+    if (/\b(?:pick[\s-]*up|pickup|take[\s-]*out|takeout|daanan)\b/i.test(rawText)) {
+      session.dining_mode = 'Pick-up';
+      session.orderType = 'pickup';
+    } else if (/\bdine[\s-]*in|sa\s*loob\b/i.test(rawText)) {
+      session.dining_mode = 'Dine In';
+      session.orderType = 'dine_in';
+    } else if (/\bdelivery|padeliver\b/i.test(rawText)) {
+      session.dining_mode = 'Delivery';
+      session.orderType = 'delivery';
+    }
   }
 
   // Issue 3: Immediately transition to COLLECTING_CUSTOMER_INFO and prompt cleanly without "Yes to what?"
@@ -6229,6 +6511,9 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
       }
 
       case 'RECOMMEND_ITEM': {
+        if (action_payload.item_name || action_payload.items) {
+          session.last_recommended_item = action_payload.item_name || (Array.isArray(action_payload.items) ? action_payload.items[0] : null);
+        }
         await sendTextMessage(psid, reply_message);
         await saveSession(session);
         return {
@@ -6296,7 +6581,7 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
           };
         }
         await sendTextMessage(psid, reply_message);
-        const checkoutRes = await startCheckoutFlow(psid, session);
+        const checkoutRes = await startCheckoutFlow(psid, session, rawText);
         return {
           ...(checkoutRes || { intent: 'AI_PROCEED_CHECKOUT', confidence: 0.98 }),
           replyLog: reply_message,
@@ -6309,10 +6594,10 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
           ? action_payload.items
           : (action_payload.item_name
             ? [{
-                item_name: action_payload.item_name,
-                quantity: action_payload.quantity,
-                addon: action_payload.addon
-              }]
+              item_name: action_payload.item_name,
+              quantity: action_payload.quantity,
+              addon: action_payload.addon
+            }]
             : []);
 
         if (requestedList.length > 0) {
@@ -6438,11 +6723,11 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
 
             const itemToCart = (isDrink && resolvedAddon)
               ? {
-                  ...dbItem,
-                  name: `${dbItem.name} (w/ ${resolvedAddon})`,
-                  addons: [resolvedAddon],
-                  addOns: [{ name: resolvedAddon, price: 20.0 }]
-                }
+                ...dbItem,
+                name: `${dbItem.name} (w/ ${resolvedAddon})`,
+                addons: [resolvedAddon],
+                addOns: [{ name: resolvedAddon, price: 20.0 }]
+              }
               : dbItem;
 
             addToCart(session.cart, itemToCart, qty);
@@ -6462,12 +6747,12 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
           if (addedSummary.length > 0) {
             await saveSession(session);
             if (psid) {
-              await db.query(`DELETE FROM cart_items WHERE sender_psid = ?`, [String(psid)]).catch(() => {});
+              await db.query(`DELETE FROM cart_items WHERE sender_psid = ?`, [String(psid)]).catch(() => { });
               for (const cItem of session.cart) {
                 await db.query(
                   `INSERT INTO cart_items (sender_psid, menu_id, quantity, notes, created_at) VALUES (?, ?, ?, ?, NOW())`,
                   [String(psid), cItem.id || cItem.menuItemId, cItem.quantity, cItem.addons?.[0] || null]
-                ).catch(() => {});
+                ).catch(() => { });
               }
             }
           }
@@ -6734,7 +7019,7 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
               }
             }
           }
-        } else if (isBatchAddIntent(rawText)) {
+        } else if (/\b(?:pa[- ]?order|order|pa[- ]?dagdag|dagdag|padagdag|pabili|add|pa[- ]?add|gusto\s*ko\s*ng|paki[- ]?add|palitan|palit|kapalit|gawing|gawin)\b/i.test(rawText) && isBatchAddIntent(rawText)) {
           const [candidates] = await db.query(`
             SELECT m.id, m.name, m.price, m.synonyms, m.is_available,
                    COALESCE(m.stock_quantity, i.stock_quantity, 0) AS stock_quantity,
@@ -6808,6 +7093,24 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
           };
         }
 
+        // If phone number is missing, strictly enforce collection before confirming order
+        if (session.cart && session.cart.length > 0 && (!session.phone_number && !session.contact_number)) {
+          const askPhoneMsg = `Pakibigay po ang inyong active Philippine Contact Number (hal. 09XXXXXXXXX) para matawagan po kayo ng aming staff/rider pagka-dispatch ng inyong order.`;
+          const finalReply = (reply_message.includes('09') || /phone|contact|number/i.test(reply_message))
+            ? reply_message
+            : `${reply_message}\n\n${askPhoneMsg}`;
+          await sendTextMessage(psid, finalReply);
+          session.state = 'COLLECTING_CUSTOMER_INFO';
+          session.current_step = 'COLLECTING_CUSTOMER_INFO';
+          await saveSession(session);
+          return {
+            intent: 'AWAITING_CUSTOMER_PHONE',
+            confidence: 0.98,
+            replyLog: finalReply,
+            aiAction: 'SET_DETAILS'
+          };
+        }
+
         await sendTextMessage(psid, reply_message);
         return {
           intent: 'AI_SET_DETAILS',
@@ -6818,6 +7121,14 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
       }
 
       case 'CONFIRM_ORDER': {
+        if (!session.phone_number && !session.contact_number) {
+          const askPhone = "Bago po natin i-confirm ang inyong order, pakibigay po ang inyong active Philippine Contact Number (09XXXXXXXXX) para matawagan po kayo:";
+          await sendTextMessage(psid, askPhone);
+          session.state = 'COLLECTING_CUSTOMER_INFO';
+          session.current_step = 'COLLECTING_CUSTOMER_INFO';
+          await saveSession(session);
+          return { intent: 'AWAITING_CUSTOMER_PHONE', confidence: 0.98, replyLog: askPhone, aiAction: 'SET_DETAILS' };
+        }
         await sendTextMessage(psid, reply_message);
         const confirmRes = await finalizeOrderSummaryAndPayment(psid, session);
         return {
@@ -6851,7 +7162,7 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
               orderContextNotice = `Parating na po si rider kasama ang inyong Order #${act.order_number}! Pakiantabayan na lamang po ang delivery sa inyong lokasyon.`;
             }
           }
-        } catch (_) {}
+        } catch (_) { }
         await sendTextMessage(psid, orderContextNotice);
         return {
           intent: 'AI_DELAY_COMPLAINT',
@@ -7047,9 +7358,9 @@ async function tryGeminiConversationalTurn(psid, session, rawText) {
     const quickReplies = mappedReplies.length > 0
       ? mappedReplies.map(qr => qr.payload ? qr : qr.title)
       : [
-          { title: '☕ Menu', payload: 'MENU_HOME' },
-          { title: '🛒 Cart', payload: 'VIEW_CART' }
-        ];
+        { title: '☕ Menu', payload: 'MENU_HOME' },
+        { title: '🛒 Cart', payload: 'VIEW_CART' }
+      ];
 
     await sendQuickReplies(psid, geminiRes.replyText, quickReplies);
     return {
@@ -7122,5 +7433,6 @@ module.exports = {
   executeAiAssistantTurn,
   withPsidLock,
   getMissingCheckoutFields,
-  isInvalidDiscountIdClaim
+  isInvalidDiscountIdClaim,
+  isLikelyAddress
 };

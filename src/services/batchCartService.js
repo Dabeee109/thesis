@@ -43,7 +43,7 @@ function isMultiItemOrderText(text) {
   const t = text.trim();
   if (!t) return false;
 
-  const foodKeywords = /\b(?:pizza|burger|fries|ribs|matcha|tea|coffee|latte|milktea|nachos|chicken|wings|pasta|spaghetti|carbonara|rice|silog|steak|quesadilla|nuggets|drinks?|meals?|ulam|kape|order|pa-?order|pabili|add|x|\d+|isa|isang|dalawa|dalawang|tatlo|tatlong|apat|lima|one|two|three|four|five)\b/i;
+  const foodKeywords = /\b(?:pizza|burger|fries|ribs|matcha|tea|coffee|latte|milktea|nachos|chicken|wings|pasta|spaghetti|carbonara|rice|silog|steak|quesadilla|nuggets|drinks?|meals?|ulam|kape)\b/i;
 
   const commaSegments = t.split(',').map(s => s.trim()).filter(Boolean);
   if (commaSegments.length >= 2) {

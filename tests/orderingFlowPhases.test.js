@@ -164,7 +164,7 @@ note: extra napkins`);
     it('Dispatches 20-min warning (10m remaining), 25-min warning (5m remaining), and 30-min auto-reset', async () => {
       const { clearMemorySessions } = require('../src/services/sessionManager');
       if (clearMemorySessions) clearMemorySessions();
-      await db.query("DELETE FROM customers").catch(() => {});
+      await db.query("UPDATE customers SET cart_json = '[]', conversation_state = 'IDLE'").catch(() => { });
       const psid = `PSID_INACTIVITY_${Date.now()}`;
       const session = await getSession(psid);
       session.cart = [{ menuItemId: 1, name: 'Cold Brew', price: 130, quantity: 1 }];

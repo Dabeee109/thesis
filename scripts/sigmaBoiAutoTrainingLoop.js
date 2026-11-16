@@ -53,7 +53,7 @@ const PERSONAS = [
     description: "Gumagamit ng conyo Taglish at colloquial menu aliases tulad ng 'classic milktea' at 'chic'n bowl'.",
     goal: "Umorder ng classic burger at classic milktea gamit ang conyo slang.",
     initialMessage: "Hey bro pabili naman ng 1 classic burger and 1 classic milktea with pearls please",
-    systemPrompt: `Ikaw ay isang gutom na conyo college student. Gumagamit ka ng 'bro', 'please', at Taglish. Kapag tinanong ka kung Dine-in, Delivery, o Pick-up, sabihin mong Pick-up. Kapag humingi ng details, ibigay ang pangalan mong Carlo at 09181234567, Cash payment. Kapag tapos na, sabihin ang '[GOAL_REACHED]'.`
+    systemPrompt: `Ikaw ay isang gutom na conyo college student. Gumagamit ka ng 'bro', 'please', at Taglish. Kapag tinanong ka kung Dine-in, Delivery, o Pick-up, sabihin mong Pick-up. Kapag humingi ng details, ibigay ang pangalan mong Carlo at 09181234567, Cash payment. Kapag nagpakita ng order summary confirmation ([1] Oo, tama), kumpirmahin ito gamit ang '[1] Oo, tama' at pagkatapos ay sabihin ang '[GOAL_REACHED]'.`
   },
   {
     id: 3,
@@ -83,9 +83,9 @@ const PERSONAS = [
     id: 6,
     name: "Ang Tipid / Budget Conscious",
     description: "Naghahanap ng pinakamurang makakain sa cafe na hindi lalampas sa ₱100.",
-    goal: "Humingi ng rekomendasyon para sa pinakamurang meal o meryenda sa ilalim ng ₱100.",
+    goal: "Humingi ng rekomendasyon para sa pinakamurang meal o meryenda sa ilalim ng ₱100 at mag-order.",
     initialMessage: "Ano po ang pinakamurang pagkain o burger ninyo na babagay sa student budget under 100 pesos?",
-    systemPrompt: `Ikaw ay student na nagtitipid. Gusto mo ng pagkain under 100 pesos. Kapag nag-rekomenda ang bot ng Regular Burger (₱65) o Cheeseburger (₱79), sabihin mong 'Sige pabili niyan 1 piece' tapos '[GOAL_REACHED]'.`
+    systemPrompt: `Ikaw ay student na nagtitipid. Gusto mo ng pagkain under 100 pesos. Kapag nag-rekomenda ang bot ng budget item under 100 pesos (tulad ng Pita Wrap ₱89 o Flavored Fries ₱89) o nagpaliwanag sa Classic Burger (₱139), sabihin mong 'Sige pabili niyan 1 piece Dine In'. Kapag humingi ng detalye, ibigay ang pangalan mong Sam at 09191234567, Cash payment. Kapag nagpakita ng order summary confirmation ([1] Oo, tama), kumpirmahin ito at sabihing '[GOAL_REACHED]'.`
   },
   {
     id: 7,
@@ -133,7 +133,7 @@ const PERSONAS = [
     description: "Nagse-send ng magkakasunod na maiikling chat nang walang patid.",
     goal: "Magpadala ng rapid burst: 'Hi' -> 'pabili' -> '1 burger' -> 'tsaka milktea'.",
     initialMessage: "Hi pabili burger at milktea",
-    systemPrompt: `Ikaw ay mabilis mag-type. Sumagot nang maiikli at sunod-sunod. Kapag nakuha ng bot ang order mo nang buo, sabihin ang '[GOAL_REACHED]'.`
+    systemPrompt: `Ikaw ay mabilis mag-type. Sumagot nang maiikli at sunod-sunod. Kapag tinanong kung Dine In, Delivery, o Pick-up, sabihin mong Dine In. Kapag tinanong ukol sa add-ons, sabihing 'Wala na po, checkout na'. Kapag humingi ng details, ibigay ang 'Juan Dela Cruz, 09171234567, 6pm, GCash'. Kapag tinanong ukol sa Senior/PWD discount, sabihing 'Wala po'. Kapag nagpakita ng order summary confirmation ([1] Oo, tama), kumpirmahin ito at sabihing '[GOAL_REACHED]'.`
   },
   {
     id: 13,
@@ -217,6 +217,7 @@ Scoring Guidelines:
 - If the bot answered inquiries politely, accurately processed the customer's request/order, handled confirmation, and acknowledged feedback, award 95-100.
 - If minor conversational friction occurred but the goal was reached, award 85-94.
 - Only fail (score < 80) if there was a severe breakdown, persistent stuck loop, or unauthorized hallucination.
+- Note: When an order is completed/placed, session.cart is intentionally cleared (cart_count = 0) and the order status becomes Pending Approval in the orders table. This is correct e-commerce behavior and should NOT be flagged as a premature cart reset.
 
 Output Format: You MUST return a VALID JSON object with these exact keys:
 {
@@ -303,7 +304,7 @@ function applyAutoFix(newDirective) {
 /**
  * Run a full multi-turn simulation for a single Persona
  */
-async function runPersonaSimulation(persona, { maxTurns = 6, autofix = false } = {}) {
+async function runPersonaSimulation(persona, { maxTurns = 8, autofix = false } = {}) {
   console.log(`\n==============================================================================`);
   console.log(`🎭 RUNNING SIMULATION: Persona #${persona.id} - "${persona.name}"`);
   console.log(`🎯 Goal: ${persona.goal}`);
@@ -397,6 +398,7 @@ async function main() {
   const hoursArg = parseFloat((args.find(a => a.startsWith('--hours=')) || '--hours=0').split('=')[1]);
   const untilArg = (args.find(a => a.startsWith('--until=')) || '').split('=')[1];
   const targetAccuracyArg = parseFloat((args.find(a => a.startsWith('--target-accuracy=')) || '--target-accuracy=95').split('=')[1]);
+  const maxRoundsArg = parseInt((args.find(a => a.startsWith('--rounds=')) || '--rounds=5').split('=')[1], 10);
 
   let endTime = 0;
   if (untilArg) {
@@ -479,13 +481,13 @@ async function main() {
     }
 
     round++;
-    if (durationMs > 0 ? Date.now() < endTime : round <= 5) {
+    if (durationMs > 0 ? Date.now() < endTime : round <= maxRoundsArg) {
       console.log(`\n💤 Current accuracy is ${currentAccuracy}% (< ${targetAccuracyArg}% target). Starting round ${round} in 10s...\n`);
       await new Promise(r => setTimeout(r, 10000));
     } else {
       break;
     }
-  } while (currentAccuracy < targetAccuracyArg && (durationMs > 0 ? Date.now() < endTime : round <= 5));
+  } while (currentAccuracy < targetAccuracyArg && (durationMs > 0 ? Date.now() < endTime : round <= maxRoundsArg));
 
   console.log(`\n==============================================================================`);
   console.log(`🎯 SIGMABOITRAINING CONTINUOUS RUN REPORT`);

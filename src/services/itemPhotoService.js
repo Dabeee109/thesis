@@ -52,7 +52,8 @@ function extractPhotoItemQuery(rawText) {
     'photo', 'photos', 'image', 'images', 'itsura', 'hitsura', 'mukha',
     'looks like', 'look like', 'ka ba', 'po ba', 'ba', 'po', 'please', 'pls',
     'nga', 'naman', 'lang', 'para sa', 'tungkol sa', 'yung', 'ung', 'ang',
-    'ng', 'na', 'sa', 'of', 'the', 'an', 'a', 'it'
+    'ng', 'na', 'sa', 'of', 'the', 'an', 'a', 'it', 'actual', 'ninyo', 'ninyo po',
+    'kung masarap', 'kung ano', 'kayo nun', 'bago ako umorder', 'bago umorder', 'muna'
   ];
 
   // Sort longest phrases first to strip multi-word expressions cleanly
@@ -66,31 +67,31 @@ function extractPhotoItemQuery(rawText) {
 /**
  * Score candidate menu item name match when SQL LIKE returns no exact substring match.
  */
-function findBestFuzzyMenuMatch(candidates, query) {
-  const qLower = String(query || '').toLowerCase().trim();
-  if (!qLower || !Array.isArray(candidates) || candidates.length === 0) return null;
-
-  const qTokens = qLower.split(/\s+/).filter(t => t.length >= 2);
-  if (qTokens.length === 0) return null;
+function findBestFuzzyMenuMatch(a, b) {
+  const candidates = Array.isArray(a) ? a : (Array.isArray(b) ? b : []);
+  const rawQuery = Array.isArray(a) ? b : a;
+  const qLower = String(rawQuery || '').toLowerCase().trim();
+  if (!qLower || candidates.length === 0) return null;
 
   let bestItem = null;
-  let bestScore = 0;
+  let maxMatched = 0;
 
   for (const item of candidates) {
     const nameLower = String(item.name || '').toLowerCase();
     const synLower = String(item.synonyms || '').toLowerCase();
-    const hay = `${nameLower} ${synLower}`;
 
-    let matchedTokens = 0;
-    for (const tok of qTokens) {
-      if (hay.includes(tok)) {
-        matchedTokens++;
-      }
+    if (nameLower.includes(qLower) || qLower.includes(nameLower)) {
+      return item;
     }
 
-    const score = matchedTokens / qTokens.length;
-    if (score > bestScore && score >= 0.5) {
-      bestScore = score;
+    const nameTokens = nameLower.split(/\s+/).filter(t => t.length > 2);
+    let matched = 0;
+    for (const t of nameTokens) {
+      if (qLower.includes(t)) matched++;
+    }
+    const ratio = nameTokens.length > 0 ? (matched / nameTokens.length) : 0;
+    if (ratio >= 0.5 && matched > maxMatched) {
+      maxMatched = matched;
       bestItem = item;
     }
   }
