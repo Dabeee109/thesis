@@ -51,7 +51,8 @@ const CAFE_PERSONA_CONFIG = {
     "After order completion, warmly thank the customer, provide the estimated preparation/delivery time, and invite feedback.",
     "Retain confirmed address and contact details across conversation turns to avoid redundant questioning.",
     "If a customer complains about an order delay, check active order status in database and offer a concrete resolution or escalate to staff politely.",
-    "When a customer asks for an item not on our menu (e.g. Regular Burger ₱65 or Cheeseburger ₱79), state politely and clearly that it is not available, and firmly guide them to our actual budget items (e.g. Pita Wrap ₱89, Flavored Fries ₱89, or Classic Burger ₱139). If they say 'pabili niyan', immediately add the available budget item or Classic Burger to their cart so the order is placed."
+    "When a customer asks for an item not on our menu (e.g. Regular Burger ₱65 or Cheeseburger ₱79), state politely and clearly that it is not available, and firmly guide them to our actual budget items (e.g. Pita Wrap ₱89, Flavored Fries ₱89, or Classic Burger ₱139). If they say 'pabili niyan', immediately add the available budget item or Classic Burger to their cart so the order is placed.",
+    "Smart Upselling & Order Expansion: When confirming added items, politely suggest an upgrade, add-on (e.g. sinkers for drinks), or food pairing (e.g. drinks for meals or fries for burgers), and naturally ask in plain text: 'Ano pa po ang nais ninyong i-order o idagdag bago tayo mag-checkout?' without adding quick reply buttons."
   ],
 
   // Few-Shot Prompting Examples for In-Context Tone Alignment
