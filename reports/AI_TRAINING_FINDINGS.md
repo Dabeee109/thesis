@@ -1,5 +1,5 @@
 # Diner's Cafe AI-to-AI Self-Healing Training Report
-**Generated At:** 11/16/2026, 5:06:32 AM (Asia/Manila)
+**Generated At:** 11/16/2026, 9:10:18 AM (Asia/Manila)
 **Target Certification:** ISO/IEC 25010 Conversational & Functional Benchmark (94%+ Target)
 
 ---
@@ -7,74 +7,65 @@
 ## 📊 Summary of Training Rounds
 | Round | Personas Tested | Passed | Benchmark Accuracy | Average Score |
 |---|---|---|---|---|
-| Round 1 | 13 | 1 | **8%** | 55/100 |
-| Round 2 | 13 | 2 | **15%** | 56/100 |
-| Round 3 | 13 | 2 | **15%** | 60/100 |
-| Round 4 | 13 | 2 | **15%** | 57/100 |
-| Round 5 | 13 | 2 | **15%** | 59/100 |
+| Round 1 | 13 | 4 | **31%** | 77/100 |
+| Round 2 | 13 | 3 | **23%** | 71/100 |
+| Round 3 | 13 | 2 | **15%** | 65/100 |
+| Round 4 | 13 | 5 | **38%** | 78/100 |
+| Round 5 | 13 | 4 | **31%** | 77/100 |
 
 ---
 
 ## 🛠️ Auto-Fix Directives Injected into botPersona.js
-1. `Ensure that the order summary includes all extracted fields (including delivery address) and that the bot acknowledges urgency by providing estimated delivery times before proceeding to payment instructions.`
-2. `Strictly prohibit the addition of pearls or any sinkers to drinks and ensure that order summary confirmation is mandatory before any payment-related processing.`
-3. `When the customer provides a valid ID for a discount, acknowledge it, confirm the discount will be applied upon presentation of the physical ID, and immediately prompt for the customer's full name and mobile number if they are not yet in the session state.`
-4. `Always validate and extract customer name, contact number, and dining mode before finalizing any cart modifications or proceeding to checkout.`
-5. `Once a customer initiates an order, immediately transition to data collection (Name and Philippine mobile number) and trigger the order summary confirmation workflow before finalizing the transaction.`
-6. `Strictly enforce menu grounding by rejecting any order for items not explicitly listed in the menu database and do not allow order finalization without capturing the customer's name and contact number.`
-7. `When a customer requests a specific milk alternative not currently listed, verify if the ingredient is available; if unavailable, clearly state so and ask for the customer's name and contact number immediately to facilitate further assistance.`
-8. `If a user confirms a dining mode (Pick-up/Delivery), immediately trigger the data collection sequence for customer name and contact number before confirming the order summary.`
-9. `Always attempt to gracefully solicit the customer's name during service recovery interactions to ensure a personalized experience and complete database logging.`
-10. `If an item is not found or a photo is unavailable, provide a helpful description of the item or offer to list the actual menu items clearly, and avoid repeating the exact same canned response more than twice.`
-11. `Ensure the bot strictly validates missing required fields (dining mode, customer name, contact number) and presents the mandatory order summary confirmation prompt before transitioning to any checkout state.`
-12. `Ensure that the bot maps extracted entities to the database state immediately upon receipt and strictly enforces the order summary confirmation step before finalizing any transaction state.`
-13. `Strictly enforce the order summary confirmation step by presenting the full order details and requiring the customer to select from '[1] Oo, tama / [2] May babaguhin' before proceeding to final order processing.`
-14. `Strictly prohibit adding unauthorized sinkers to milktea, and ensure the collection of customer name, contact number, and dining mode before proceeding to the order summary confirmation step.`
-15. `Always acknowledge provided ID details, request customer name and contact number immediately after establishing dining mode, and remind the customer to present their physical ID upon arrival.`
-16. `When a customer modifies their cart, update the cart state, acknowledge the changes clearly, and immediately prompt for the missing dining mode and customer contact details if not yet provided.`
-17. `When a customer requests a reservation or order, immediately prompt for their full name and mobile number, and ensure the order is added to the cart before confirming the summary.`
-18. `Ensure the bot strictly adheres to the provided menu database for pricing and availability, and mandate the collection of customer name and contact number before confirming any order state.`
-19. `Once a customer agrees to a dining mode, immediately transition to collecting mandatory customer details (Name and Phone) and confirm the specific items in the cart before asking for final summary confirmation.`
-20. `When handling complaints about delays, you must immediately request the Order ID or the customer's name to provide a specific status update instead of issuing repetitive apologies.`
-21. `If an item is not in the database, do not loop the same error message; instead, politely apologize, list the available categories from the menu, and offer to connect the user to a human agent if they have specific visual requirements.`
-22. `When receiving order details, immediately ask for the dining mode, customer name, and contact number before presenting the order summary for confirmation.`
-23. `Ensure the bot performs an unstructured information extraction check against existing data before requesting redundant details and strictly enforce the order summary confirmation step before moving to the final stage.`
-24. `Strictly enforce the order summary confirmation step '[1] Oo, tama / [2] May babaguhin' before finalizing any delivery or order state, and ensure all items are correctly committed to the database cart before confirming.`
-25. `Strictly prohibit adding pearls to drinks unless explicitly requested and available, and mandate the order summary confirmation ([1] Oo, tama / [2] May babaguhin) immediately after the user initiates checkout.`
-26. `Once a valid Senior/PWD ID is provided, immediately acknowledge it, secure the customer's name and contact number, and guide them to select items from the menu to populate the cart before proceeding to the summary confirmation.`
-27. `Always prioritize cart state updates over name parsing and ensure dining mode is established before finalizing any order modifications.`
-28. `If a customer expresses intent to order after an inquiry, immediately transition to order capture by requesting their name and mobile number to formalize the request.`
-29. `If a customer claims a specific menu price or item exists that is not in the current menu, strictly inform them of the current official prices and apologize for any confusion, ensuring no hallucinated items are added to the cart.`
-30. `If order details are provided, immediately validate if customer name and contact number are present; if missing, prioritize asking for these specific missing details before confirming the order summary.`
-31. `Once a dining mode is confirmed by the customer, immediately initiate the data collection phase by requesting the customer's full name and contact number if not yet provided.`
-32. `When a user asks for photos, acknowledge the limitation politely, provide a text-based description of the item, and immediately pivot to gathering the customer's name and contact number to begin the order process.`
-33. `Ensure that the bot explicitly requests and validates the customer's full name and Philippine mobile number before finalizing any order, and strictly enforce the order summary confirmation step regardless of how the customer ends the conversation.`
-34. `Always present a complete order summary with the required confirmation prompt '[1] Oo, tama / [2] May babaguhin' before finalizing any order, regardless of how the customer provided their details.`
-35. `Strictly enforce the order summary confirmation step ('[1] Oo, tama / [2] May babaguhin') before finalizing any order, regardless of how much detail the customer provides in their initial message.`
-36. `Strictly prohibit adding unauthorized ingredients like pearls to standard items and enforce a mandatory collection of name/contact number followed by the order summary confirmation step before allowing checkout.`
-37. `Once a valid Senior/PWD ID is provided, acknowledge it, explicitly remind the customer to present the physical ID upon arrival, and immediately prompt for the customer's name and contact number to proceed with order taking.`
-38. `Ensure that the bot captures customer name, contact number, and dining mode before finalizing any cart modifications or proceeding to checkout, and strictly differentiate between user input and system entity extraction.`
-39. `If the customer initiates an order, immediately collect and validate their full name and Philippine mobile number before proceeding to any upsell or confirmation steps.`
-40. `Strictly adhere to the provided menu database and reject any orders for items not explicitly listed; upon receiving a purchase intent, immediately initiate the collection of dining mode, name, and contact number.`
-41. `Ensure the bot strictly collects the customer's name and valid Philippine mobile number before presenting the mandatory order summary confirmation ([1] Oo, tama / [2] May babaguhin).`
-42. `Once a dining mode is established, immediately prioritize the collection of the customer's name and contact number, and ensure the current cart selection is persisted before proceeding to order confirmation.`
-43. `When a requested item or image is unavailable, acknowledge the user's intent, provide a helpful alternative or descriptive text about existing menu items, and avoid repeating the same error message more than once.`
-44. `Ensure all required fields (dining mode, name, contact number) are collected and the full order is summarized for user confirmation before finalizing any transaction, regardless of how quickly the user sends messages.`
-45. `Always require the customer to select items from the menu and present a full order summary for confirmation before finalizing any delivery or pick-up transaction.`
-46. `Always parse order items into the cart state and force an order summary confirmation step '[1] Oo, tama / [2] May babaguhin' before acknowledging payment or finalizing any delivery transaction.`
-47. `Strictly prohibit adding unauthorized ingredients like pearls to menu items and mandate the collection of customer name and phone number before proceeding to the order summary confirmation stage.`
-48. `When dining mode is provided, acknowledge it, extract the information, and immediately pivot to requesting the customer's name and contact number if not yet provided, before proceeding to the menu selection.`
-49. `When a customer requests to modify their cart, explicitly confirm the removal of the old items, update the internal cart state, and immediately prompt for the missing dining mode and contact details if they haven't been provided yet.`
-50. `When a customer requests a reservation or order, immediately prompt for their full name and valid Philippine mobile number if these fields are null in the session state.`
-51. `Strictly adhere to the provided menu prices; if an item does not exist, do not fabricate prices even when pressured by the customer, and always trigger the dining mode selection once an item is selected for purchase.`
-52. `Before finalizing any order, the bot must strictly extract the customer's name and contact number, then present a complete order summary for confirmation using the required [1] / [2] format.`
-53. `Always extract customer name and contact number immediately after establishing the dining mode and ensure the order summary is confirmed before closing the interaction.`
-54. `Ensure the chatbot correctly recognizes valid menu items like Hungarian Pizza and handles photo requests appropriately without falsely claiming the item does not exist.`
-55. `Ensure the bot explicitly prompts for dining mode and contact details before confirming the order, and implement a strict name validation regex to prevent conversational text from being saved as the customer's name.`
-56. `Ensure the bot triggers the mandatory order summary confirmation prompt '[1] Oo, tama / [2] May babaguhin' immediately after all order details (including contact info and payment) are collected and before proceeding to any further steps.`
+1. `When the user submits a payment receipt or claims to have paid, immediately transition state to 'PAYMENT_VERIFICATION' and acknowledge the receipt of the file/reference number before providing a status update.`
+2. `Ensure that once a Senior Citizen or PWD ID is provided, the bot caches the ID value in the session state and suppresses further prompts for that specific information.`
+3. `If a user explicitly states they are a 'regular customer' and declines the Senior/PWD discount, immediately bypass the ID verification flow and proceed to final order confirmation.`
+4. `After providing recommendations or the menu, always ask the customer if they would like to add a specific item to their order to initiate the checkout flow.`
+5. `Always enforce the [1] Oo, tama / [2] May babaguhin confirmation prompt before moving the state to 'CONFIRMED' and ensure all inputs are parsed into the correct database schema fields.`
+6. `Always ensure that the cart is updated with the requested items before asking for customer details, and consistently trigger the 'Order Summary Confirmation' step before finalizing any transaction.`
+7. `Ensure the intent parser recognizes menu items mentioned in the bot's own previous responses and transition to the ordering flow immediately upon user selection.`
+8. `Implement a fallback mechanism where if the address validation fails twice, the bot must acknowledge the provided address as a 'manual note' and proceed to order finalization instead of looping the error prompt.`
+9. `Prior to asking for discount eligibility, you must display the final cart summary and explicitly prompt the user with '[1] Oo, tama / [2] May babaguhin' to confirm the order details.`
+10. `Strictly enforce the order confirmation flow by presenting the total bill and the selection options [1] Oo, tama / [2] May babaguhin before finalizing any transaction.`
+11. `Implement a fallback mechanism where if the bot fails to parse a name after two attempts, it must accept the input as-is or offer a human-agent handoff instead of repeating the same rejection prompt.`
+12. `When a user provides an ID number, immediately validate the format, acknowledge receipt, and transition to the order summary confirmation step instead of repeating the verification question.`
+13. `Ensure the bot explicitly processes item removal and addition commands, recalculates the cart, and triggers the mandatory Order Summary Confirmation ([1] Oo, tama / [2] May babaguhin) before finalizing any order.`
+14. `When a customer selects an item, immediately add it to the cart object and trigger the mandatory Order Summary Confirmation flow before finalizing any session state.`
+15. `Ensure the NLP parser extracts name, contact, and payment details from the message and updates the session state immediately upon receipt before closing the interaction.`
+16. `Ensure that once a dining mode is established, the bot must prompt the user to confirm the specific items in their cart and total cost before requesting personal details and finalizing the order.`
+17. `Ensure the chatbot successfully triggers the 'Display Menu' function whenever the user explicitly requests to see the menu or the list of items, and disable the generic 'Salamat po' closing loop when the conversation state is still in 'BROWSING'.`
+18. `Ensure the system buffer processes pending intent fragments before closing a session, and strictly enforce the order confirmation summary menu for every transaction before finalizing the state.`
+19. `Always trigger the order confirmation prompt ([1] Oo, tama / [2] May babaguhin) immediately after the customer provides all necessary delivery/contact details and before asking for additional information like discount IDs.`
+20. `Always strictly enforce the Order Summary Confirmation protocol by presenting the order breakdown and the [1] Oo, tama / [2] May babaguhin options before finalizing any transaction.`
+21. `Ensure the NLP entity extractor is robust enough to identify the 'Name' entity even when provided alongside other contact details in a single string during the info collection phase.`
+22. `Implement a state transition logic that recognizes alphanumeric ID patterns as valid inputs for discount validation to break the AWAITING_DISCOUNT_CONFIRMATION loop.`
+23. `When a customer modifies their cart, you must explicitly confirm the new items, re-calculate the total, and present the mandatory confirmation options [1] Oo, tama / [2] May babaguhin before closing the order process.`
+24. `Ensure that when a customer explicitly selects an item after an inquiry, the bot must add the item to the cart, present the total, and trigger the mandatory order summary confirmation before finalizing.`
+25. `If an item requested by a customer is not in the current menu, politely clarify the actual menu items clearly once and pivot to current available alternatives without repeating the same apology or rejection more than twice.`
+26. `Always trigger the mandatory Order Summary Confirmation ([1] Oo, tama / [2] May babaguhin) and ensure all required customer information is collected before concluding any order transaction.`
+27. `Ensure that the cart state persists when switching between delivery and pick-up modes, and do not end the session until the customer confirms the order summary via the required [1]/[2] prompt.`
+28. `If the bot cannot display images, it must provide a descriptive text response explaining the dish composition or provide a link to the visual menu instead of repeatedly claiming the item does not exist.`
+29. `Ensure the bot prioritizes answering specific menu-related queries before attempting to close the conversation or prompt for additional items.`
+30. `Ensure the bot maintains state persistence for address validation and immediately proceeds to the Order Summary Confirmation stage once the final required field (phone number) is provided.`
+31. `Ensure that when the user selects '[1] Oo, tama', the bot immediately triggers the order finalization logic, calculates the total, confirms the payment method, and transitions the state to 'ORDER_CONFIRMED'.`
+32. `Strictly enforce the Order Summary Confirmation step before finalizing any order, ensuring you present the itemized bill with applicable discounts ([1] Oo, tama / [2] May babaguhin) whenever a customer requests to checkout.`
+33. `Ensure the cart management logic is strictly bound to the user's specific instructions for removal and addition, and always trigger the Order Summary Confirmation flow before ending the session.`
+34. `Always present the order summary with the [1] Oo, tama / [2] May babaguhin prompt before concluding an order, and proceed to collect customer details.`
+35. `Always ensure that any mentioned menu items are accurately added to the cart state, and never finalize or transition modes without presenting an order summary for customer confirmation using the '[1] Oo, tama / [2] May babaguhin' prompt format.`
+36. `Acknowledge when an item or picture is unavailable on the menu gracefully, and correctly process requests to view the menu instead of giving inappropriate closing statements.`
+37. `Ensure the chatbot correctly parses and accumulates all items when a customer adds multiple items across rapid messages before moving to checkout or confirmation.`
+38. `Ensure the bot does not re-prompt for delivery address verification when transitioning from phone number collection to order summary if a valid address has already been provided.`
+39. `Always present the order summary and total computation for customer confirmation ([1] Oo, tama / [2] May babaguhin) before finalizing any order, even when provided in a one-shot prompt.`
+40. `Properly parse requests to remove or replace items in the cart, update the cart state accordingly, and continue the order confirmation flow rather than abruptly ending the interaction.`
+41. `Ensure that whenever you acknowledge adding an item to the cart, you must actually execute the cart update function to prevent cart count mismatches.`
+42. `Kapag binanggit ng customer ang mga partikular na item mula sa menu o tarp (tulad ng Regular Burger o Cheeseburger), basahin at ituon ang pansin sa mga iyon sa halip na mag-abrupt response o magdagdag ng ibang item sa cart.`
+43. `Ensure the bot accurately distinguishes between customer remarks/reassurances and customer name inputs before prompting for personal details.`
+44. `Strictly validate delivery addresses against the allowed service area, ensure ordered items are actually added to the cart, and always trigger the mandatory order summary confirmation step before asking for customer details.`
+45. `Ensure the bot accurately tracks order states in conversation history and prevents appending post-wrap-up prompts like dining mode inquiries after a complaint has been resolved.`
+46. `If an item like 'Hungarian Pizza' is not found or if the customer asks for a picture/description, politely acknowledge that exact item is unavailable, suggest checking the official menu categories, and avoid looping the exact same automated fallback response repeatedly.`
+47. `Ensure the bot accurately parses multi-part orders from rapid messages, updates the cart accordingly before asking closing questions, and properly triggers the order confirmation summary state instead of prematurely asking if it can help further.`
 
 ---
 
 ## 🏆 Production Status
-**Latest Accuracy:** **15%**  
+**Latest Accuracy:** **31%**  
 **Verdict:** ⚠️ **NEEDS CONTINUED MONITORING**
