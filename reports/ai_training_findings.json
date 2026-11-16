@@ -1,27 +1,20 @@
 {
-  "timestamp": "2026-11-16T15:54:46.461Z",
-  "totalRounds": 3,
+  "timestamp": "2026-11-16T16:43:03.725Z",
+  "totalRounds": 2,
   "rounds": [
     {
       "round": 1,
-      "passedCount": 0,
-      "total": 1,
-      "accuracy": 0,
-      "averageScore": 65
+      "passedCount": 8,
+      "total": 13,
+      "accuracy": 62,
+      "averageScore": 87
     },
     {
       "round": 2,
-      "passedCount": 0,
-      "total": 1,
-      "accuracy": 0,
-      "averageScore": 75
-    },
-    {
-      "round": 3,
-      "passedCount": 1,
-      "total": 1,
-      "accuracy": 100,
-      "averageScore": 92
+      "passedCount": 6,
+      "total": 13,
+      "accuracy": 46,
+      "averageScore": 85
     }
   ],
   "appliedFixes": []
