@@ -45,7 +45,7 @@ function parseReceiptText(rawText = '') {
   // 2. Extract Amount
   // Prioritize labeled or currency-prefixed amount
   let amount = null;
-  const labeledAmountMatch = text.match(/(?:total\s+amount|amount\s+sent|amount|paid)\s*[:#]?\s*(?:PHP|Php|₱)?\s*([\d,]+(?:\.\d{2})?)/i);
+  const labeledAmountMatch = text.match(/(?:total\s+amount(?:\s+sent)?|amount\s+sent|amount|paid)\s*[:#]?\s*(?:PHP|Php|₱|£)?\s*([\d,]+(?:\.\d{2})?)/i);
   if (labeledAmountMatch) {
     const rawVal = labeledAmountMatch[1].replace(/,/g, '');
     const num = parseFloat(rawVal);
@@ -55,7 +55,15 @@ function parseReceiptText(rawText = '') {
   }
 
   if (amount === null) {
-    const currencyMatch = text.match(/(?:PHP|Php|₱)\s*([\d,]+(?:\.\d{2})?)/i);
+    const transferMatch = text.match(/(?:PHP|Php|₱|£)?\s*([\d,]+(?:\.\d{2})?)\s*(?:transfer\s+completed|completed|sent)/i);
+    if (transferMatch) {
+      const num = parseFloat(transferMatch[1].replace(/,/g, ''));
+      if (!isNaN(num) && num > 0) amount = num;
+    }
+  }
+
+  if (amount === null) {
+    const currencyMatch = text.match(/(?:PHP|Php|₱|£)\s*([\d,]+(?:\.\d{2})?)/i);
     if (currencyMatch) {
       const rawVal = currencyMatch[1].replace(/,/g, '');
       const num = parseFloat(rawVal);
@@ -84,6 +92,57 @@ function parseReceiptText(rawText = '') {
 }
 
 /**
+ * Fallback to Gemini Vision multimodal analysis when Tesseract OCR fails or yields partial data
+ * @param {Buffer} imageBuffer 
+ * @returns {Promise<{ referenceNumber: string|null, amount: number|null, rawText: string }|null>}
+ */
+async function recognizeReceiptWithGeminiVision(imageBuffer) {
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return null;
+    const { GoogleGenAI } = require('@google/genai');
+    const ai = new GoogleGenAI({ apiKey });
+    const base64Data = Buffer.isBuffer(imageBuffer) ? imageBuffer.toString('base64') : null;
+    if (!base64Data) return null;
+
+    const response = await Promise.race([
+      ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { inlineData: { mimeType: 'image/jpeg', data: base64Data } },
+              {
+                text: 'You are an OCR receipt parser for a Philippine cafe. Analyze this GCash receipt or screenshot. Extract the 13-digit Reference Number (or 9 to 13 digits) and the amount paid. Return ONLY valid JSON: {"referenceNumber": string or null, "amount": number or null, "rawText": string}'
+              }
+            ]
+          }
+        ]
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Vision timeout')), 10000))
+    ]);
+
+    const text = response?.text || '';
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.referenceNumber || parsed.amount) {
+        return {
+          referenceNumber: parsed.referenceNumber ? String(parsed.referenceNumber).replace(/\D+/g, '') : null,
+          amount: typeof parsed.amount === 'number' ? parsed.amount : (parseFloat(parsed.amount) || null),
+          rawText: parsed.rawText || text
+        };
+      }
+    }
+    return null;
+  } catch (err) {
+    // Silent fail in tests or offline sandbox
+    return null;
+  }
+}
+
+/**
  * Recognize receipt image and extract structured data
  * Accepts URL, file path, Buffer, or mock object { text: '...' }
  * @param {string|Buffer|Object} imageInput 
@@ -92,6 +151,8 @@ function parseReceiptText(rawText = '') {
 async function recognizeReceipt(imageInput) {
   try {
     let ocrText = '';
+    let bufferData = null;
+    let effectiveInput = imageInput;
 
     if (!imageInput) {
       return {
@@ -107,23 +168,64 @@ async function recognizeReceipt(imageInput) {
     } else if (typeof imageInput === 'string' && (imageInput.startsWith('text:') || imageInput.includes('\n'))) {
       ocrText = imageInput.replace(/^text:/, '');
     } else {
+      // If imageInput is a remote URL (e.g. Facebook CDN), download as Buffer with User-Agent to avoid blocking
+      if (Buffer.isBuffer(imageInput)) {
+        bufferData = imageInput;
+      } else if (typeof imageInput === 'string' && (imageInput.startsWith('http://') || imageInput.startsWith('https://'))) {
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 12000);
+          try {
+            const res = await fetch(imageInput, {
+              headers: { 'User-Agent': 'DinersCafeBot/1.0' },
+              signal: controller.signal
+            });
+            if (res.ok) {
+              bufferData = Buffer.from(await res.arrayBuffer());
+              effectiveInput = bufferData;
+            }
+          } finally {
+            clearTimeout(timer);
+          }
+        } catch (dlErr) {
+          console.warn('[ReceiptOCR] Fetch error:', dlErr.message);
+        }
+      }
+
       // Run Tesseract OCR on image URL, Buffer, or local path with 15s timeout guard
-      const result = await Promise.race([
-        Tesseract.recognize(imageInput, 'eng', {
-          logger: () => {} // silent logger
-        }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('OCR timeout')), 15000))
-      ]);
-      ocrText = result?.data?.text || '';
+      try {
+        const result = await Promise.race([
+          Tesseract.recognize(effectiveInput, 'eng', {
+            logger: () => {} // silent logger
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('OCR timeout')), 15000))
+        ]);
+        ocrText = result?.data?.text || '';
+      } catch (tessErr) {
+        console.warn('[ReceiptOCR] Tesseract error/timeout:', tessErr.message);
+      }
     }
 
-    const parsed = parseReceiptText(ocrText);
+    let parsed = parseReceiptText(ocrText);
+
+    // If Tesseract failed to extract referenceNumber, try Gemini Vision fallback
+    if (!parsed.referenceNumber && bufferData) {
+      const visionResult = await recognizeReceiptWithGeminiVision(bufferData);
+      if (visionResult && (visionResult.referenceNumber || visionResult.amount)) {
+        parsed = {
+          referenceNumber: visionResult.referenceNumber || parsed.referenceNumber,
+          amount: visionResult.amount !== null ? visionResult.amount : parsed.amount,
+          rawText: visionResult.rawText || ocrText
+        };
+      }
+    }
 
     if (!parsed.referenceNumber) {
       return {
         success: false,
         error: 'UNREADABLE_RECEIPT',
         botReply: UNREADABLE_REPLY,
+        amount: parsed.amount,
         rawText: ocrText
       };
     }

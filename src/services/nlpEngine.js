@@ -1263,6 +1263,13 @@ async function savePaymentProofImage(fileSource, orderId) {
 async function checkPendingGcashGuard(psid, session) {
   const status = getPendingGcashStatus(session);
   if (status.expired) {
+    // Preserve expired checkout order details for up to 2 hours for Late Payment Recovery
+    if (session.pendingGCashOrder) {
+      session.expiredPendingGCashOrder = {
+        ...session.pendingGCashOrder,
+        expiredAt: Date.now()
+      };
+    }
     session.pendingGCashOrder = null;
     session.checkout_step = null;
     session.state = 'IDLE';
@@ -1478,6 +1485,23 @@ async function finalizeOrderFromProofSubmission(psid, session, { referenceNumber
  * Handle incoming image attachment when session.checkout_step === 'AWAITING_PAYMENT_PROOF'
  */
 async function handlePaymentProofUpload(psid, session, imgAttachment) {
+  // Late Payment Recovery: If pendingGCashOrder expired recently (< 2 hours), revive it!
+  if (!session.pendingGCashOrder && session.expiredPendingGCashOrder) {
+    const expiredElapsed = Date.now() - (Number(session.expiredPendingGCashOrder.expiredAt) || 0);
+    if (expiredElapsed < 2 * 60 * 60 * 1000) {
+      console.log(`[handlePaymentProofUpload] Reviving expired GCash order for ${psid} (expired ${Math.round(expiredElapsed / 60000)}m ago)`);
+      session.pendingGCashOrder = {
+        ...session.expiredPendingGCashOrder,
+        expiresAt: Date.now() + 20 * 60 * 1000
+      };
+      session.checkout_step = 'AWAITING_PAYMENT_PROOF';
+      session.state = 'AWAITING_PAYMENT_PROOF';
+      session.current_step = 'AWAITING_PAYMENT_PROOF';
+      delete session.expiredPendingGCashOrder;
+      await saveSession(session);
+    }
+  }
+
   const guard = await checkPendingGcashGuard(psid, session);
   if (guard.blocked) {
     return { intent: guard.intent, confidence: 1.0, replyLog: guard.replyLog };
@@ -1488,7 +1512,7 @@ async function handlePaymentProofUpload(psid, session, imgAttachment) {
   const rawUrl = imgAttachment?.payload?.url || (typeof imgAttachment === 'string' ? imgAttachment : (imgAttachment?.url || null));
 
   let fileBuffer = null;
-  let ocrInput = rawUrl;
+  let ocrInput = (imgAttachment && (imgAttachment.text || Buffer.isBuffer(imgAttachment))) ? imgAttachment : rawUrl;
   if (typeof rawUrl === 'string' && (rawUrl.startsWith('http://') || rawUrl.startsWith('https://'))) {
     try {
       const controller = new AbortController();
@@ -1541,9 +1565,10 @@ async function handlePaymentProofUpload(psid, session, imgAttachment) {
     expectedTotal > 0 &&
     Number(ocrResult.amount) + 1.00 < expectedTotal
   ) {
+    const kulang = (expectedTotal - Number(ocrResult.amount)).toFixed(2);
     const attemptInfo = registerFailedProofAttempt(pending);
     await saveSession(session);
-    const shortMsg = `Mas mababa po ang nakitang halaga sa resibo (₱${Number(ocrResult.amount).toFixed(2)}) kaysa sa kabuuang bayad na ₱${expectedTotal.toFixed(2)}. Pakisend ang kumpletong GCash receipt.`;
+    const shortMsg = `Mas mababa po ang nakitang halaga sa resibo (₱${Number(ocrResult.amount).toFixed(2)}) kaysa sa kabuuang bayad na ₱${expectedTotal.toFixed(2)}. Kulang pa po ng ₱${kulang}. Pakisend ang kumpletong GCash receipt upang mai-dispatch ang inyong order.`;
     await sendQuickReplies(psid, shortMsg, [
       { title: '❌ Cancel Checkout', payload: 'CANCEL_PENDING_GCASH' },
       { title: '📋 Menu', payload: 'MENU_HOME' }
@@ -2156,7 +2181,8 @@ async function handleMessageEventUnlocked(psid, incomingText = '', payload = nul
         session.checkout_step === 'AWAITING_PAYMENT_PROOF' ||
         session.state === 'AWAITING_PAYMENT_PROOF' ||
         session.current_step === 'AWAITING_PAYMENT_PROOF' ||
-        Boolean(session.pendingGCashOrder)
+        Boolean(session.pendingGCashOrder) ||
+        Boolean(session.expiredPendingGCashOrder)
       );
       const imgAttachment =
         attachments.find(a => a.type === 'image') ||
@@ -3171,8 +3197,8 @@ async function handleTextInput(psid, session, rawText) {
     session.checkout_step = 'COLLECTING_CUSTOMER_INFO';
   }
 
-  // Check for payment confirmation signal like "Send na po", "Bayad na po", "Na-send ko na"
-  const isPaidSignal = /(?:^|\b)(?:send na po|na-?send|bayad na|paid|done paying|ok na po|tapos na po|settled)(?:\b|$)/i.test(rawText);
+  // Check for payment confirmation signal like "Send na po", "Bayad na po", "Na-send ko na", "Ayan na ohh bayad na ako"
+  const isPaidSignal = /(?:^|\b)(?:send na po|na-?send|bayad na|paid|done paying|ok na po|tapos na po|settled|ayan na(?: oh+)? bayad|nagbayad na|bayad na ako|bayad na ko|nabayaran ko na|ito na bayad|eto na bayad)(?:\b|$)/i.test(rawText);
   if (isPaidSignal) {
     if (session.pendingStage5) {
       return handleStage5Confirmation(psid, session, { isAlreadyPaid: true });
@@ -3196,6 +3222,46 @@ async function handleTextInput(psid, session, rawText) {
         session.current_step = 'AWAITING_DELIVERY';
         await saveSession(session);
         return { intent: 'GCASH_PAID_SIGNAL', confidence: 1.0, replyLog: reply };
+      }
+    }
+
+    // Check if user is in checkout or has an expired checkout order
+    if (session.pendingGCashOrder || session.expiredPendingGCashOrder) {
+      if (!session.pendingGCashOrder && session.expiredPendingGCashOrder) {
+        session.pendingGCashOrder = { ...session.expiredPendingGCashOrder, expiresAt: Date.now() + 20 * 60 * 1000 };
+        session.checkout_step = 'AWAITING_PAYMENT_PROOF';
+        session.state = 'AWAITING_PAYMENT_PROOF';
+        session.current_step = 'AWAITING_PAYMENT_PROOF';
+        delete session.expiredPendingGCashOrder;
+        await saveSession(session);
+      }
+      const customerName = session.customer_name || session.pendingGCashOrder?.customerName || 'Customer';
+      const promptProofMsg = `Salamat po sa inyong abiso, ${customerName}! Pakisend po rito ang screenshot ng inyong GCash receipt o i-type ang 13-digit Reference Number (hal. 7047160660300) upang mai-verify at maipadala agad ang inyong order sa kusina. 🧾`;
+      await sendQuickReplies(psid, promptProofMsg, [
+        { title: '❌ Cancel Checkout', payload: 'CANCEL_PENDING_GCASH' },
+        { title: '📋 Menu', payload: 'MENU_HOME' }
+      ]);
+      return { intent: 'AWAITING_PAYMENT_PROOF_SIGNAL', confidence: 1.0, replyLog: promptProofMsg };
+    }
+
+    // Check if customer has a recent pending order in DB
+    const [cRows] = await db.query('SELECT id FROM customers WHERE psid = ? LIMIT 1', [psid]);
+    if (cRows && cRows.length > 0) {
+      const [recentOrders] = await db.query(
+        `SELECT id, order_number, total_amount, payment_status, status 
+         FROM orders 
+         WHERE customer_id = ? AND status NOT IN ('cancelled', 'delivered') 
+         ORDER BY id DESC LIMIT 1`,
+        [cRows[0].id]
+      );
+      if (recentOrders && recentOrders.length > 0) {
+        session.active_order_id = recentOrders[0].id;
+        session.activeOrderNumber = recentOrders[0].order_number;
+        const promptProofMsg = `Salamat po sa inyong abiso! Para sa inyong order #${recentOrders[0].order_number}, pakisend po rito ang screenshot ng inyong GCash receipt o i-type ang 13-digit Reference Number upang mai-verify at maipadala sa kusina.`;
+        await sendQuickReplies(psid, promptProofMsg, [
+          { title: '📋 Menu', payload: 'MENU_HOME' }
+        ]);
+        return { intent: 'AWAITING_PAYMENT_PROOF_SIGNAL', confidence: 1.0, replyLog: promptProofMsg };
       }
     }
   }
@@ -7453,6 +7519,7 @@ module.exports = {
   formatPromotionAnnouncement,
   getActivePromotionForPreMenu,
   savePaymentProofImage,
+  checkPendingGcashGuard,
   handlePaymentProofUpload,
   handlePaymentProofTextInput,
   calculateDeliveryFee,
