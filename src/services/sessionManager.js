@@ -437,6 +437,12 @@ async function resetUserSession(psid, options = {}) {
   session.discount_amount = 0;
   session.discount_info = null;
   session.is_preorder = false;
+  session.is_bot_paused = false;
+  session.handover_mode = false;
+  session.handover_at = null;
+  session.last_handover_notice_at = null;
+  session.is_third_party_courier = false;
+  session.thirdPartyDelivery = false;
 
   // 5. Reset AI conversation thread & inactivity flags
   session.geminiInteractionId = null;

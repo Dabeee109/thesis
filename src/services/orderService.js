@@ -609,6 +609,20 @@ async function updateOrderStatus(orderId, newStatus, extraData = {}) {
       });
     }
   } else if (normStatus === 'preparing') {
+    if (order.psid) {
+      try {
+        const { getSession, saveSession } = require('./sessionManager');
+        getSession(order.psid).then(sess => {
+          if (sess && (sess.is_bot_paused || sess.handover_mode)) {
+            sess.is_bot_paused = false;
+            sess.handover_mode = false;
+            sess.state = 'AWAITING_DELIVERY';
+            sess.current_step = 'AWAITING_DELIVERY';
+            saveSession(sess);
+          }
+        }).catch(() => {});
+      } catch (_) {}
+    }
     notifMessage = "Update po sa inyong order: Kasalukuyan na po itong In Kitchen Preparation! Inihahanda na po ng aming kitchen/barista team ang inyong order.";
     await sendNotification(order.psid, 'preparing', `Order #${order.order_number} is Preparing`, notifMessage);
     if (order.psid && !order.psid.startsWith('POS_MANUAL_')) {

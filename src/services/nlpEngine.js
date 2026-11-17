@@ -3042,6 +3042,10 @@ async function handleThirdPartyDeliveryHandoff(psid, session) {
   session.current_step = 'PENDING_ADMIN_QUOTE';
   session.checkout_step = null;
   session.cart = [];
+  session.is_bot_paused = true;
+  session.handover_mode = true;
+  session.handover_at = Date.now();
+  session.last_handover_notice_at = Date.now();
   await saveSession(session);
 
   try {
@@ -3528,6 +3532,51 @@ async function handleTextInput(psid, session, rawText, options = {}) {
   const isAffirmativeConfirm = /(?:^|\b)(?:yes|oo|opo|confirm|proceed|tama|sige|push|g|ok na)(?:\b|$)/i.test(rawText);
   if (isAffirmativeConfirm && (session.state === 'AWAITING_STAGE5_CONFIRM' || session.pendingStage5)) {
     return handleStage5Confirmation(psid, session, { isAlreadyPaid: false });
+  }
+
+  // =========================================================================
+  // ⏸️ HUMAN HANDOVER / PER-USER AI PAUSE GUARD
+  // Pauses AI for 3rd-party delivery handoff (Grab/Lalamove) while Admin takes over.
+  // Includes 30-min Fail-Safe Auto-Unpause, Cancellation Bypass, and Auto-Ack.
+  // =========================================================================
+  const isHandoverPaused = Boolean(
+    session.is_bot_paused ||
+    session.handover_mode ||
+    session.state === 'PENDING_ADMIN_QUOTE' ||
+    session.current_step === 'PENDING_ADMIN_QUOTE'
+  );
+
+  if (isHandoverPaused) {
+    // Fail-Safe 1: 30-Minute Inactivity / Handover Timeout Check
+    const handoverAge = session.handover_at
+      ? (Date.now() - session.handover_at)
+      : (session.lastInteraction ? (Date.now() - session.lastInteraction) : 0);
+
+    if (handoverAge >= 30 * 60 * 1000) {
+      session = await resetUserSession(psid, { targetState: 'IDLE' });
+      // Proceed to normal flow as IDLE
+    } else {
+      // Fail-Safe 2: Cancellation Bypass (Customer can cancel order anytime while waiting)
+      const isCancelRequest = isCancelTriggerWord(norm, rawText) ||
+        /\b(?:cancel|pa[- ]?cancel|ayaw\s*na|ayoko\s*na|wag\s*na|huwag\s*na|i-?cancel)\b/i.test(norm);
+      if (isCancelRequest) {
+        return await cancelOrderIntent(psid, session, rawText);
+      }
+
+      // Mitigation Solution 1: Auto-Acknowledge Message (Prevents dead air / seen zone while keeping AI muted)
+      const now = Date.now();
+      const lastNotice = session.last_handover_notice_at || 0;
+      if (now - lastNotice >= 15 * 1000) {
+        session.last_handover_notice_at = now;
+        await saveSession(session);
+        const handoverAckMsg = 'Naka-forward na po ang inyong chat sa aming Store Admin para sa inyong Grab/Lalamove delivery quote. Sandali lamang po at personal po kayong sasagutin ni Admin dito sa chat. Maraming salamat po sa inyong pasensya! 🛵';
+        await sendTextMessage(psid, handoverAckMsg);
+        return { intent: 'HUMAN_HANDOVER_PAUSED', confidence: 1.0, replyLog: handoverAckMsg };
+      }
+
+      // If user typed again within 15 seconds, stay completely silent (no AI spam)
+      return { intent: 'HUMAN_HANDOVER_SILENT', confidence: 1.0 };
+    }
   }
 
   // =========================================================================

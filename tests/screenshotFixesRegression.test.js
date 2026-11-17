@@ -487,4 +487,62 @@ describe('Screenshot Bug Fixes & Multi-Key AI Pool Verification', () => {
     assert.strictEqual(session.state, 'PENDING_ADMIN_QUOTE');
     assert.strictEqual(session.cart.length, 0, 'Cart must be cleared after handoff order is placed');
   });
+
+  it('27. Human Handover Pause & Auto-Acknowledge: AI remains muted and sends reassuring note on customer follow-up', async () => {
+    const psid = `TEST_HANDOVER_PAUSE_${Date.now()}`;
+    const session = await getSession(psid);
+    session.state = 'PENDING_ADMIN_QUOTE';
+    session.current_step = 'PENDING_ADMIN_QUOTE';
+    session.is_bot_paused = true;
+    session.handover_mode = true;
+    session.handover_at = Date.now();
+    session.last_handover_notice_at = 0; // Allow immediate notice
+
+    const res1 = await nlpEngine.handleTextInput(psid, session, 'Magkano po ba ang Grab fee?');
+    assert.strictEqual(res1.intent, 'HUMAN_HANDOVER_PAUSED');
+    assert.match(res1.replyLog, /Naka-forward na po ang inyong chat sa aming Store Admin/i);
+    assert.match(res1.replyLog, /Grab\/Lalamove/i);
+
+    // Rapid successive message within 15s stays completely silent (zero AI intervention)
+    const res2 = await nlpEngine.handleTextInput(psid, session, 'Hello? Nandiyan pa ba kayo?');
+    assert.strictEqual(res2.intent, 'HUMAN_HANDOVER_SILENT');
+  });
+
+  it('28. Human Handover Cancellation Bypass: "Pa cancel na lang po" cancels active quote order and unpauses session', async () => {
+    const psid = `TEST_HANDOVER_CANCEL_${Date.now()}`;
+    const session = await getSession(psid);
+    session.customer_name = 'Francis Dave';
+    session.contact_number = '09273844028';
+    session.dining_mode = 'Delivery';
+    session.orderType = 'delivery';
+
+    const [rows] = await db.query('SELECT id, name, price FROM menu_items WHERE is_available = 1 LIMIT 1');
+    const item = (rows && rows[0]) ? rows[0] : { id: 10555, name: 'Biscoff Cheesecake', price: 140 };
+    session.cart = [{ id: item.id, menuItemId: item.id, name: item.name, price: item.price, quantity: 1 }];
+    session.state = 'AWAITING_BOUNDARY_PICKUP_SWITCH';
+
+    await nlpEngine.handleTextInput(psid, session, 'Delivery pa din');
+    assert.strictEqual(session.state, 'PENDING_ADMIN_QUOTE');
+    assert.strictEqual(session.is_bot_paused, true);
+
+    const cancelRes = await nlpEngine.handleTextInput(psid, session, 'Pa cancel na lang po');
+    assert.strictEqual(cancelRes.intent, 'ORDER_CANCELLED_PENDING');
+    assert.match(cancelRes.replyLog, /Matagumpay na pong nakansela/i);
+    assert.strictEqual(session.is_bot_paused, false, 'Bot must be unpaused after cancellation');
+    assert.strictEqual(session.state, 'IDLE', 'Session must reset to IDLE');
+  });
+
+  it('29. Fail-Safe 30-Min Inactivity Timeout: Handover older than 30 mins cleanly unpauses session to IDLE', async () => {
+    const psid = `TEST_HANDOVER_TIMEOUT_${Date.now()}`;
+    const session = await getSession(psid);
+    session.state = 'PENDING_ADMIN_QUOTE';
+    session.current_step = 'PENDING_ADMIN_QUOTE';
+    session.is_bot_paused = true;
+    session.handover_mode = true;
+    session.handover_at = Date.now() - (35 * 60 * 1000); // 35 minutes ago
+
+    await nlpEngine.handleTextInput(psid, session, 'Hello po');
+    assert.strictEqual(session.is_bot_paused, false, 'Must be unpaused after 30+ min timeout');
+    assert.notStrictEqual(session.state, 'PENDING_ADMIN_QUOTE', 'State must not remain stuck in PENDING_ADMIN_QUOTE');
+  });
 });
