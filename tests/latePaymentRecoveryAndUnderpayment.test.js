@@ -10,8 +10,17 @@ const { parseReceiptText } = require('../src/services/receiptOcrService');
 const db = require('../database/db');
 
 describe('Late Payment Recovery & Underpayment Guard Test Suite', () => {
+  let validMenuItemId = 10202;
+
   before(async () => {
     await db.query("UPDATE customers SET cart_json = '[]', conversation_state = 'IDLE', updated_at = datetime('now', '-5 hours')").catch(() => {});
+    try {
+      const [rows] = await db.query("SELECT id FROM menu_items WHERE is_available = 1 AND COALESCE(is_deleted, 0) = 0 LIMIT 1");
+      if (rows && rows.length > 0) {
+        validMenuItemId = rows[0].id;
+      }
+    } catch (_) {}
+    await db.query(`UPDATE menu_items SET is_available = 1, stock_quantity = 50 WHERE id = ${validMenuItemId}`).catch(() => {});
   });
 
   it('1. parseReceiptText correctly extracts amount from "₱20.00 transfer completed" and currency variants', () => {
@@ -56,7 +65,7 @@ describe('Late Payment Recovery & Underpayment Guard Test Suite', () => {
       customerName: 'Francis',
       contactNumber: '09281762895',
       address: "Diner's Cafe, Tondo, Manila",
-      items: [{ menuItemId: 10003, name: 'Biscoff Cheesecake', price: 169.00, quantity: 1 }],
+      items: [{ menuItemId: validMenuItemId, name: 'Biscoff Cheesecake', price: 169.00, quantity: 1 }],
       expiredAt: Date.now() - (10 * 60 * 1000) // expired 10 minutes ago
     };
     session.state = 'IDLE';
@@ -125,7 +134,7 @@ describe('Late Payment Recovery & Underpayment Guard Test Suite', () => {
       customerName: 'Francis',
       contactNumber: '09281762895',
       address: "Diner's Cafe, Tondo, Manila",
-      items: [{ menuItemId: 10003, name: 'Biscoff Cheesecake', price: 169.00, quantity: 1 }],
+      items: [{ menuItemId: validMenuItemId, name: 'Biscoff Cheesecake', price: 169.00, quantity: 1 }],
       expiresAt: Date.now() + (20 * 60 * 1000)
     };
     session.state = 'AWAITING_PAYMENT_PROOF';
@@ -148,7 +157,7 @@ describe('Late Payment Recovery & Underpayment Guard Test Suite', () => {
       customerName: 'Francis',
       contactNumber: '09281762895',
       address: "Diner's Cafe, Tondo, Manila",
-      items: [{ menuItemId: 10003, name: 'Biscoff Cheesecake', price: 169.00, quantity: 1 }],
+      items: [{ menuItemId: validMenuItemId, name: 'Biscoff Cheesecake', price: 169.00, quantity: 1 }],
       expiresAt: Date.now() + (20 * 60 * 1000)
     };
     session.state = 'AWAITING_PAYMENT_PROOF';

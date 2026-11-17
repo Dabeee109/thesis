@@ -35,24 +35,42 @@ async function upsertCustomer({ psid, firstName = '', lastName = '', phone = '',
   const [rows] = await db.query(`SELECT id FROM customers WHERE psid = ?`, [psid]);
   let customerId;
 
+  const cleanFirst = (firstName || '').trim();
+  const cleanLast = (lastName || '').trim();
+  const hasProvidedName = Boolean(cleanFirst);
+
   if (rows.length > 0) {
     customerId = rows[0].id;
-    await db.query(
-      `UPDATE customers 
-       SET first_name = COALESCE(NULLIF(?, ''), first_name),
-           last_name = COALESCE(NULLIF(?, ''), last_name),
-           phone_number = COALESCE(NULLIF(?, ''), phone_number),
-           delivery_address = COALESCE(NULLIF(?, ''), delivery_address),
-           distance_km = ?,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-      [firstName, lastName, phone, address, distanceKm, customerId]
-    );
+    if (hasProvidedName) {
+      // Overwrite first_name and last_name EXACTLY with what the customer provided!
+      // If customer provided a single name (e.g. "Francis"), last_name becomes empty string, NOT stale profile surname!
+      await db.query(
+        `UPDATE customers 
+         SET first_name = ?,
+             last_name = ?,
+             phone_number = COALESCE(NULLIF(?, ''), phone_number),
+             delivery_address = COALESCE(NULLIF(?, ''), delivery_address),
+             distance_km = ?,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [cleanFirst, cleanLast, phone, address, distanceKm, customerId]
+      );
+    } else {
+      await db.query(
+        `UPDATE customers 
+         SET phone_number = COALESCE(NULLIF(?, ''), phone_number),
+             delivery_address = COALESCE(NULLIF(?, ''), delivery_address),
+             distance_km = ?,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [phone, address, distanceKm, customerId]
+      );
+    }
   } else {
     const [result] = await db.query(
       `INSERT INTO customers (psid, first_name, last_name, phone_number, delivery_address, distance_km)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [psid, firstName || 'Messenger', lastName || 'Customer', phone || '', address || '', distanceKm]
+      [psid, cleanFirst || 'Messenger', cleanLast, phone || '', address || '', distanceKm]
     );
     customerId = result.insertId;
   }
@@ -572,7 +590,23 @@ async function updateOrderStatus(orderId, newStatus, extraData = {}) {
 
   // Automated customer notifications & session reset based on status (Module 2.C)
   let notifMessage = '';
-  if (normStatus === 'preparing') {
+  if (normStatus === 'confirmed' || normStatus === 'approved') {
+    notifMessage = `Magandang balita po! Na-approve na ng kusina ang inyong Order #${order.order_number}. Inihahanda na po ito.`;
+    await sendNotification(order.psid, 'confirmed', `Order #${order.order_number} Approved`, notifMessage);
+    if (order.psid && !order.psid.startsWith('POS_MANUAL_') && !order.psid.startsWith('WEB_')) {
+      await sendTextMessage(order.psid, notifMessage).catch(err => {
+        console.warn('[orderService] Failed to send confirmed push to Messenger:', err.message);
+      });
+    }
+  } else if (normStatus === 'ready' || normStatus === 'ready_for_pickup' || normStatus === 'ready for pickup') {
+    notifMessage = `Handa na po para sa Pick-up ang inyong Order #${order.order_number}! Maaari na po itong kunin sa counter ng Diner's Cafe.`;
+    await sendNotification(order.psid, 'ready', `Order #${order.order_number} Ready for Pick-up`, notifMessage);
+    if (order.psid && !order.psid.startsWith('POS_MANUAL_') && !order.psid.startsWith('WEB_')) {
+      await sendTextMessage(order.psid, notifMessage).catch(err => {
+        console.warn('[orderService] Failed to send ready push to Messenger:', err.message);
+      });
+    }
+  } else if (normStatus === 'preparing') {
     notifMessage = "Update po sa inyong order: Kasalukuyan na po itong In Kitchen Preparation! Inihahanda na po ng aming kitchen/barista team ang inyong order.";
     await sendNotification(order.psid, 'preparing', `Order #${order.order_number} is Preparing`, notifMessage);
     if (order.psid && !order.psid.startsWith('POS_MANUAL_')) {
@@ -699,7 +733,7 @@ async function getOrdersList(filters = {}) {
       o.order_number,
       o.customer_id,
       c.psid,
-      CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, '')) AS customer_name,
+      TRIM(CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, ''))) AS customer_name,
       COALESCE(o.customer_phone, c.phone_number) AS customer_phone,
       o.order_type,
       o.status,

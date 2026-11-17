@@ -95,9 +95,20 @@ function parseReceiptText(rawText = '') {
     }
   }
 
+  // 3. Anti-Fraud: Extract Transaction Date & Time if present in receipt screenshot
+  let transactionDate = null;
+  const dateMatch = text.match(/(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+\d{4}/i) ||
+    text.match(/\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}/i) ||
+    text.match(/\b\d{4}-\d{2}-\d{2}\b/) ||
+    text.match(/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/);
+  if (dateMatch) {
+    transactionDate = dateMatch[0];
+  }
+
   return {
     referenceNumber,
     amount,
+    transactionDate,
     rawText: text
   };
 }
@@ -118,14 +129,14 @@ async function recognizeReceiptWithGeminiVision(imageBuffer) {
 
     const response = await Promise.race([
       ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-flash-lite-latest',
         contents: [
           {
             role: 'user',
             parts: [
               { inlineData: { mimeType: 'image/jpeg', data: base64Data } },
               {
-                text: 'You are an OCR receipt parser for a Philippine cafe. Analyze this GCash receipt or screenshot. Extract the 13-digit Reference Number (or 9 to 13 digits) and the amount paid. Return ONLY valid JSON: {"referenceNumber": string or null, "amount": number or null, "rawText": string}'
+                text: 'You are an OCR receipt parser for a Philippine cafe. Analyze this GCash receipt or screenshot. Extract the 13-digit Reference Number (or 9 to 13 digits), payment amount, and transaction date. Return ONLY valid JSON: {"referenceNumber": string or null, "amount": number or null, "transactionDate": string or null, "rawText": string}'
               }
             ]
           }

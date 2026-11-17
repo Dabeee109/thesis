@@ -208,18 +208,21 @@ function buildInvalidDiscountReply(reason) {
   return `Paumanhin po, hindi po maaaring gamitin ang ${reason} para sa 20% Senior Citizen / PWD discount. Tanging valid at hindi expired na Senior Citizen (OSCA) o PWD ID na nakapangalan sa mismong customer na kakain ang tinatanggap, at kailangan po itong ipakita nang pisikal sa rider o counter pagka-deliver o pick-up. Itutuloy po ba natin ang order nang walang discount?`;
 }
 
-const NON_NAME_FILLERS = /^(?:nice|ok|okay|(?:ok|okay)\s*na(?:\s*po)?|sige|sige\s*po|cge|geh|ge|yes|yep|opo|oo|salamat|thanks|thank\s*you|ty|k|noted|copy|alright|good|ayos|g|wala|walaw|walaa|wla|meron|mayroon|none|patingin|hi|hello|hey|yo|pakibigay|note|notes|oo[,.]?\s*tama(?:\s*po)?|tama(?:\s*po)?|may\s*babaguhin|proceed|confirm|done)$/i;
+const NON_NAME_FILLERS = /^(?:nice|ok|okay|(?:ok|okay)\s*na(?:\s*po)?|sige|sige\s*po|cge|geh|ge|yes|yep|opo|oo|salamat|thanks|thank\s*you|ty|k|noted|copy|alright|good|ayos|g|wala|walaw|walaa|wla|meron|mayroon|none|patingin|hi|hello|hey|yo|pakibigay|note|notes|oo[,.]?\s*tama(?:\s*po)?|tama(?:\s*po)?|may\s*babaguhin|proceed|confirm|done|oo\s*pala|ay\s*oo\s*pala|ay\s*oo|pala|hala\s*oo\s*pala|nakalimutan\s*ko.*)$/i;
 
-const NON_NAME_PATTERNS = /\b(?:pick[\s-]*up|pickup|take[\s-]*out|takeout|dine[\s-]*in|delivery|deliver|padeliver|dadaan|daraan|punta|pupunta|kukunin|mamaya|order|cancel|pabili|menu|cart|wala|meron|ano|saan|kailan|kelan|oras|\d{1,2}\s*(?:am|pm)|minutes?|mins?|hours?|hrs?|street|st|ave|road|city|tondo|manila|store|milktea|milk\s*tea|burger|pizza|coffee|kape|fries|wrap|shakes?|drinks?|classic|bacon|wintermelon|okinawa|matcha|latte|macchiato|americano|espresso|add[\s-]*ons?|pearls?|nata|cheese|pudding|addons?|addons?|lang)\b/i;
+const NON_NAME_PATTERNS = /\b(?:pick[\s-]*up|pickup|take[\s-]*out|takeout|dine[\s-]*in|delivery|deliver|padeliver|dadaan|daraan|punta|pupunta|kukunin|mamaya|order|cancel|pabili|menu|cart|wala|meron|ano|saan|kailan|kelan|oras|\d{1,2}\s*(?:am|pm)|minutes?|mins?|hours?|hrs?|street|st|ave|road|city|tondo|manila|store|milktea|milk\s*tea|burger|pizza|coffee|kape|fries|wrap|shakes?|drinks?|classic|bacon|wintermelon|okinawa|matcha|latte|macchiato|americano|espresso|add[\s-]*ons?|pearls?|nata|cheese|pudding|addons?|addons?|lang|oo\s*pala|nakalimutan|number\s*ko|phone\s*ko)\b/i;
 
 function extractRealName(text) {
   if (!text || typeof text !== 'string') return '';
+  if (/\b(?:oo\s*pala|nakalimutan|number\s*ko|phone\s*ko)\b/i.test(text)) {
+    return '';
+  }
   let str = text.trim();
   str = str.replace(/^(?:(?:ok|okay)\s*na(?:\s*po)?,?\s*|ah,?\s*|ay,?\s*|sorry\s*(?:bro|sis|po|pre)?,?\s*|ito\s*po\s*(?:ang\s*name\s*ko)?|pangalan\s*ko\s*po\s*(?:ay)?|name\s*ko\s*po\s*(?:ay)?|ako\s*po\s*si|ako\s*si)\s*/i, '');
   str = str.replace(/^(?:sorry\s*(?:bro|sis|po|pre)?,?\s*)/i, '');
-  str = str.replace(/\s*(?:po\s*pala(?:\s*ang\s*name(?:\s*ko)?)?|pala(?:\s*ang\s*name(?:\s*ko)?)?|po\s*ang\s*name(?:\s*ko)?|po|bro|pre|boss|lod[iy]|na\s*lang)\s*$/i, '');
+  str = str.replace(/\s*(?:po\s*pala(?:\s*ang\s*name(?:\s*ko)?)?|pala(?:\s*ang\s*name(?:\s*ko)?)?|po\s*ang\s*name(?:\s*ko)?|po|bro|pre|boss|lod[iy]|na\s*lang|cod|cash|gcash|xendit)\s*$/i, '');
   if (/[,\n]|\.\s+/.test(str)) {
-    const parts = str.split(/[,\n]|\.\s+/).map(p => p.trim().replace(/\s*(?:po|bro|pre|boss|lod[iy]|na\s*lang|ulit)$/i, '')).filter(Boolean);
+    const parts = str.split(/[,\n]|\.\s+/).map(p => p.trim().replace(/\s*(?:po|bro|pre|boss|lod[iy]|na\s*lang|ulit|cod|cash|gcash|xendit)$/i, '')).filter(Boolean);
     for (const p of parts) {
       if (/^[A-Za-z .'-]{2,30}$/.test(p) && !NON_NAME_FILLERS.test(p) && !NON_NAME_PATTERNS.test(p) && !/^(?:sorry|bro|pre|boss|cash|gcash|dine|delivery|pickup|okay|ok|checkout)/i.test(p) && !normalizePhone(p)) {
         return p;
@@ -382,9 +385,9 @@ function parseCustomerInfo(rawText, diningMode) {
 
   // 2. Multiline or delimiter-based fallback
   const needsAddress = isDelivery;
+  const rawLines = clean.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const lines = [...rawLines];
   if ((needsAddress && !address) || !name || !contact) {
-    const rawLines = clean.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-    const lines = [...rawLines];
 
     for (let i = lines.length - 1; i >= 0; i--) {
       const line = lines[i];
@@ -449,6 +452,20 @@ function parseCustomerInfo(rawText, diningMode) {
   if (needsAddress && !address && clean.length > 5 && !NON_NAME_FILLERS.test(clean) && !/^\+?[\d\s-]{7,}$/.test(clean)) {
     if (isLikelyAddress(clean)) {
       address = clean;
+    }
+  }
+
+  if (!note && lines.length > 0) {
+    const noteCandidates = lines.filter(l => !NON_NAME_FILLERS.test(l) && l.length > 3 && !normalizePhone(l) && l !== name && l !== address);
+    if (noteCandidates.length > 0) {
+      note = noteCandidates.join(', ');
+    }
+  }
+
+  if (!note) {
+    const rawNoteMatch = rawText.match(/(?:paki[- ]*note(?:\s*na)?|bilin(?:\s*na)?|strictly|allergic\s*(?:sa)?|allergy\s*(?:sa)?|oatmilk|less\s*(?:ice|sugar)|no\s*sugar)[^,.\n]+/i);
+    if (rawNoteMatch) {
+      note = rawNoteMatch[0].trim();
     }
   }
 
@@ -728,8 +745,26 @@ async function dispatchPersonalGcashCheckout(psid, session, draftData = {}) {
  */
 async function finalizeOrderSummaryAndPayment(psid, session, options = {}) {
   const subtotal = session.order_subtotal || (session.cart ? calculateCartSubtotal(session.cart) : 0);
-  const discountAmount = session.discount_amount || session.discount?.amount || 0;
-  const discountType = (session.discount && session.discount.applied) ? (session.discount.type || 'Senior Citizen / PWD 20%') : 'None';
+  let discountAmount = session.discount_amount || session.discount?.amount || 0;
+  let discountType = (session.discount && session.discount.applied) ? (session.discount.type || 'Senior Citizen / PWD 20%') : 'None';
+
+  // If discount was not yet computed but customer previously provided Senior / PWD ID (e.g. in notes or details)
+  if ((!session.discount || !session.discount.applied) && subtotal > 0) {
+    const noteText = String(session.note || session.customer_notes || session.details?.note || '');
+    const idMatch = noteText.match(/\b(?:osca|pwd)[-\s\w]+\b/i) || noteText.match(/Senior Citizen ID:\s*([A-Za-z0-9_-]+)/i);
+    if (idMatch) {
+      const computedDiscount = Math.round((subtotal * 0.20) * 100) / 100;
+      session.discount = {
+        applied: true,
+        type: 'Senior Citizen / PWD 20%',
+        amount: computedDiscount,
+        idNumber: idMatch[1] || idMatch[0]
+      };
+      session.discount_amount = computedDiscount;
+      discountAmount = computedDiscount;
+      discountType = 'Senior Citizen / PWD 20%';
+    }
+  }
 
   let diningMode = session.dining_mode || (session.orderType === 'delivery' ? 'Delivery' : 'Dine In');
   if (/pick[\s-]*up|pickup|take[\s-]*out|takeout/i.test(diningMode)) diningMode = 'Pick-up';
@@ -1633,6 +1668,21 @@ async function handlePaymentProofTextInput(psid, session, rawText) {
   }
 
   // Conversational Question / Inquiry Interceptor during Payment Proof
+  const isTotalDueInquiry = /\b(?:magkano\s*(?:nga\s*ulit|lahat|babayaran|ang\s*babayaran)|ano\s*(?:nga\s*ulit\s*)?(?:total|inorder|ang\s*total))\b/i.test(cleanRaw.toLowerCase());
+  if (isTotalDueInquiry && (session.pendingGCashOrder?.grandTotal || session.order_total)) {
+    const totalVal = session.pendingGCashOrder?.grandTotal || session.order_total;
+    const totalMsg = `Ang Total Amount Due po para sa inyong order ay ₱${Number(totalVal).toFixed(2)}. Paki-send po ang GCash screenshot o 13-digit Reference Number pagkatapos magbayad.`;
+    await sendTextMessage(psid, totalMsg);
+    return { intent: 'PAYMENT_PROOF_TOTAL_INQUIRY', confidence: 1.0, replyLog: totalMsg };
+  }
+
+  const isLateDiscountInPayment = /\b(?:senior|pwd|osca|discount)\b/i.test(cleanRaw.toLowerCase());
+  if (isLateDiscountInPayment) {
+    const discountNotice = "Kung nais po ninyong i-apply ang 20% Senior Citizen o PWD discount, maaari po ninyong ikansela muna ang checkout na ito para ma-apply ang discount sa inyong order, o i-upload ang picture ng inyong OSCA/PWD ID kasama ng inyong resibo upang ma-verify at ma-adjust ng aming staff sa cashier.";
+    await sendTextMessage(psid, discountNotice);
+    return { intent: 'PAYMENT_PROOF_DISCOUNT_INQUIRY', confidence: 1.0, replyLog: discountNotice };
+  }
+
   const isDeliveryFeeInquiry = /\b(?:delivery\s*fee|bakit\s*wala|walang\s*delivery|magkano\s*ang\s*delivery|libreng\s*delivery|free\s*delivery)\b/i.test(cleanRaw.toLowerCase());
   if (isDeliveryFeeInquiry) {
     let feeExplanation = '';
@@ -3204,8 +3254,8 @@ async function handleTextInput(psid, session, rawText, options = {}) {
     session.checkout_step = 'COLLECTING_CUSTOMER_INFO';
   }
 
-  // Check for explicit transfer completion notification (e.g. "₱20.00 transfer completed", "transfer completed", Meta card payload)
-  const isTransferCompleted = /(?:transfer\s+completed|transfer\s+complete|transfer\s+sent|transfer\s+success|completed\s+transfer|p[\d.,]+\s*transfer\s+completed)/i.test(rawText) ||
+  // Check for explicit transfer completion notification (e.g. "₱20.00 transfer completed", "transfer completed", Meta card payload, or [ATTACHED_IMAGE])
+  const isTransferCompleted = /(?:transfer\s+completed|transfer\s+complete|transfer\s+sent|transfer\s+success|completed\s+transfer|p[\d.,]+\s*transfer\s+completed|\[ATTACHED_IMAGE\])/i.test(rawText) ||
     options?.payload === 'PAYMENT_TRANSFER_COMPLETED';
 
   if (isTransferCompleted) {
@@ -3345,6 +3395,32 @@ async function handleTextInput(psid, session, rawText, options = {}) {
     return handleStage5Confirmation(psid, session, { isAlreadyPaid: false });
   }
 
+  // =========================================================================
+  // 🌟 LLM-FIRST CONVERSATIONAL AGENT GATEWAY (Hybrid AI Architecture)
+  // Direct conversational input goes straight to Gemini LLM across all 4 keys.
+  // Handles natural language, one-shot orders, inquiries, and revisions before
+  // falling into rigid legacy state machine traps.
+  // =========================================================================
+  const isPureShortAnswer = /^(?:1|2|oo|opo|yes|hindi|no)$/i.test(norm) &&
+    ['AWAITING_SUGGESTION_CONFIRMATION', 'AWAITING_ADDRESS_CONFIRMATION', 'AWAITING_ORDER_SUMMARY_CONFIRM', 'AWAITING_CANCEL_CONFIRMATION'].includes(session.state);
+
+  const isDirectDeterministicPayload = options?.payload ||
+    /^CONFIRM_/i.test(rawText) ||
+    /^DISCOUNT_/i.test(rawText) ||
+    /^ORDER_TYPE_/i.test(rawText) ||
+    isPureShortAnswer;
+
+  if (!isDirectDeterministicPayload && (process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured()) {
+    try {
+      const aiTurn = await executeAiAssistantTurn(psid, session, rawText, options);
+      if (aiTurn) {
+        return aiTurn;
+      }
+    } catch (aiErr) {
+      console.warn('[LLM-First Gateway] Error in AI turn, falling through to deterministic fallback:', aiErr.message);
+    }
+  }
+
   // 0b. State: 'AWAITING_SUGGESTION_CONFIRMATION' (Bago dumaan sa ibang intent parser)
   if (session.state === 'AWAITING_SUGGESTION_CONFIRMATION' || session.current_step === 'AWAITING_SUGGESTION_CONFIRMATION') {
     const affirmativeWords = ['yes', 'oo', 'opo', 'yep', 'sige'];
@@ -3452,11 +3528,23 @@ async function handleTextInput(psid, session, rawText, options = {}) {
       return { intent: 'SUGGESTION_DECLINED', confidence: 1.0, replyLog: reply };
     }
 
-    // Kung hindi yes o no ang sagot:
-    await saveSession(session);
-    const reply = 'Pakisagot po ng yes kung ito ang iyong ibig sabihin, o no para ulitin ang order.';
-    await sendTextMessage(psid, reply);
-    return { intent: 'AWAITING_SUGGESTION_CONFIRMATION_RETRY', confidence: 1.0, replyLog: reply };
+    const isBreakout = /\b(?:menu|order|oorder|pabili|listahan|view\s*cart|cart|checkout|cancel|pa-?cancel|dine[\s-]*in|pick[\s-]*up|delivery)\b/i.test(norm) ||
+      /\b(?:isang|dalawang|tatlong|blast|cake|cheesecake|pizza|milktea|coffee|latte|tea)\b/i.test(norm);
+
+    if (isBreakout) {
+      session.pending_suggestion = null;
+      session.pendingItem = null;
+      session.state = (Array.isArray(session.cart) && session.cart.length > 0) ? 'ORDERING' : 'IDLE';
+      session.current_step = session.state;
+      await saveSession(session);
+      // Fall through to allow standard intent parser / menu / order processing
+    } else {
+      // Kung hindi yes o no ang sagot:
+      await saveSession(session);
+      const reply = 'Pakisagot po ng yes kung ito ang iyong ibig sabihin, o no para ulitin ang order.';
+      await sendTextMessage(psid, reply);
+      return { intent: 'AWAITING_SUGGESTION_CONFIRMATION_RETRY', confidence: 1.0, replyLog: reply };
+    }
   }
 
   const isDetailsStateCheck = [
@@ -3565,14 +3653,8 @@ async function handleTextInput(psid, session, rawText, options = {}) {
     /\boo[,.]?\s*tama\b/i.test(rawText)
   );
 
-  const hasExplicitRatingAnchor = /(?:isa(?:ng)?|dalawa(?:ng)?|tatlo(?:ng)?|apat|lima(?:ng)?|one|two|three|four|five|\d+)\s*(?:na\s*)?(?:stars?|bituin|ratings?|rate\b)/i.test(rawText) || /[⭐★]/.test(rawText);
-  const isPaymentProofContext = session.state === 'AWAITING_PAYMENT_PROOF' ||
-    session.checkout_step === 'AWAITING_PAYMENT_PROOF' ||
-    Boolean(session.pendingGCashOrder) ||
-    /\b(?:screenshot|resibo|proof|payment|bayad|ref|reference)\b/i.test(rawText);
-  const shouldEvaluateFeedback = !isPaymentProofContext && !isConfirmingOrder && (!isInActiveOrderingPipeline || hasExplicitRatingAnchor) && (session.state === 'AWAITING_FEEDBACK_COMMENT' || session.state === 'awaiting_feedback' || (hasExplicitRatingAnchor && !session.cart?.length));
-
-  if (shouldEvaluateFeedback) {
+  const hasExplicitRatingAnchor = /(?:isa(?:ng)?|dalawa(?:ng)?|tatlo(?:ng)?|apat|lima(?:ng)?|one|two|three|four|five|[1-5])\s*(?:na\s*)?(?:stars?|bituin|ratings?|rate\b)/i.test(rawText) || /[⭐★]/.test(rawText);
+  if (hasExplicitRatingAnchor) {
     const feedbackParsed = parseCustomerFeedback(rawText, session);
     if (feedbackParsed.isFeedback) {
       const feedbackResult = await processFeedbackSubmission({
@@ -3581,6 +3663,7 @@ async function handleTextInput(psid, session, rawText, options = {}) {
         rating: feedbackParsed.rating,
         comment: feedbackParsed.comment
       });
+      await resetUserSession(psid, { targetState: 'IDLE' });
       return { intent: 'FEEDBACK_SUBMITTED', confidence: 1.0, replyLog: feedbackResult.botReply };
     }
   }
@@ -3628,7 +3711,8 @@ async function handleTextInput(psid, session, rawText, options = {}) {
     (session.state === 'idle' && !session.dining_mode);
 
   if (isPostResetState && !session.dining_mode) {
-    const hasOrderWithDiningMode = /\b(?:pa-?order|pabili|add\s+\d+|isa|dalawa|tatlo|burger|fries|pizza|milktea|coffee|latte|tea|wings|pasta|steak|meal|dog|nachos|nuggets|lasagna|spaghetti|carbonara|quesadilla)\b/i.test(norm);
+    const hasOrderWithDiningMode = /\b(?:pa-?order|pabili|add\s+\d+|isa|isang|dalawa|dalawang|tatlo|tatlong|burger|fries|pizza|milktea|coffee|latte|tea|wings|pasta|steak|meal|dog|nachos|nuggets|lasagna|spaghetti|carbonara|quesadilla|blast|cheesecake|frappe|drink|shake|taro|wintermelon|matcha|okinawa|caramel|vanilla|americano|cappuccino|mocha|oreo)\b/i.test(norm) ||
+      /(?:isang|dalawang|tatlong|\d+x?)\s+[a-z]/i.test(norm);
     const detectedOneShotPay = /\bgcash|g-?cash\b/i.test(rawText) ? 'GCash' : (/\b(?:cash|cod)\b/i.test(rawText) ? 'Cash' : null);
 
     const hasExplicitMode = /\b(?:dine[\s-]*in|sa\s*loob|table|pick[\s-]*up|pickup|take[\s-]*out|takeout)\b/i.test(norm);
@@ -3779,13 +3863,56 @@ async function handleTextInput(psid, session, rawText, options = {}) {
       const cartTotal = session.cart.reduce((sum, item) => sum + ((item.price || 0) * (item.quantity || 1)), 0);
       session.order_subtotal = cartTotal;
       session.order_total = cartTotal;
+
+      // Extract one-shot customer details if provided in same message
+      const parsedDetails = parseCustomerInfo(rawText, session.dining_mode || (/\b(?:deliver|delivery|padeliver)\b/i.test(rawText) ? 'Delivery' : 'Dine In'));
+      let extractedName = (parsedDetails.name || '').replace(/^(?:via|sa|thru|through)?\s*(?:gcash|cash|cod)\s*/i, '').trim();
+      if (extractedName && !session.customer_name) session.customer_name = extractedName;
+      const extractedPhone = parsedDetails.contact || parsedDetails.phone;
+      if (extractedPhone && !session.contact_number) {
+        session.contact_number = extractedPhone;
+        session.phone_number = extractedPhone;
+      }
+      if (parsedDetails.address && !session.delivery_address) {
+        session.delivery_address = parsedDetails.address;
+        session.address = parsedDetails.address;
+      }
+      if (parsedDetails.landmark && !session.landmark) session.landmark = parsedDetails.landmark;
+      if (parsedDetails.paymentMode && !session.payment_mode) session.payment_mode = parsedDetails.paymentMode;
+      if (parsedDetails.diningMode && !session.dining_mode) session.dining_mode = parsedDetails.diningMode;
+
+      const isCompleteOneShot = session.customer_name &&
+        (session.contact_number || session.phone_number) &&
+        (session.dining_mode === 'Dine In' || session.dining_mode === 'Pick-up' || session.delivery_address) &&
+        session.payment_mode;
+
+      if (isCompleteOneShot) {
+        session.state = 'AWAITING_DISCOUNT_CONFIRMATION';
+        session.current_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+        session.checkout_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+        await saveSession(session);
+
+        const ackMsg = `Maraming salamat po, ${session.customer_name}! Naitala ko na po ang inyong order details.`;
+        await sendTextMessage(psid, ackMsg);
+
+        const askDiscountMsg = 'Mayroon po ba kayong Senior Citizen o PWD ID para sa 20% discount?';
+        await sendTextMessage(psid, askDiscountMsg);
+        return {
+          intent: 'ONE_SHOT_ORDER',
+          confidence: 1.0,
+          replyLog: `${ackMsg}\n\n${askDiscountMsg}`,
+          addedItems,
+          cartTotal
+        };
+      }
+
       session.state = 'AWAITING_CHECKOUT_CONFIRM';
       session.current_step = 'AWAITING_CHECKOUT_CONFIRM';
       await saveSession(session);
 
       const resp = formatUpdatedCartResponse(session.cart);
       await sendQuickReplies(psid, resp.text, resp.quickReplies);
-      return { intent: 'BATCH_CART_ADD', confidence: 1.0, addedItems, cartTotal };
+      return { intent: 'BATCH_CART_ADD', confidence: 1.0, addedItems, cartTotal, replyLog: resp.text };
     } else if (addedItems && addedItems.outOfStockItems && addedItems.outOfStockItems.length > 0) {
       return { intent: 'BATCH_CART_ADD_OUT_OF_STOCK', confidence: 1.0, outOfStock: true };
     }
@@ -4208,6 +4335,33 @@ async function handleTextInput(psid, session, rawText, options = {}) {
       session.checkout_step = null;
       await saveSession(session);
     } else {
+      const isEditDetails = /\b(?:mali|palitan|baguhin|ibahin|change|edit|update|wrong)\b/i.test(norm);
+      if (isEditDetails) {
+        const phoneMatch = rawText.match(/(?:(?:\+63|0)9\d{9}|9\d{9})/);
+        if (phoneMatch) {
+          const newPhone = phoneMatch[0];
+          session.contact_number = newPhone;
+          session.phone_number = newPhone;
+          if (session.details) session.details.phone = newPhone;
+          await saveSession(session);
+          const updateAck = `Sige po, na-update ko na ang inyong phone number sa **${newPhone}**! 👍`;
+          await sendTextMessage(psid, updateAck);
+          const askDiscountMsg = 'Mayroon po ba kayong Senior Citizen o PWD ID para sa 20% discount?';
+          await sendQuickReplies(psid, askDiscountMsg, [
+            { title: 'Mayroon', payload: 'DISCOUNT_YES' },
+            { title: 'Wala po', payload: 'DISCOUNT_NO' }
+          ]);
+          return { intent: 'UPDATE_PHONE_AND_REASK_DISCOUNT', confidence: 1.0, replyLog: `${updateAck}\n\n${askDiscountMsg}` };
+        }
+
+        session.state = 'COLLECTING_CUSTOMER_INFO';
+        session.current_step = 'COLLECTING_CUSTOMER_INFO';
+        await saveSession(session);
+        const prompt = `Sige po! Pakibigay po muli ang inyong tamang detalye para sa order:\n\n` + getCheckoutInfoPrompt(session);
+        await sendTextMessage(psid, prompt);
+        return { intent: 'COLLECTING_CUSTOMER_INFO_PROMPT', confidence: 1.0, replyLog: prompt };
+      }
+
       const isYes = rawText === 'DISCOUNT_YES' || /\b(?:meron|mayroon|opo|yes|oo|senior|pwd|meron\s*po|mayroon\s*po|i\s*have)\b/i.test(norm);
       const isNo = rawText === 'DISCOUNT_NO' || /\b(?:wala|walaw|walaa|wla|wala\s*po|no|nope|hindi|none|wag\s*na|huwag|ayaw|wala\s*akong)\b/i.test(norm) || /^wal/i.test(norm);
       const hasDirectIdOrDiscount = /\b(?:osca|pwd|senior|id(?:\s*no|\s*number)?|discount)\b/i.test(norm) || /[A-Za-z]{2,}-\d{3,}/.test(rawText);
@@ -4229,6 +4383,12 @@ async function handleTextInput(psid, session, rawText, options = {}) {
         return await finalizeOrderSummaryAndPayment(psid, session);
       }
 
+      if (isNo) {
+        session.discount = { applied: false, type: 'None', amount: 0 };
+        session.discount_amount = 0;
+        return await finalizeOrderSummaryAndPayment(psid, session);
+      }
+
       if (isYes) {
         session.state = 'AWAITING_DISCOUNT_PROOF';
         session.current_step = 'AWAITING_DISCOUNT_PROOF';
@@ -4237,12 +4397,6 @@ async function handleTextInput(psid, session, rawText, options = {}) {
         const askProofMsg = 'Paki-send po ang picture ng inyong Senior Citizen o PWD ID o i-type ang inyong ID Number para ma-apply ang 20% discount.';
         await sendTextMessage(psid, askProofMsg);
         return { intent: 'AWAITING_DISCOUNT_PROOF', confidence: 1.0, replyLog: askProofMsg };
-      }
-
-      if (isNo) {
-        session.discount = { applied: false, type: 'None', amount: 0 };
-        session.discount_amount = 0;
-        return await finalizeOrderSummaryAndPayment(psid, session);
       }
 
       const reAskMsg = 'Mayroon po ba kayong Senior Citizen o PWD ID para sa 20% discount?';
@@ -4259,6 +4413,26 @@ async function handleTextInput(psid, session, rawText, options = {}) {
     session.state === 'AWAITING_DISCOUNT_PROOF' ||
     session.current_step === 'AWAITING_DISCOUNT_PROOF'
   ) {
+    const isNo = rawText === 'DISCOUNT_NO' ||
+      /\b(?:wala|walaw|walaa|wla|wala\s*po|no|nope|hindi|none|wag\s*na|huwag|ayaw|wala\s*akong|skip|pass|cancel)\b/i.test(norm) ||
+      /^wal/i.test(norm);
+
+    if (isNo) {
+      session.discount = { applied: false, type: 'None', amount: 0 };
+      session.discount_amount = 0;
+      return await finalizeOrderSummaryAndPayment(psid, session);
+    }
+
+    const isEditDetails = /\b(?:mali|palitan|baguhin|ibahin|change|edit|update|wrong)\b/i.test(norm);
+    if (isEditDetails) {
+      session.state = 'COLLECTING_CUSTOMER_INFO';
+      session.current_step = 'COLLECTING_CUSTOMER_INFO';
+      await saveSession(session);
+      const prompt = `Sige po! Pakibigay po muli ang inyong tamang detalye para sa order:\n\n` + getCheckoutInfoPrompt(session);
+      await sendTextMessage(psid, prompt);
+      return { intent: 'COLLECTING_CUSTOMER_INFO_PROMPT', confidence: 1.0, replyLog: prompt };
+    }
+
     const subtotal = session.order_subtotal || (session.cart ? calculateCartSubtotal(session.cart) : 0);
     const computedDiscount = Math.round((subtotal * 0.20) * 100) / 100;
     const idText = rawText.trim() || 'Senior / PWD ID Provided';
@@ -4284,6 +4458,48 @@ async function handleTextInput(psid, session, rawText, options = {}) {
       /\b(?:1|oo|opo|yes|tama|tama\s*po|oo\s*tama|proceed|confirm|ok|okay|sige|push|tuloy|g)\b/i.test(norm);
     const isEdit = rawText === 'CONFIRM_ORDER_SUMMARY_EDIT' ||
       /\b(?:2|may\s*babaguhin|baguhin|ibahin|palitan|mali|edit|change|no|hindi)\b/i.test(norm);
+
+    // Check if customer is claiming Senior Citizen or PWD discount at Order Summary (Persona #14: Makakalimutin)
+    const isLateDiscount = /\b(?:senior|pwd|osca|discount)\b/i.test(norm) || /\b(?:senior|pwd|osca|discount)\b/i.test(rawText);
+    if (isLateDiscount) {
+      const invalidReason = isInvalidDiscountIdClaim(rawText);
+      if (invalidReason) {
+        const rejectMsg = getInvalidDiscountRejectionMessage(invalidReason);
+        await sendTextMessage(psid, rejectMsg);
+        return { intent: 'INVALID_DISCOUNT_CLAIM', confidence: 1.0, replyLog: rejectMsg };
+      }
+
+      const idMatch = rawText.match(/\b(?:osca|pwd)[-\s\w]+\b/i) ||
+        rawText.match(/Senior Citizen ID:\s*([A-Za-z0-9_-]+)/i) ||
+        (/[A-Za-z]{2,}-\d{3,}/.test(rawText) ? rawText.match(/[A-Za-z]{2,}-\d{3,}/) : null);
+
+      if (idMatch) {
+        const directId = idMatch[0].trim();
+        const subtotal = calculateCartSubtotal(session.cart || []);
+        const computedDiscount = Math.round(subtotal * 0.20 * 100) / 100;
+        session.discount = {
+          applied: true,
+          type: /pwd/i.test(directId) ? 'PWD 20%' : 'Senior Citizen 20%',
+          idNumber: directId,
+          amount: computedDiscount
+        };
+        session.discount_amount = computedDiscount;
+        await saveSession(session);
+
+        const ackDiscountMsg = `Salamat po! Na-apply na po ang inyong 20% Senior Citizen / PWD discount (ID: ${directId}, Bawas: ₱${computedDiscount.toFixed(2)}).`;
+        await sendTextMessage(psid, ackDiscountMsg);
+        return await finalizeOrderSummaryAndPayment(psid, session);
+      } else {
+        session.state = 'AWAITING_DISCOUNT_CONFIRMATION';
+        session.current_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+        session.checkout_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+        await saveSession(session);
+
+        const askProofMsg = 'Paki-send po ang picture ng inyong Senior Citizen o PWD ID o i-type ang inyong ID Number para ma-apply ang 20% discount.';
+        await sendTextMessage(psid, askProofMsg);
+        return { intent: 'AWAITING_DISCOUNT_CONFIRMATION', confidence: 1.0, replyLog: askProofMsg };
+      }
+    }
 
     if (isAffirmative) {
       return await executeFinalOrderPlacement(psid, session, rawText);
@@ -4379,6 +4595,30 @@ async function handleTextInput(psid, session, rawText, options = {}) {
     if (qty !== null) {
       await handleQuantitySelection(psid, session, qty);
       return { intent: 'SET_QUANTITY', confidence: 1.0 };
+    }
+  }
+
+  // Standalone Contact Number Capture (Offline & Multi-turn safeguard)
+  const standalonePhone = normalizePhone(rawText);
+  if (standalonePhone && rawText.trim().replace(/\D/g, '').length >= 10 && !isConfirmingOrder) {
+    session.contact_number = standalonePhone;
+    session.phone_number = standalonePhone;
+    if (!session.details) session.details = {};
+    session.details.phone = standalonePhone;
+    await saveSession(session);
+
+    if (session.cart && session.cart.length > 0 && session.customer_name) {
+      session.state = 'AWAITING_DISCOUNT_CONFIRMATION';
+      session.current_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+      await saveSession(session);
+      const askDiscountMsg = 'Mayroon po ba kayong Senior Citizen o PWD ID para sa 20% discount?';
+      await sendTextMessage(psid, askDiscountMsg);
+      return { intent: 'AWAITING_DISCOUNT_CONFIRMATION', confidence: 1.0, replyLog: askDiscountMsg };
+    } else {
+      const greetingName = session.customer_name ? `Kuya ${session.customer_name}` : 'po';
+      const ackPhoneMsg = `Maraming salamat po, ${greetingName}! Na-update ko na po ang phone number ninyo sa ating delivery details (${standalonePhone}). Ano po ang nais ninyong i-order mula sa ating menu?`;
+      await sendTextMessage(psid, ackPhoneMsg);
+      return { intent: 'ORDER_DETAILS_RECORDED', confidence: 1.0, replyLog: ackPhoneMsg };
     }
   }
 
@@ -5484,7 +5724,7 @@ async function handleOrderItemText(psid, session, rawText, nlu) {
       await saveSession(session);
       const resp = formatUpdatedCartResponse(session.cart);
       await sendQuickReplies(psid, resp.text, resp.quickReplies);
-      return { intent: 'BATCH_CART_ADD', confidence: 1.0, addedItems, cartTotal };
+      return { intent: 'BATCH_CART_ADD', confidence: 1.0, addedItems, cartTotal, replyLog: resp.text };
     }
   }
 
@@ -5500,6 +5740,12 @@ async function handleOrderItemText(psid, session, rawText, nlu) {
     if (geminiInquiry) {
       return geminiInquiry;
     }
+  }
+
+  // Delivery address / boundary queries or complex instructions go straight to Gemini AI
+  if ((/\b(?:quezon|circle|alabang|makati|pasig|taguig|marikina|valenzuela|cavite|laguna|mandaluyong)\b/i.test(rawText) || /\b(?:deliver|padeliver)\s+(?:sa|to)\b/i.test(rawText)) && (process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured()) {
+    const aiBoundary = await executeAiAssistantTurn(psid, session, rawText);
+    if (aiBoundary) return aiBoundary;
   }
   // Extract candidate query string
   const [candidates] = await db.query(`
@@ -5673,6 +5919,95 @@ async function handleOrderItemText(psid, session, rawText, nlu) {
     }
   }
 
+  // Hybrid Offline Rule-Based Fallback (Zero AI Down-time Safeguard)
+  // When AI is offline, timed out, or 503, salvage multi-item orders, one-shot checkout, or details offline
+  if (isBatchAddIntent(rawText) || /\b(?:padeliver|pabili|pa-order|order|paorder)\b/i.test(rawText)) {
+    const [candidates] = await db.query(`
+      SELECT m.id, m.name, m.price, m.synonyms, m.is_available,
+             COALESCE(m.stock_quantity, i.stock_quantity, 0) AS stock_quantity,
+             COALESCE(c.name, m.category, 'Cafe') AS category_name, m.category
+      FROM menu_items m
+      LEFT JOIN categories c ON c.id = m.category_id
+      LEFT JOIN inventory i ON i.menu_item_id = m.id
+      WHERE COALESCE(m.is_deleted, 0) = 0
+    `);
+    if (!session.cart) session.cart = [];
+    const initialCartLen = session.cart.length;
+    executeBatchAdd(session.cart, rawText, candidates);
+
+    if (session.cart.length > initialCartLen) {
+      const parsedDetails = parseCustomerInfo(rawText, session.dining_mode || (/\b(?:deliver|delivery|padeliver)\b/i.test(rawText) ? 'Delivery' : 'Dine In'));
+      if (parsedDetails.name) session.customer_name = parsedDetails.name;
+      if (parsedDetails.phone) {
+        session.contact_number = parsedDetails.phone;
+        session.phone_number = parsedDetails.phone;
+      }
+      if (parsedDetails.address) {
+        session.delivery_address = parsedDetails.address;
+        session.address = parsedDetails.address;
+      }
+      if (parsedDetails.landmark) session.landmark = parsedDetails.landmark;
+      if (parsedDetails.paymentMode) session.payment_mode = parsedDetails.paymentMode;
+      if (parsedDetails.diningMode) session.dining_mode = parsedDetails.diningMode;
+
+      const subtotal = calculateCartSubtotal(session.cart);
+      session.order_subtotal = subtotal;
+      await saveSession(session);
+
+      // Check if complete one-shot details are present
+      const isCompleteOneShot = session.customer_name &&
+        (session.contact_number || session.phone_number) &&
+        (session.dining_mode === 'Dine In' || session.dining_mode === 'Pick-up' || session.delivery_address) &&
+        session.payment_mode;
+
+      if (isCompleteOneShot) {
+        session.state = 'AWAITING_DISCOUNT_CONFIRMATION';
+        session.current_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+        session.checkout_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+        await saveSession(session);
+
+        const ackMsg = `Maraming salamat po, ${session.customer_name}! Naitala ko na po ang inyong order details.`;
+        await sendTextMessage(psid, ackMsg);
+
+        const askDiscountMsg = 'Mayroon po ba kayong Senior Citizen o PWD ID para sa 20% discount?';
+        await sendTextMessage(psid, askDiscountMsg);
+        return {
+          intent: 'AWAITING_DISCOUNT_CONFIRMATION',
+          confidence: 0.95,
+          replyLog: `${ackMsg}\n\n${askDiscountMsg}`,
+          aiAction: 'SET_DETAILS'
+        };
+      } else {
+        session.state = 'AWAITING_CHECKOUT_CONFIRM';
+        await saveSession(session);
+        const addedNames = session.cart.map(c => `${c.quantity || 1}x ${c.name}`).join(', ');
+        const offlineAddedMsg = `Naidagdag na po sa cart: ${addedNames}.\nCart subtotal: ${peso(subtotal)}. Nais na po ba ninyong mag-checkout o magdagdag pa? Ano pa po ang nais ninyong i-order o idagdag bago tayo mag-checkout?`;
+        await sendTextMessage(psid, offlineAddedMsg);
+        return { intent: 'ORDER_ITEM', confidence: 0.95, replyLog: offlineAddedMsg };
+      }
+    }
+  }
+
+  // Offline Delivery / Customer Details Fallback when cart is empty
+  const parsedFallbackDetails = parseCustomerInfo(rawText, 'Delivery');
+  if (parsedFallbackDetails.address || (parsedFallbackDetails.name && !NON_NAME_FILLERS.test(parsedFallbackDetails.name) && parsedFallbackDetails.name.length >= 2)) {
+    if (parsedFallbackDetails.name) session.customer_name = parsedFallbackDetails.name;
+    if (parsedFallbackDetails.address) {
+      session.delivery_address = parsedFallbackDetails.address;
+      session.address = parsedFallbackDetails.address;
+    }
+    if (parsedFallbackDetails.landmark) session.landmark = parsedFallbackDetails.landmark;
+    if (parsedFallbackDetails.paymentMode) session.payment_mode = parsedFallbackDetails.paymentMode;
+    session.dining_mode = 'Delivery';
+    session.state = 'COLLECTING_CUSTOMER_INFO';
+    await saveSession(session);
+
+    const greetingName = session.customer_name ? `Kuya ${session.customer_name}` : 'po';
+    const missingItemsMsg = `Sige po ${greetingName}, na-save ko na po ang inyong delivery address sa ${session.address || 'inyong lokasyon'}${session.landmark ? ` (malapit sa ${session.landmark})` : ''} para sa ${session.payment_mode || 'Cash'} payment. Ano po ang gusto ninyong i-order mula sa ating menu?`;
+    await sendTextMessage(psid, missingItemsMsg);
+    return { intent: 'ORDER_DETAILS_RECORDED', confidence: 0.95, replyLog: missingItemsMsg };
+  }
+
   // Fallback
   const fb = botMessages.fallback();
   await sendQuickReplies(psid, fb.text, fb.quickReplies);
@@ -5836,6 +6171,11 @@ async function startCheckoutFlow(psid, session, rawText = '') {
       session.dining_mode = 'Delivery';
       session.orderType = 'delivery';
     }
+  }
+
+  // If customer name and phone are already captured, go directly to Order Summary
+  if (session.customer_name && (session.contact_number || session.phone_number)) {
+    return await finalizeOrderSummaryAndPayment(psid, session);
   }
 
   // Issue 3: Immediately transition to COLLECTING_CUSTOMER_INFO and prompt cleanly without "Yes to what?"
@@ -6774,6 +7114,9 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
           const { checkMenuAvailability } = require('./inventoryService');
           if (!session.cart) session.cart = [];
 
+          // Check if user is correcting/setting the quantity of an existing item (e.g. "Isa lang ang order kong biscoff", "gawing 1 na lang")
+          const isQuantityCorrection = /\b(?:isa|dalawa|tatlo|\d+)\s*(?:lang|na\s*lang)\b|\bgawing\s*(\d+|isa|dalawa|tatlo)\b|\bpalitan\s*(?:mo\s*)?(?:ng|sa)\s*(\d+|isa|dalawa|tatlo)\b/i.test(rawText);
+
           // Recommendation swap: If customer rejects previous suggestions and asks for different items, replace instead of stack
           const isSwap = /\b(?:iba\s+na\s+lang|magkakaiba|mag[\s-]*kakaiba|ayaw\s+ko\s+ng\s+pare[\s-]*pareho|palitan\s+mo|palitan\s+yung|palitan\s+ung|wag\s+yan|huwag\s+yan|ibang\s+meal|ibang\s+ulam)\b/i.test(rawText);
           if (isSwap && session.cart && session.cart.length > 0) {
@@ -6871,8 +7214,6 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
             const rawAddon = (isDrink && reqEntry.addon) ? String(reqEntry.addon).trim() : null;
             const resolvedAddon = rawAddon ? (detectAddonInText(rawAddon) || rawAddon) : null;
 
-            // Check if user is correcting/setting the quantity of an existing item (e.g. "Isa lang ang order kong biscoff", "gawing 1 na lang")
-            const isQuantityCorrection = /\b(?:isa|dalawa|tatlo|\d+)\s*(?:lang|na\s*lang)\b|\bgawing\s*(\d+|isa|dalawa|tatlo)\b|\bpalitan\s*(?:mo\s*)?(?:ng|sa)\s*(\d+|isa|dalawa|tatlo)\b/i.test(rawText);
             const isInCheckoutOrSummary = ['AWAITING_ORDER_SUMMARY_CONFIRM', 'COLLECTING_CUSTOMER_INFO', 'AWAITING_DISCOUNT_CONFIRMATION'].includes(session.state);
 
             // Single-item Drinks & Milktea with no add-on triggers AWAITING_DRINK_ADDON upsell only if NOT a correction and NOT in checkout/summary
@@ -7044,7 +7385,7 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
 
             session.state = 'AWAITING_CHECKOUT_CONFIRM';
             await saveSession(session);
-            const cartText = `${reply_message}\n\nNaidagdag: ${addedSummary.join(', ')}${oosSuffix}\nCart subtotal: ${peso(subtotal)}. Nais na po ba ninyong mag-checkout o magdagdag pa?`;
+            const cartText = `${reply_message}\n\nNaidagdag: ${addedSummary.join(', ')}${oosSuffix}\nCart subtotal: ${peso(subtotal)}. Nais na po ba ninyong mag-checkout o magdagdag pa? Ano pa po ang nais ninyong i-order o idagdag bago tayo mag-checkout?`;
             await sendTextMessage(psid, cartText);
             return {
               intent: 'AI_ADD_ITEM',
@@ -7108,7 +7449,7 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
         const validPhone = normalizePhone(rawPhone) || normalizePhone(rawText) || rawPhone;
 
         const resolvedName = action_payload.customer_name || parsedFallback.name || session.customer_name;
-        if (resolvedName) {
+        if (resolvedName && (!session.customer_name || /(?:name|pangalan|ako\s*si)\b/i.test(rawText) || (action_payload.customer_name && action_payload.customer_name !== session.customer_name))) {
           session.customer_name = resolvedName;
           session.name = resolvedName;
         }
@@ -7179,9 +7520,10 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
             WHERE COALESCE(m.is_deleted, 0) = 0
           `);
           for (const itemReq of itemsToOrder) {
+            const reqNorm = (itemReq.name || itemReq.item_name || '').trim().toLowerCase();
+            if (!reqNorm) continue;
             const matched = candidates.find(c => {
               const cNorm = c.name.toLowerCase();
-              const reqNorm = (itemReq.name || '').toLowerCase();
               return cNorm === reqNorm || cNorm.includes(reqNorm) || reqNorm.includes(cNorm);
             });
             if (matched) {
@@ -7397,8 +7739,10 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
       case 'NONE':
       default: {
         let finalReply = reply_message;
+        const textToCheck = rawText || '';
         const hasDiningMode = session.dining_mode || session.orderType;
-        if (!hasDiningMode && !/(?:dine\s*in|delivery|pick[\s-]*up|take\s*out)/i.test(finalReply)) {
+        const isClosingOrFarewell = /(?:wala\s*na|salamat|bye|ingat|magandang\s*araw|walang\s*anuman|thank)/i.test(textToCheck) || /(?:magandang\s*araw|ingat\s*po|walang\s*anuman)/i.test(finalReply);
+        if (!hasDiningMode && !isClosingOrFarewell && !/(?:dine\s*in|delivery|pick[\s-]*up|take\s*out)/i.test(finalReply)) {
           finalReply += "\n\nBago po tayo mag-order, ask ko lang po: will this be for Dine In, Delivery, or Pick-up?";
         }
         await sendTextMessage(psid, finalReply);

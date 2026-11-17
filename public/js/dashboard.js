@@ -55,6 +55,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     handleRealtimeEvent(eventType, eventData);
   });
 
+  // 4b. Background Order Synchronization Watchdog (Polls every 5s as fail-safe fallback)
+  setInterval(() => {
+    if (document.visibilityState === 'visible') {
+      const activeTab = document.querySelector('.nav-tab.active')?.dataset?.tab || 'orders';
+      if (activeTab === 'orders' && typeof loadOrders === 'function') {
+        loadOrders();
+      }
+    }
+  }, 5000);
+
   // 5. Setup Menu Image Dropzone and File Picker
   setupMenuImagePicker();
 });
@@ -346,10 +356,18 @@ function handleRealtimeEvent(eventType, data) {
   loadKPIs();
   if (eventType === 'NEW_ORDER') {
     playOrderChime();
-    API.toast(`🔔 Bagong Order! #${data.orderNumber} (${data.customerName || 'Customer'})`, 'info');
+    if (data.payment_status === 'Underpayment' || data.is_underpayment) {
+      API.toast(`⚠️ Babala: Underpayment sa Order #${data.orderNumber}! Kulang ang naipadalang bayad.`, 'error');
+    } else {
+      API.toast(`🔔 Bagong Order! #${data.orderNumber} (${data.customerName || 'Customer'})`, 'info');
+    }
     loadOrders();
     loadDeliveries();
-  } else if (eventType === 'ORDER_STATUS_CHANGED' || eventType === 'PAYMENT_UPDATE') {
+  } else if (eventType === 'ORDER_STATUS_CHANGED' || eventType === 'PAYMENT_UPDATE' || eventType === 'ORDER_PAYMENT_UNDERPAID') {
+    if (eventType === 'ORDER_PAYMENT_UNDERPAID') {
+      playOrderChime();
+      API.toast(`⚠️ Babala: Mismatch / Underpayment naitala sa Order #${data.orderNumber}!`, 'error');
+    }
     loadOrders();
     loadDeliveries();
   }
@@ -559,7 +577,9 @@ function renderKanban(orders) {
         paymentBadge = `<span class="badge badge-pending">💳 Xendit Pending</span>`;
       }
     } else if (pMethodLower === 'gcash') {
-      if (order.payment_mismatch) {
+      if (order.payment_status === 'Underpayment' || order.payment_status === 'UNDERPAYMENT') {
+        paymentBadge = `<span class="badge badge-mismatch" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #ef4444; font-weight: bold;">⚠️ Underpayment</span>`;
+      } else if (order.payment_mismatch) {
         paymentBadge = `<span class="badge badge-mismatch">⚠️ GCash Mismatch</span>`;
       } else if (order.payment_status === 'Pending Verification') {
         paymentBadge = `<span class="badge badge-preparing" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #f59e0b;">⏳ Proof Sent</span>`;
@@ -817,7 +837,7 @@ async function viewOrderDetails(orderId) {
       document.getElementById('modal-order-body').innerHTML = `
         <div style="margin-bottom: 16px;">
           <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-            <span>Customer: <strong>${escapeHtml((o.first_name || '') + ' ' + (o.last_name || ''))}</strong></span>
+            <span>Customer: <strong>${escapeHtml(((o.first_name || '') + ' ' + (o.last_name || '')).trim() || 'Customer')}</strong></span>
             <span>Status: <span class="badge badge-${o.status}">${o.status}</span></span>
           </div>
           <div style="font-size: 0.88rem; color: var(--text-secondary); margin-bottom: 3px;">Phone: <strong>${escapeHtml(o.customer_phone || 'N/A')}</strong></div>
@@ -1345,7 +1365,7 @@ function printReceipt() {
         <div class="divider"></div>
         <div class="bold">Order #${o.order_number}</div>
         <div>Date: ${new Date(o.created_at || Date.now()).toLocaleString()}</div>
-        <div>Customer: ${escapeHtml((o.first_name || '') + ' ' + (o.last_name || ''))}</div>
+        <div>Customer: ${escapeHtml(((o.first_name || '') + ' ' + (o.last_name || '')).trim() || 'Customer')}</div>
         <div>Dining Mode: ${escapeHtml(diningModeLabel)}</div>
       </div>
       <div class="divider"></div>

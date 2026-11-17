@@ -16,6 +16,7 @@ const db = require('../../database/db');
 const config = require('../config/config');
 const storeSettingsService = require('./storeSettingsService');
 const systemSettingsService = require('./systemSettingsService');
+const geminiService = require('./geminiService');
 
 let CAFE_PERSONA_CONFIG = null;
 try {
@@ -26,8 +27,8 @@ try {
   } catch (__) {}
 }
 
-const PRIMARY_AI_MODEL = 'gemini-3.8-flash';
-const FALLBACK_AI_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-flash-lite-latest'];
+const PRIMARY_AI_MODEL = 'gemini-flash-lite-latest';
+const FALLBACK_AI_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.8-flash'];
 const MAX_CONVERSATION_MESSAGES = 8;
 const MODEL_COOLDOWN_MS = 30 * 60 * 1000;
 
@@ -141,6 +142,8 @@ function normalizeModelName(rawModel) {
 }
 
 function resolveApiKey() {
+  const pool = geminiService.getHealthyApiKeys ? geminiService.getHealthyApiKeys() : [];
+  if (pool.length > 0) return pool[0];
   const key = String(process.env.GEMINI_API_KEY || config.geminiApiKey || '').trim();
   if (!key || key === 'your_gemini_api_key_here') {
     return '';
@@ -149,12 +152,17 @@ function resolveApiKey() {
 }
 
 function isAiConfigured() {
-  return Boolean(resolveApiKey());
+  const pool = geminiService.resolveApiKeyPool ? geminiService.resolveApiKeyPool() : [];
+  return pool.length > 0 || Boolean(resolveApiKey());
 }
 
 function getGenAIClient() {
   const apiKey = resolveApiKey();
   if (!apiKey) return null;
+
+  if (geminiService.getClientForKey) {
+    return geminiService.getClientForKey(apiKey);
+  }
 
   if (!cachedClient || cachedApiKey !== apiKey) {
     cachedClient = new GoogleGenAI({ apiKey });
@@ -666,8 +674,8 @@ function buildInputWithHistory(messageText, history = []) {
  * @returns {Promise<{ reply_message: string, detected_action: string, action_payload: Object, model: string, latencyMs: number, context: Object } | null>}
  */
 async function generateAssistantResponse(psid, messageText, session = null, options = {}) {
-  const client = options.client || getGenAIClient();
-  if (!client || !client.interactions?.create) {
+  const healthyKeys = geminiService.getHealthyApiKeys ? geminiService.getHealthyApiKeys() : [resolveApiKey()].filter(Boolean);
+  if (healthyKeys.length === 0) {
     return null;
   }
 
@@ -680,70 +688,83 @@ async function generateAssistantResponse(psid, messageText, session = null, opti
   const models = resolveModelChain(options.preferredModel);
   const startMs = Date.now();
 
-  for (let i = 0; i < models.length; i++) {
-    const model = models[i];
-    const perAttemptTimeoutMs = i === models.length - 1 ? timeoutMs : Math.min(timeoutMs, 15000);
+  for (let kIdx = 0; kIdx < healthyKeys.length; kIdx++) {
+    const selectedKey = healthyKeys[kIdx];
+    const client = options.client || (geminiService.getClientForKey ? geminiService.getClientForKey(selectedKey) : getGenAIClient());
+    if (!client || !client.interactions?.create) continue;
+    let keyHitQuota = false;
 
-    try {
-      const interaction = await client.interactions.create(
-        {
-          model,
-          input,
-          system_instruction: systemInstruction,
-          generation_config: {
-            temperature: 0.7
+    for (let i = 0; i < models.length; i++) {
+      const model = models[i];
+      const perAttemptTimeoutMs = i === models.length - 1 ? timeoutMs : Math.min(timeoutMs, 15000);
+
+      try {
+        const interaction = await client.interactions.create(
+          {
+            model,
+            input,
+            system_instruction: systemInstruction,
+            generation_config: {
+              temperature: 0.7
+            },
+            response_format: {
+              type: 'text',
+              mime_type: 'application/json',
+              schema: ASSISTANT_RESPONSE_SCHEMA
+            }
           },
-          response_format: {
-            type: 'text',
-            mime_type: 'application/json',
-            schema: ASSISTANT_RESPONSE_SCHEMA
+          {
+            timeout_ms: perAttemptTimeoutMs,
+            retries: { strategy: 'none' }
           }
-        },
-        {
-          timeout_ms: perAttemptTimeoutMs,
-          retries: { strategy: 'none' }
+        );
+
+        const outputText = interaction?.output_text ||
+          interaction?.steps
+            ?.filter(s => s.type === 'model_output')
+            ?.flatMap(s => s.content || [])
+            ?.filter(c => c.type === 'text' && c.text)
+            ?.map(c => c.text)
+            ?.join('') ||
+          '';
+
+        const parsed = parseAssistantJson(outputText);
+        if (parsed) {
+          modelCooldownUntil.delete(model);
+          appendConversationTurn(psid, messageText, parsed.reply_message, session);
+          return {
+            ...parsed,
+            model,
+            latencyMs: Date.now() - startMs,
+            context
+          };
         }
-      );
+      } catch (err) {
+        const status = err?.status || err?.statusCode || err?.code || '';
+        const msg = String(err?.message || '');
+        if (status === 429 || /RESOURCE_EXHAUSTED|quota|rate\s*limit/i.test(msg)) {
+          console.warn(`[aiService Multi-Key] Key ending in ...${selectedKey.slice(-6)} hit 429. Failing over immediately.`);
+          keyHitQuota = true;
+          break;
+        }
+        const isRetryable =
+          status === 429 ||
+          status === 503 ||
+          status === 500 ||
+          status === 504 ||
+          /rate\s*limit|quota|overload|capacity|timeout|ECONNRESET|ETIMEDOUT/i.test(msg);
 
-      const outputText = interaction?.output_text ||
-        interaction?.steps
-          ?.filter(s => s.type === 'model_output')
-          ?.flatMap(s => s.content || [])
-          ?.filter(c => c.type === 'text' && c.text)
-          ?.map(c => c.text)
-          ?.join('') ||
-        '';
-
-      const parsed = parseAssistantJson(outputText);
-      if (parsed) {
-        modelCooldownUntil.delete(model);
-        appendConversationTurn(psid, messageText, parsed.reply_message, session);
-        return {
-          ...parsed,
-          model,
-          latencyMs: Date.now() - startMs,
-          context
-        };
-      }
-    } catch (err) {
-      const status = err?.status || err?.statusCode || err?.code || '';
-      const msg = String(err?.message || '');
-      const isRetryable =
-        status === 429 ||
-        status === 503 ||
-        status === 500 ||
-        status === 504 ||
-        /rate\s*limit|quota|overload|capacity|timeout|ECONNRESET|ETIMEDOUT/i.test(msg);
-
-      console.warn(`[aiService] Model ${model} failed (${status || 'ERR'}): ${msg}`);
-      if (isRetryable) {
-        modelCooldownUntil.set(model, Date.now() + MODEL_COOLDOWN_MS);
-        continue;
-      }
-      if (i < models.length - 1) {
-        continue;
+        console.warn(`[aiService] Model ${model} failed (${status || 'ERR'}): ${msg}`);
+        if (isRetryable) {
+          modelCooldownUntil.set(model, Date.now() + MODEL_COOLDOWN_MS);
+          continue;
+        }
+        if (i < models.length - 1) {
+          continue;
+        }
       }
     }
+    if (!keyHitQuota) break;
   }
 
   return null;

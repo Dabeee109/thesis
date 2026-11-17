@@ -262,6 +262,49 @@ note: Allergic to dairy, strictly oatmilk only please`;
       `Extracted: Name=${parsed.name}, Address=${parsed.address}, Landmark=${parsed.landmark}. Missing: [${missingFields.join(', ')}]`);
   });
 
+  // Persona 14: Ang Makakalimutin / Late Details & Senior Discount Claim
+  it('Persona 14: Ang Makakalimutin - recovers missing phone and applies late Senior Citizen discount at Order Summary', async () => {
+    const raw = "Pa-deliver po ng 1 Bacon Burger sa 456 Magsaysay St Tondo tapat ng simbahan, Juan Dela Cruz COD";
+    const parsed = nlpEngine.parseCustomerInfo(raw, 'Delivery');
+
+    const nameOk = parsed.name === 'Juan Dela Cruz';
+    const missing = nlpEngine.getMissingCheckoutFields({
+      name: parsed.name,
+      contact: parsed.contact,
+      address: parsed.address,
+      paymentMode: parsed.paymentMode,
+      diningMode: parsed.diningMode
+    });
+    const phoneMissing = missing.length === 1 && missing[0].includes('Phone');
+
+    // Simulate session at AWAITING_ORDER_SUMMARY_CONFIRM
+    const psid = `PSID_FORGETFUL_${Date.now()}`;
+    const session = await nlpEngine.getSession(psid);
+    session.cart = [{ id: 10034, name: 'Bacon Burger', price: 189, quantity: 1 }];
+    session.customer_name = 'Juan Dela Cruz';
+    session.contact_number = '09171234567';
+    session.delivery_address = '456 Magsaysay St Tondo';
+    session.dining_mode = 'Delivery';
+    session.payment_mode = 'COD';
+    session.delivery_fee = 39.00;
+    session.state = 'AWAITING_ORDER_SUMMARY_CONFIRM';
+    session.current_step = 'AWAITING_ORDER_SUMMARY_CONFIRM';
+    await nlpEngine.saveSession(session);
+
+    // Customer late-claims Senior Citizen ID at Order Summary
+    const lateDiscountMsg = "May senior citizen ID pala ako: OSCA-12345";
+    const res = await nlpEngine.handleTextInput(psid, session, lateDiscountMsg);
+
+    const updatedSession = await nlpEngine.getSession(psid);
+    const discountApplied = updatedSession.discount?.applied === true &&
+      Number(updatedSession.discount_amount) > 0 &&
+      updatedSession.discount?.idNumber?.includes('OSCA-12345');
+
+    recordResult(14, 'Ang Makakalimutin / Late Discount Claim',
+      nameOk && phoneMissing && discountApplied,
+      `Missing phone detected: ${phoneMissing}, Discount applied: ${discountApplied} (Amount: ₱${updatedSession.discount_amount})`);
+  });
+
   it('BENCHMARK SUMMARY: Overall Persona Benchmark Accuracy Score', () => {
     const accuracy = (scorePassed / scoreTotal) * 100;
     console.log(`\n========================================================`);

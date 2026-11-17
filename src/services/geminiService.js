@@ -15,8 +15,8 @@ const {
 
 // Default to gemini-3.5-flash-lite for fast sub-1-second latency and high free-tier limits (Feature 3)
 const PRIMARY_MODEL = 'gemini-3.5-flash-lite';
-const FALLBACK_MODEL = 'gemini-3.1-flash-lite';
-const TERTIARY_MODEL = 'gemini-3-flash-preview';
+const FALLBACK_MODEL = 'gemini-flash-lite-latest';
+const TERTIARY_MODEL = 'gemini-3.8-flash';
 
 // Structured JSON Schema enforced by Gemini API response_format (Feature 4 Multi-Item Array)
 const BARISTA_RESPONSE_SCHEMA = {
@@ -84,9 +84,11 @@ const BARISTA_RESPONSE_SCHEMA = {
   required: ['replyText', 'intent', 'items', 'suggestedReplies']
 };
 
-// Cached SDK client instance keyed by API key so hot key updates work seamlessly
-let cachedClient = null;
-let cachedApiKey = null;
+// Client cache map (apiKey -> GoogleGenAI instance)
+const clientCache = new Map();
+const keyCooldownUntil = new Map();
+const KEY_COOLDOWN_MS = 60 * 1000; // 1 minute cooldown per key on 429
+let currentKeyIndex = 0;
 
 // Lightweight in-memory interaction tracker for standalone /api/webhook callers without DB sessions
 const standaloneInteractions = new Map();
@@ -96,14 +98,51 @@ const modelCooldownUntil = new Map();
 const MODEL_COOLDOWN_MS = 2 * 60 * 1000;
 
 /**
+ * Resolve active pool of API keys from environment or config
+ * @returns {string[]}
+ */
+function resolveApiKeyPool() {
+  const rawPool = (process.env.GEMINI_API_KEYS || '').split(',')
+    .concat(process.env.GEMINI_API_KEY ? [process.env.GEMINI_API_KEY] : [])
+    .concat(Array.isArray(config.geminiApiKeys) ? config.geminiApiKeys : [])
+    .concat(config.geminiApiKey ? [config.geminiApiKey] : []);
+
+  const keys = Array.from(new Set(
+    rawPool.map(k => (k || '').trim()).filter(k => k && k !== 'your_gemini_api_key_here')
+  ));
+  return keys;
+}
+
+/**
+ * Get active keys that are currently healthy (not in cooldown)
+ * @returns {string[]}
+ */
+function getHealthyApiKeys() {
+  const allKeys = resolveApiKeyPool();
+  if (allKeys.length === 0) return [];
+  const now = Date.now();
+  const healthy = allKeys.filter(k => (keyCooldownUntil.get(k) || 0) <= now);
+  return healthy.length > 0 ? healthy : allKeys;
+}
+
+/**
+ * Get or create GoogleGenAI client for a given key
+ * @param {string} apiKey
+ * @returns {GoogleGenAI}
+ */
+function getClientForKey(apiKey) {
+  if (!clientCache.has(apiKey)) {
+    clientCache.set(apiKey, new GoogleGenAI({ apiKey }));
+  }
+  return clientCache.get(apiKey);
+}
+
+/**
  * Resolve active API key from environment or config without hardcoding secrets
  */
 function resolveApiKey() {
-  const key = (process.env.GEMINI_API_KEY || config.geminiApiKey || '').trim();
-  if (!key || key === 'your_gemini_api_key_here') {
-    return '';
-  }
-  return key;
+  const pool = getHealthyApiKeys();
+  return pool.length > 0 ? pool[0] : '';
 }
 
 /**
@@ -115,25 +154,20 @@ function resolveModelChain(preferredModel) {
     raw = PRIMARY_MODEL;
   }
   const normalized = raw || PRIMARY_MODEL;
-  const candidates = Array.from(new Set([normalized, PRIMARY_MODEL, FALLBACK_MODEL, TERTIARY_MODEL, 'gemini-3.1-flash-lite', 'gemini-3.5-flash-lite']));
+  const candidates = Array.from(new Set([normalized, PRIMARY_MODEL, FALLBACK_MODEL, TERTIARY_MODEL, 'gemini-flash-lite-latest', 'gemini-3.5-flash-lite']));
   const now = Date.now();
   const healthy = candidates.filter(m => (modelCooldownUntil.get(m) || 0) <= now);
   return healthy.length > 0 ? healthy : candidates;
 }
 
 /**
- * Get or initialize singleton GoogleGenAI client
+ * Get or initialize default GoogleGenAI client
  * @returns {GoogleGenAI|null}
  */
 function getGenAIClient() {
   const apiKey = resolveApiKey();
   if (!apiKey) return null;
-
-  if (!cachedClient || cachedApiKey !== apiKey) {
-    cachedClient = new GoogleGenAI({ apiKey });
-    cachedApiKey = apiKey;
-  }
-  return cachedClient;
+  return getClientForKey(apiKey);
 }
 
 /**
@@ -279,7 +313,7 @@ function buildContextualInput(userMessage, history = []) {
 }
 
 /**
- * Execute an Interactions API call with automatic model failover and expired-interaction recovery
+ * Execute an Interactions API call with automatic multi-key rotation, model failover, and expired-interaction recovery
  */
 async function executeResilientInteraction({
   input,
@@ -289,88 +323,112 @@ async function executeResilientInteraction({
   responseSchema = null,
   preferredModel = null
 }) {
-  const client = getGenAIClient();
-  if (!client) {
+  const healthyKeys = getHealthyApiKeys();
+  if (healthyKeys.length === 0) {
     return null;
   }
 
   const timeoutMs = config.geminiTimeoutMs || 45000;
   const models = resolveModelChain(preferredModel);
-  let activePrevId = previousInteractionId || null;
 
-  for (let mIdx = 0; mIdx < models.length; mIdx++) {
-    const model = models[mIdx];
-    const isLastModel = mIdx === models.length - 1;
-    const perAttemptTimeoutMs = isLastModel ? timeoutMs : Math.min(timeoutMs, 15000);
+  // Try across available keys (round-robin starting from currentKeyIndex)
+  for (let kAttempt = 0; kAttempt < healthyKeys.length; kAttempt++) {
+    const selectedKey = healthyKeys[(currentKeyIndex + kAttempt) % healthyKeys.length];
+    const client = getClientForKey(selectedKey);
+    let keyHitQuota = false;
+    let activePrevId = previousInteractionId || null;
 
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const effectiveInput = activePrevId
-        ? input
-        : buildContextualInput(input, historyFallback);
+    for (let mIdx = 0; mIdx < models.length; mIdx++) {
+      const model = models[mIdx];
+      const isLastModel = mIdx === models.length - 1;
+      const perAttemptTimeoutMs = isLastModel ? timeoutMs : Math.min(timeoutMs, 15000);
 
-      const requestParams = {
-        model,
-        input: effectiveInput,
-        system_instruction: systemInstruction
-      };
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const effectiveInput = activePrevId
+          ? input
+          : buildContextualInput(input, historyFallback);
 
-      if (activePrevId) {
-        requestParams.previous_interaction_id = activePrevId;
-      }
-
-      if (responseSchema) {
-        requestParams.response_format = {
-          type: 'text',
-          mime_type: 'application/json',
-          schema: responseSchema
+        const requestParams = {
+          model,
+          input: effectiveInput,
+          system_instruction: systemInstruction
         };
-      }
 
-      try {
-        const interaction = await client.interactions.create(requestParams, {
-          timeout_ms: perAttemptTimeoutMs,
-          retries: { strategy: 'none' }
-        });
+        if (activePrevId) {
+          requestParams.previous_interaction_id = activePrevId;
+        }
 
-        const outputText = interaction?.output_text ||
-          interaction?.steps
-            ?.filter(s => s.type === 'model_output')
-            ?.flatMap(s => s.content || [])
-            ?.filter(c => c.type === 'text' && c.text)
-            ?.map(c => c.text)
-            ?.join('') ||
-          '';
-
-        if (outputText) {
-          modelCooldownUntil.delete(model);
-          return {
-            id: interaction.id || null,
-            model,
-            outputText: outputText.trim()
+        if (responseSchema) {
+          requestParams.response_format = {
+            type: 'text',
+            mime_type: 'application/json',
+            schema: responseSchema
           };
         }
-        break; // Empty output -> try next model in fallback chain
-      } catch (err) {
-        const status = err?.status || err?.statusCode || err?.code || 'UNKNOWN';
-        const message = String(err?.message || '');
 
-        // If previous_interaction_id expired or is invalid (400/404), drop it and retry once with rolling history
-        if (activePrevId && attempt === 0 && (status === 400 || status === 404 || /previous_interaction_id|interaction.*not found/i.test(message))) {
-          console.warn(`[Gemini AI] Stale previous_interaction_id (${activePrevId}); retrying with local rolling history.`);
-          activePrevId = null;
-          continue;
+        try {
+          const interaction = await client.interactions.create(requestParams, {
+            timeout_ms: perAttemptTimeoutMs,
+            retries: { strategy: 'none' }
+          });
+
+          const outputText = interaction?.output_text ||
+            interaction?.steps
+              ?.filter(s => s.type === 'model_output')
+              ?.flatMap(s => s.content || [])
+              ?.filter(c => c.type === 'text' && c.text)
+              ?.map(c => c.text)
+              ?.join('') ||
+            '';
+
+          if (outputText) {
+            modelCooldownUntil.delete(model);
+            keyCooldownUntil.delete(selectedKey);
+            // Advance key index for round-robin balancing
+            currentKeyIndex = (currentKeyIndex + 1) % healthyKeys.length;
+            return {
+              id: interaction.id || null,
+              model,
+              outputText: outputText.trim()
+            };
+          }
+          break; // Empty output -> try next model in fallback chain
+        } catch (err) {
+          const status = err?.status || err?.statusCode || err?.code || 'UNKNOWN';
+          const message = String(err?.message || '');
+
+          // If previous_interaction_id expired or is invalid (400/404), drop it and retry once with rolling history
+          if (activePrevId && attempt === 0 && (status === 400 || status === 404 || /previous_interaction_id|interaction.*not found/i.test(message))) {
+            console.warn(`[Gemini AI] Stale previous_interaction_id (${activePrevId}); retrying with local rolling history.`);
+            activePrevId = null;
+            continue;
+          }
+
+          // Rate limit / Quota reached (429, RESOURCE_EXHAUSTED) -> put key on cooldown and immediately failover to next key!
+          if (status === 429 || /RESOURCE_EXHAUSTED|quota|rate\s*limit/i.test(message)) {
+            keyCooldownUntil.set(selectedKey, Date.now() + KEY_COOLDOWN_MS);
+            console.warn(`[Gemini AI Multi-Key] Key ending in ...${selectedKey.slice(-6)} hit quota limit (${status}). Cooling down and failing over to next key immediately.`);
+            keyHitQuota = true;
+            break; // Break model loop, try next key in healthyKeys
+          }
+
+          // Non-retryable auth / bad API key error
+          if (status === 401 || /API_KEY_INVALID/i.test(message)) {
+            keyCooldownUntil.set(selectedKey, Date.now() + 24 * 60 * 60 * 1000); // disable bad key
+            console.error(`[Gemini AI Multi-Key] Invalid API Key ending in ...${selectedKey.slice(-6)}. Failing over to next key.`);
+            keyHitQuota = true;
+            break;
+          }
+
+          // Model-level demand spike (503) or timeout -> cool down model
+          modelCooldownUntil.set(model, Date.now() + MODEL_COOLDOWN_MS);
+          console.warn(`[Gemini AI] Model ${model} unavailable (${status}); cooling down 2m & failing over: ${message.slice(0, 140)}`);
+          break;
         }
+      }
 
-        // Non-retryable auth / bad API key error -> abort immediately without hammering fallback models
-        if (status === 401 || status === 403 || /API_KEY_INVALID|permission_denied/i.test(message)) {
-          console.error(`[Gemini AI] Authentication error (${status}): Check GEMINI_API_KEY in .env.`);
-          return null;
-        }
-
-        // Rate limit (429), demand spike (503), or timeout -> place model on brief cooldown & failover
-        modelCooldownUntil.set(model, Date.now() + MODEL_COOLDOWN_MS);
-        console.warn(`[Gemini AI] Model ${model} unavailable (${status}); cooling down 2m & failing over: ${message.slice(0, 140)}`);
-        break;
+      if (keyHitQuota) {
+        break; // break to next key
       }
     }
   }
@@ -570,6 +628,8 @@ module.exports = {
   PRIMARY_MODEL,
   FALLBACK_MODEL,
   getGenAIClient,
+  resolveApiKeyPool,
+  getHealthyApiKeys,
   resolveModelChain,
   buildBaristaSystemInstruction,
   formatOrderSummaryReceipt,
