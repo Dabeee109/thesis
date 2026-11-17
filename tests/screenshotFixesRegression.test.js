@@ -386,4 +386,81 @@ describe('Screenshot Bug Fixes & Multi-Key AI Pool Verification', () => {
     assert.doesNotMatch(res.replyLog, /hindi ko po lubos na naintindihan/i);
     assert.strictEqual(session.cart.length, 0, 'Cart must be cleared on cancellation');
   });
+
+  it('22. Screenshot 1: Recommendation inquiry "Ano ang ma recomend mo saakin?" does NOT auto-add items to cart', async () => {
+    const psid = `TEST_RECOM_INQ_${Date.now()}`;
+    const session = await getSession(psid);
+    session.cart = [];
+    session.last_recommended_items = ['Classic Burger', 'Dark Chocolate Milktea'];
+
+    const res = await nlpEngine.executeAiAssistantTurn(psid, session, 'Ano ang ma recomend mo saakin?', {
+      aiResponse: {
+        reply_message: 'Inirerekomenda ko po ang ating masarap na Classic Burger at refreshing na Dark Chocolate Milktea! Nais niyo po bang idagdag ang mga ito sa inyong cart?',
+        detected_action: 'RECOMMEND_ITEMS',
+        action_payload: {}
+      }
+    });
+
+    assert.strictEqual((session.cart || []).length, 0, 'Cart must remain empty on recommendation inquiry');
+    assert.notStrictEqual(res?.aiAction, 'ADD_ITEM');
+  });
+
+  it('23. Screenshot 2: "Cge checkout na" without dining mode prompts for Dining Mode ONLY without double discount prompt', async () => {
+    const psid = `TEST_CHECKOUT_DOUBLE_${Date.now()}`;
+    const session = await getSession(psid);
+    session.cart = [{ id: 1, name: 'Classic Burger', price: 139, quantity: 1 }];
+    session.dining_mode = null;
+    session.orderType = null;
+
+    const res = await nlpEngine.executeAiAssistantTurn(psid, session, 'Cge checkout na', {
+      aiResponse: {
+        reply_message: 'Sige po! Para sa ating checkout, ano po ang gagamitin nating dining mode: Delivery, Pick-up, o Dine-in po?',
+        detected_action: 'PROCEED_CHECKOUT',
+        action_payload: {}
+      }
+    });
+
+    assert.strictEqual(session.state, 'AWAITING_DINING_MODE');
+    assert.match(res.replyLog, /dining mode/i);
+    assert.doesNotMatch(res.replyLog, /Senior Citizen/i, 'Must not send Senior Citizen discount prompt before dining mode is selected');
+  });
+
+  it('24. Screenshot 3: "Palitan ko na lang ung address ko" in AWAITING_BOUNDARY_PICKUP_SWITCH transitions to AWAITING_ADDRESS_RETRY', async () => {
+    const psid = `TEST_BOUNDARY_CHANGE_${Date.now()}`;
+    const session = await getSession(psid);
+    session.state = 'AWAITING_BOUNDARY_PICKUP_SWITCH';
+    session.checkout_step = 'AWAITING_BOUNDARY_PICKUP_SWITCH';
+    session.address = 'Block 13/14, Block 41 Zone 8, Addition Hills, Mandaluyong';
+    session.cart = [{ id: 1, name: 'Classic Burger', price: 139, quantity: 1 }];
+
+    const res = await nlpEngine.handleTextInput(psid, session, 'Palitan ko na lang ung address ko');
+    assert.strictEqual(session.state, 'AWAITING_ADDRESS_RETRY');
+    assert.strictEqual(res.intent, 'AWAITING_ADDRESS_RETRY');
+    assert.match(res.replyLog, /bagong Delivery Address/i);
+    assert.doesNotMatch(res.replyLog, /10\.77/i, 'Must not repeat out of bounds distance error');
+  });
+
+  it('25. Screenshot 4: SET_DETAILS does not re-trigger 3km boundary violation when customer replies "Gcash ako" or answers discount', async () => {
+    const psid = `TEST_NO_REBOUNDARY_${Date.now()}`;
+    const session = await getSession(psid);
+    session.dining_mode = 'Delivery';
+    session.orderType = 'delivery';
+    session.address = 'Block 13/14, Block 41 Zone 8, Addition Hills, Mandaluyong';
+    session.delivery_distance_km = 10.77;
+    session.is_third_party_courier = true;
+    session.thirdPartyDelivery = true;
+    session.cart = [{ id: 1, name: 'Classic Burger', price: 139, quantity: 1 }];
+    session.state = 'AWAITING_PAYMENT_MODE';
+
+    const res = await nlpEngine.executeAiAssistantTurn(psid, session, 'Gcash ako', {
+      aiResponse: {
+        reply_message: 'Sige po, GCash payment po.',
+        detected_action: 'SET_DETAILS',
+        action_payload: { payment_mode: 'GCash' }
+      }
+    });
+
+    assert.notStrictEqual(session.state, 'AWAITING_BOUNDARY_PICKUP_SWITCH', 'Must not reset state back to AWAITING_BOUNDARY_PICKUP_SWITCH');
+    assert.doesNotMatch(res.replyLog, /lampas sa aming/i, 'Must not re-send out-of-bounds warning message');
+  });
 });

@@ -3530,12 +3530,16 @@ async function handleTextInput(psid, session, rawText, options = {}) {
   const isDiscountStateReply = ['AWAITING_DISCOUNT_CONFIRMATION', 'AWAITING_DISCOUNT_PROOF'].includes(session.state) &&
     /\b(?:wala|walaw|walaa|wla|wala\s*po|meron|mayroon|none|senior|pwd|id|skip|pass|ayaw|wag\s*na|oo\s*pala|wala\s*nga)\b/i.test(norm);
 
+  const isBoundaryStateReply = ['AWAITING_BOUNDARY_PICKUP_SWITCH', 'AWAITING_ADDRESS_RETRY'].includes(session.state) &&
+    (/\b(?:delivery\s*pa\s*(?:din|rin)|palitan|change|ibahin|switch|pick[\s-]*up|pickup|cancel|wag\s*na|ayoko)\b/i.test(norm) || isThirdPartyDeliveryInsistence(rawText));
+
   const isDirectDeterministicPayload = options?.payload ||
     /^CONFIRM_/i.test(rawText) ||
     /^DISCOUNT_/i.test(rawText) ||
     /^ORDER_TYPE_/i.test(rawText) ||
     isPureShortAnswer ||
-    isDiscountStateReply;
+    isDiscountStateReply ||
+    isBoundaryStateReply;
 
   if (!isDirectDeterministicPayload && (process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured()) {
     try {
@@ -4408,7 +4412,7 @@ async function handleTextInput(psid, session, rawText, options = {}) {
       session.checkout_step = 'AWAITING_ADDRESS_RETRY';
       await saveSession(session);
 
-      const askRetryMsg = 'Pakibigay po ng bagong Delivery Address at kalapit na Landmark sa loob ng 3 km radius:';
+      const askRetryMsg = 'Sige po! Pakibigay po ang inyong bagong Delivery Address at kalapit na Landmark sa loob ng 3 km radius:';
       await sendTextMessage(psid, askRetryMsg);
       return { intent: 'AWAITING_ADDRESS_RETRY', confidence: 1.0, replyLog: askRetryMsg };
     }
@@ -7154,6 +7158,11 @@ function formatItemListText(items) {
  */
 async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
   try {
+    if (isThirdPartyDeliveryInsistence(rawText)) {
+      session.is_third_party_courier = true;
+      session.thirdPartyDelivery = true;
+      return await handleThirdPartyDeliveryHandoff(psid, session);
+    }
     const aiRes = options.aiResponse || await aiService.generateAssistantResponse(psid, rawText, session, options);
     if (!aiRes || !aiRes.reply_message) {
       return null;
@@ -7186,7 +7195,12 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
     }
 
     // Intercept recommendation acceptance (e.g. "pa add lahat ng recomedation mo", "sige lahat yan", "kunin ko yan")
-    const isAcceptingRecommendations = /\b(?:pa[- ]?add(?:\s+lahat)?|sige\s+lahat\s*yan|sige\s*lahat|lahat\s*yan|kunin\s*ko\s*lahat|kunin\s*ko\s*yan|order\s*ko\s*na\s*yan|sige\s*yun\s*na\s*lang|sige\s*yan|idagdag\s*mo\s*lahat|lahat\s*ng\s*recom\w*|recom\w*\s*mo)\b/i.test(rawText);
+    const isRecommendationInquiry = isRecommendationRequest(rawText) ||
+      /\b(?:ano|alin|anong|ano-?ano|patingin|meron|ano\s+ba|sabihin|give\s+me)\b.*?\brecom/i.test(rawText) ||
+      /\b(?:ano|anong)\s+.*?\b(?:bestseller|best\s*seller)\b/i.test(rawText);
+
+    const isAcceptingRecommendations = !isRecommendationInquiry &&
+      /\b(?:pa[- ]?add(?:\s+lahat|\s+ung|\s+ang)?(?:\s+ng)?\s*recom\w*|sige\s+lahat\s*yan|sige\s*lahat|lahat\s*yan|kunin\s*ko\s*(?:lahat|yan|yung\s*recom\w*)|order\s*ko\s*na\s*yan|sige\s*yun\s*na\s*lang|sige\s*yan|idagdag\s*mo\s*lahat|idagdag\s*mo\s*(?:lahat\s*ng\s*)?recom\w*|lahat\s*ng\s*recom\w*|i-?order\s*lahat|kunin\s*ko\s*lahat\s*ng\s*recom\w*)\b/i.test(rawText);
 
     let recList = Array.isArray(session.last_recommended_items) ? [...session.last_recommended_items] : [];
     if (recList.length === 0 && session.last_recommended_item) {
@@ -7212,6 +7226,11 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
       detected_action = 'ADD_ITEM';
       action_payload.items = recList.map(name => ({ item_name: name, quantity: 1, addon: null }));
       action_payload.customer_name = null;
+    }
+
+    if (isRecommendationInquiry && detected_action === 'ADD_ITEM') {
+      detected_action = 'RECOMMEND_ITEMS';
+      action_payload.items = [];
     }
 
     // Cart Clean-Up: If user mentions "no pearl", "walang pearl", or "99 lang", strip pearls and reset price to base ₱99
@@ -7340,11 +7359,41 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
             aiAction: 'PROCEED_CHECKOUT'
           };
         }
-        await sendTextMessage(psid, reply_message);
+
+        const chosenMode = action_payload.dining_mode || (rawText && (
+          /\b(?:pick[\s-]*up|pickup|take[\s-]*out|takeout)\b/i.test(rawText) ? 'Pick-up' :
+          /\bdine[\s-]*in\b/i.test(rawText) ? 'Dine In' :
+          /\bdelivery|padeliver\b/i.test(rawText) ? 'Delivery' : null
+        ));
+
+        if (chosenMode) {
+          session.dining_mode = chosenMode;
+          session.orderType = chosenMode === 'Delivery' ? 'delivery' : (chosenMode === 'Pick-up' ? 'pickup' : 'dine_in');
+        }
+
+        if (!session.dining_mode) {
+          session.state = 'AWAITING_DINING_MODE';
+          session.current_step = 'AWAITING_DINING_MODE';
+          session.checkout_step = 'AWAITING_DINING_MODE';
+          await saveSession(session);
+          const askDiningMsg = 'Sige po! Para sa ating checkout, ano po ang gagamitin nating dining mode: Delivery, Pick-up, o Dine-in po?';
+          await sendQuickReplies(psid, askDiningMsg, [
+            { title: 'Delivery', payload: 'DINING_DELIVERY' },
+            { title: 'Pick-up', payload: 'DINING_PICKUP' },
+            { title: 'Dine-in', payload: 'DINING_DINE_IN' }
+          ]);
+          return {
+            intent: 'AWAITING_DINING_MODE',
+            confidence: 1.0,
+            replyLog: askDiningMsg,
+            aiAction: 'PROCEED_CHECKOUT'
+          };
+        }
+
         const checkoutRes = await startCheckoutFlow(psid, session, rawText);
         return {
           ...(checkoutRes || { intent: 'AI_PROCEED_CHECKOUT', confidence: 0.98 }),
-          replyLog: reply_message,
+          replyLog: checkoutRes?.replyLog || reply_message,
           aiAction: 'PROCEED_CHECKOUT'
         };
       }
@@ -7859,11 +7908,15 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
           executeBatchAdd(session.cart, rawText, candidates);
         }
 
-        if (session.address && isDeliveryDiningMode(session.dining_mode)) {
+        const isAlreadyThirdParty = Boolean(session.is_third_party_courier || session.thirdPartyDelivery || session.state === 'PENDING_ADMIN_QUOTE');
+        const isNewAddressProvided = Boolean(action_payload.address || action_payload.delivery_address || (session.address && session.address !== session._last_checked_address));
+
+        if (session.address && isDeliveryDiningMode(session.dining_mode) && !isAlreadyThirdParty && isNewAddressProvided) {
           try {
             const fareEngine = require('./fareEngine');
             const fareRes = await fareEngine.calculateFareForAddress(session.address, session.landmark);
             if (fareRes) {
+              session._last_checked_address = session.address;
               session.delivery_fee = fareRes.breakdown?.finalFare || 0;
               session.deliveryFee = session.delivery_fee;
               session.delivery_distance_km = fareRes.distanceKm;
