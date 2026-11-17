@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>User Data Deletion Instructions | Diner's Cafe</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#d4a373">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/dashboard.css">
+  <style>
+    .deletion-container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 50px 24px 80px 24px;
+    }
+    .deletion-hero {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+    .deletion-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 18px;
+      background: rgba(230, 57, 70, 0.15);
+      border: 1px solid var(--status-danger);
+      border-radius: var(--radius-full);
+      color: #ff9b9b;
+      font-size: 0.88rem;
+      font-weight: 600;
+      margin-bottom: 20px;
+    }
+    .deletion-title {
+      font-size: 2.8rem;
+      font-weight: 800;
+      color: #fff;
+      line-height: 1.2;
+      margin-bottom: 16px;
+      background: linear-gradient(135deg, #ffffff 0%, #faedcd 60%, #d4a373 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .policy-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 32px 36px;
+      margin-bottom: 28px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    }
+    .policy-card h2 {
+      font-size: 1.45rem;
+      color: var(--brand-crema);
+      margin-top: 0;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .policy-card p, .policy-card li {
+      color: var(--text-secondary);
+      font-size: 0.96rem;
+      line-height: 1.7;
+    }
+    .deletion-steps {
+      counter-reset: step-counter;
+      list-style: none;
+      padding-left: 0;
+      margin-top: 20px;
+    }
+    .deletion-steps li {
+      counter-increment: step-counter;
+      position: relative;
+      padding-left: 48px;
+      margin-bottom: 24px;
+    }
+    .deletion-steps li::before {
+      content: counter(step-counter);
+      position: absolute;
+      left: 0;
+      top: 2px;
+      width: 32px;
+      height: 32px;
+      background: var(--brand-primary);
+      color: var(--bg-main);
+      font-weight: 800;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.95rem;
+    }
+    .code-pill {
+      display: inline-block;
+      padding: 2px 10px;
+      background: rgba(212, 163, 115, 0.2);
+      border: 1px solid var(--brand-primary);
+      border-radius: 6px;
+      color: var(--brand-crema);
+      font-family: monospace;
+      font-size: 0.95rem;
+      font-weight: bold;
+    }
+    .highlight-box {
+      background: var(--bg-surface-elevated);
+      border-left: 4px solid var(--brand-primary);
+      padding: 16px 20px;
+      border-radius: 0 var(--radius-md) var(--radius-md) 0;
+      margin: 18px 0;
+    }
+    .highlight-box p {
+      margin: 0;
+      color: var(--brand-crema);
+      font-size: 0.92rem;
+    }
+    .back-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 24px;
+      color: var(--brand-primary);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+    .back-btn:hover {
+      color: var(--brand-primary-hover);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Navigation Header -->
+  <header style="padding: 20px 40px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); background: var(--bg-surface);">
+    <a href="index.html" style="display: flex; align-items: center; gap: 12px; text-decoration: none; color: inherit;">
+      <div class="brand-icon">☕</div>
+      <div>
+        <h2 style="font-size: 1.25rem; margin: 0; color: #fff;">Diner's Cafe</h2>
+        <span style="font-size: 0.75rem; color: var(--brand-primary); font-weight: 600;">Ordering &amp; Delivery System</span>
+      </div>
+    </a>
+    <div style="display: flex; gap: 14px;">
+      <a href="index.html" class="btn btn-secondary btn-sm">🏠 Home</a>
+      <a href="privacy.html" class="btn btn-outline btn-sm">🔒 Privacy Policy</a>
+      <a href="terms.html" class="btn btn-outline btn-sm">📜 Terms</a>
+    </div>
+  </header>
+
+  <main class="deletion-container">
+    <a href="index.html" class="back-btn">&larr; Back to Home</a>
+
+    <div class="deletion-hero">
+      <div class="deletion-badge">🗑️ Meta Platform Data Deletion Compliance</div>
+      <h1 class="deletion-title">User Data Deletion Instructions</h1>
+      <p style="color: var(--text-muted); font-size: 0.95rem;">
+        In accordance with the <strong>Meta Platform Developer Policy</strong> and the <strong>Philippine Data Privacy Act of 2012 (RA 10173)</strong>, 
+        Diner's Cafe respects your right to have your personal data, chat history, and order profile deleted upon request.
+      </p>
+    </div>
+
+    <!-- Section 1: Instant In-Chat Reset -->
+    <div class="policy-card">
+      <h2><span>Method 1:</span> Instant Chat &amp; Cart Reset (Immediate)</h2>
+      <p>
+        If you wish to immediately erase your active session, uncommitted cart, temporary notes, and chat context from our system:
+      </p>
+      <ul class="deletion-steps">
+        <li>
+          Open our chat on <strong>Facebook Messenger</strong> (search for <strong>Diner's Cafe</strong>).
+        </li>
+        <li>
+          Type and send the command <span class="code-pill">Reset</span> or <span class="code-pill">Clear cart</span>.
+        </li>
+        <li>
+          Our chatbot will instantly delete your cached draft items, delivery coordinates, active conversation thread, and reset your state back to <span class="code-pill">IDLE</span>.
+        </li>
+      </ul>
+    </div>
+
+    <!-- Section 2: Facebook App Removal -->
+    <div class="policy-card">
+      <h2><span>Method 2:</span> Remove Diner's Cafe via Facebook Settings</h2>
+      <p>
+        You can revoke Messenger permissions and remove Diner's Cafe from your Meta account directly:
+      </p>
+      <ul class="deletion-steps">
+        <li>
+          Open Facebook on your mobile device or desktop browser.
+        </li>
+        <li>
+          Navigate to <strong>Settings &amp; Privacy &gt; Settings</strong>.
+        </li>
+        <li>
+          Scroll down to the <em>Permissions</em> section and click <strong>Apps and Websites</strong>.
+        </li>
+        <li>
+          Locate <strong>Diner's Cafe</strong> in the list of active apps and click <strong>Remove</strong>.
+        </li>
+        <li>
+          Confirm the prompt. Meta will immediately cease passing your profile information to our platform.
+        </li>
+      </ul>
+    </div>
+
+    <!-- Section 3: Formal Complete Permanent Deletion Request -->
+    <div class="policy-card">
+      <h2><span>Method 3:</span> Permanent Database Erasure Request</h2>
+      <p>
+        If you wish to have all your historical database records (including past order receipts, archived phone numbers, delivery addresses, and PSID associations) completely and permanently purged from our database:
+      </p>
+      <div class="highlight-box">
+        <p>
+          📧 Send an email to: <a href="mailto:dinerscafemanila@gmail.com" style="color: var(--brand-primary); font-weight: bold; text-decoration: underline;">dinerscafemanila@gmail.com</a><br>
+          Subject: <strong>Data Deletion Request - [Your Full Name]</strong>
+        </p>
+      </div>
+      <p>Please include the following details in your message:</p>
+      <ul>
+        <li>Your Full Name as it appears on your Facebook profile.</li>
+        <li>The contact phone number used for delivery (if applicable).</li>
+        <li>Approximate date of your recent order or interaction.</li>
+      </ul>
+      <p>
+        Our Data Protection Officer will review and permanently wipe all matching records from our primary database within <strong>three (3) business days</strong>, and issue an official Confirmation of Data Erasure to your email.
+      </p>
+    </div>
+
+    <!-- Section 4: Contact DPO -->
+    <div class="policy-card">
+      <h2><span>4.</span> Data Privacy Officer Contact Details</h2>
+      <div style="background: var(--bg-surface-elevated); padding: 20px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+        <p style="margin: 4px 0; color: #fff; font-weight: 600;">Diner's Cafe Data Protection Office</p>
+        <p style="margin: 4px 0;">📍 <strong>Address:</strong> Tondo, Manila, Metro Manila, Philippines</p>
+        <p style="margin: 4px 0;">📧 <strong>Email:</strong> dinerscafemanila@gmail.com</p>
+        <p style="margin: 4px 0;">🕒 <strong>Operating Hours:</strong> Monday &ndash; Sunday, 7:00 AM &ndash; 10:00 PM</p>
+      </div>
+    </div>
+  </main>
+
+  <!-- Standardized Footer -->
+  <footer style="text-align: center; padding: 30px 20px; border-top: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 0.88rem; background: var(--bg-surface);">
+    <div style="margin-bottom: 12px; display: flex; gap: 20px; justify-content: center; align-items: center; flex-wrap: wrap;">
+      <a href="index.html" style="color: var(--text-secondary); text-decoration: none;">🏠 Home</a>
+      <span style="color: var(--border-subtle);">&bull;</span>
+      <a href="privacy.html" style="color: var(--text-secondary); text-decoration: none;">🔒 Privacy Policy</a>
+      <span style="color: var(--border-subtle);">&bull;</span>
+      <a href="terms.html" style="color: var(--text-secondary); text-decoration: none;">📜 Terms of Service</a>
+      <span style="color: var(--border-subtle);">&bull;</span>
+      <a href="deletion.html" style="color: var(--brand-primary); text-decoration: none; font-weight: 600;">🗑️ User Data Deletion</a>
+      <span style="color: var(--border-subtle);">&bull;</span>
+      <a href="delivery-check.html" style="color: var(--text-secondary); text-decoration: none;">📍 Delivery Zone</a>
+    </div>
+    <div>
+      &copy; 2026 Diner's Cafe Ordering &amp; Delivery System &bull; Full-Stack AI Thesis Web Application
+    </div>
+  </footer>
+
+  <script src="/js/app-install-banner.js"></script>
+</body>
+</html>

@@ -767,6 +767,15 @@ async function dispatchPersonalGcashCheckout(psid, session, draftData = {}) {
  */
 async function finalizeOrderSummaryAndPayment(psid, session, options = {}) {
   const subtotal = session.order_subtotal || (session.cart ? calculateCartSubtotal(session.cart) : 0);
+  if (!session.cart || session.cart.length === 0 || subtotal <= 0) {
+    session.state = 'IDLE';
+    session.current_step = 'IDLE';
+    session.checkout_step = null;
+    await saveSession(session);
+    const emptyMsg = 'Paumanhin po, wala pa po kayong napipiling items sa inyong cart kaya hindi pa po tayo makakapag-checkout. Maaari po kayong pumili muna mula sa ating menu!';
+    await sendQuickReplies(psid, emptyMsg, [{ title: '☕ Menu', payload: 'MENU_HOME' }]);
+    return { intent: 'CHECKOUT_EMPTY', confidence: 1.0, replyLog: emptyMsg };
+  }
   let discountAmount = session.discount_amount || session.discount?.amount || 0;
   let discountType = (session.discount && session.discount.applied) ? (session.discount.type || 'Senior Citizen / PWD 20%') : 'None';
 
@@ -4147,6 +4156,15 @@ async function handleTextInput(psid, session, rawText, options = {}) {
     session.state === 'AWAITING_CUSTOMER_INFO' ||
     session.current_step === 'AWAITING_CUSTOMER_INFO'
   ) {
+    if (!session.cart || session.cart.length === 0) {
+      session.state = 'IDLE';
+      session.current_step = 'IDLE';
+      session.checkout_step = null;
+      await saveSession(session);
+      const empty = botMessages.cartEmpty();
+      await sendQuickReplies(psid, empty.text, empty.quickReplies);
+      return { intent: 'CHECKOUT_EMPTY', confidence: 1.0, replyLog: empty.text };
+    }
     if (shouldEscapeCheckoutState(rawText, session)) {
       session.state = (session.cart && session.cart.length > 0) ? 'BROWSING' : 'IDLE';
       session.current_step = session.state;
@@ -4685,6 +4703,15 @@ async function handleTextInput(psid, session, rawText, options = {}) {
     session.current_step === 'AWAITING_ORDER_SUMMARY_CONFIRM' ||
     session.checkout_step === 'AWAITING_ORDER_SUMMARY_CONFIRM'
   ) {
+    if (!session.cart || session.cart.length === 0) {
+      session.state = 'IDLE';
+      session.current_step = 'IDLE';
+      session.checkout_step = null;
+      await saveSession(session);
+      const empty = botMessages.cartEmpty();
+      await sendQuickReplies(psid, empty.text, empty.quickReplies);
+      return { intent: 'CHECKOUT_EMPTY', confidence: 1.0, replyLog: empty.text };
+    }
     const isAffirmative = rawText === 'CONFIRM_ORDER_SUMMARY_YES' ||
       /\b(?:1|oo|opo|yes|tama|tama\s*po|oo\s*tama|proceed|confirm|ok|okay|sige|push|tuloy|g)\b/i.test(norm);
     const isEdit = rawText === 'CONFIRM_ORDER_SUMMARY_EDIT' ||
@@ -6240,7 +6267,9 @@ async function handleOrderItemText(psid, session, rawText, nlu) {
     if (parsedFallbackDetails.landmark) session.landmark = parsedFallbackDetails.landmark;
     if (parsedFallbackDetails.paymentMode) session.payment_mode = parsedFallbackDetails.paymentMode;
     if (!session.dining_mode) session.dining_mode = 'Delivery';
-    session.state = 'COLLECTING_CUSTOMER_INFO';
+    session.state = (session.cart && session.cart.length > 0) ? 'COLLECTING_CUSTOMER_INFO' : 'IDLE';
+    session.current_step = session.state;
+    session.checkout_step = (session.cart && session.cart.length > 0) ? 'COLLECTING_CUSTOMER_INFO' : null;
     await saveSession(session);
 
     const greetingName = session.customer_name ? `${session.customer_name} po` : 'po';
@@ -6394,9 +6423,13 @@ async function renderCartSummary(psid, session) {
  */
 async function startCheckoutFlow(psid, session, rawText = '') {
   if (!session.cart || session.cart.length === 0) {
+    session.state = 'IDLE';
+    session.current_step = 'IDLE';
+    session.checkout_step = null;
+    await saveSession(session);
     const empty = botMessages.cartEmpty();
     await sendQuickReplies(psid, empty.text, empty.quickReplies);
-    return { intent: 'CHECKOUT_EMPTY', confidence: 1.0 };
+    return { intent: 'CHECKOUT_EMPTY', confidence: 1.0, replyLog: empty.text };
   }
 
   if (rawText) {
@@ -7154,17 +7187,45 @@ async function handleStage5Confirmation(psid, session, options = {}) {
  * Track latest order
  */
 async function handleTrackOrder(psid, session) {
-  const [rows] = await db.query(
+  // 1. First look for active, non-terminal orders
+  const [activeRows] = await db.query(
     `SELECT o.order_number, o.status, o.total_amount, o.order_type, d.status as delivery_status
      FROM orders o
      JOIN customers c ON c.id = o.customer_id
      LEFT JOIN deliveries d ON d.order_id = o.id
-     WHERE c.psid = ?
+     WHERE c.psid = ? AND LOWER(o.status) NOT IN ('cancelled', 'voided', 'delivered', 'completed')
      ORDER BY o.created_at DESC LIMIT 1`,
     [psid]
   );
 
-  if (!rows || rows.length === 0) {
+  let o = (activeRows && activeRows.length > 0) ? activeRows[0] : null;
+
+  // 2. If no active order, check if there was a past terminal order
+  if (!o) {
+    const [recentRows] = await db.query(
+      `SELECT o.order_number, o.status, o.total_amount, o.order_type
+       FROM orders o
+       JOIN customers c ON c.id = o.customer_id
+       WHERE c.psid = ?
+       ORDER BY o.created_at DESC LIMIT 1`,
+      [psid]
+    );
+
+    session.activeOrderNumber = null;
+    await saveSession(session);
+
+    if (recentRows && recentRows.length > 0) {
+      const past = recentRows[0];
+      const pastStatusStr = (past.status === 'cancelled' || past.status === 'voided') ? 'na-cancel na po' : 'tapos na po';
+      const noActiveMsg = `Wala po kayong aktibong order sa ngayon (ang inyong nakaraang Order #${past.order_number} ay ${pastStatusStr}). Nais niyo po bang mag-order mula sa ating menu?`;
+      await sendQuickReplies(
+        psid,
+        noActiveMsg,
+        [{ title: '☕ Menu', payload: 'MENU_HOME' }]
+      );
+      return;
+    }
+
     await sendQuickReplies(
       psid,
       "Wala po kayong aktibong order sa ngayon. Nais niyo po bang mag-order?",
@@ -7172,8 +7233,6 @@ async function handleTrackOrder(psid, session) {
     );
     return;
   }
-
-  const o = rows[0];
   let statusText = 'Pending Approval (kasalukuyang sinusuri at bine-verify ng cashier ang inyong order at payment bago ipasa sa kusina, karaniwang 2-5 minuto)';
   if (o.status === 'preparing') {
     statusText = 'kasalukuyang inihahanda at niluluto sa kusina';
@@ -7412,11 +7471,16 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
 
       case 'PROCEED_CHECKOUT': {
         if (!session.cart || session.cart.length === 0) {
-          await sendTextMessage(psid, reply_message);
+          session.state = 'IDLE';
+          session.current_step = 'IDLE';
+          session.checkout_step = null;
+          await saveSession(session);
+          const empty = botMessages.cartEmpty();
+          await sendQuickReplies(psid, empty.text, empty.quickReplies);
           return {
             intent: 'AI_PROCEED_CHECKOUT_EMPTY',
-            confidence: 0.95,
-            replyLog: reply_message,
+            confidence: 1.0,
+            replyLog: empty.text,
             aiAction: 'PROCEED_CHECKOUT'
           };
         }

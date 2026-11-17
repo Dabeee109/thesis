@@ -409,7 +409,12 @@ async function resetUserSession(psid, options = {}) {
   session.gcash_ref = null;
   session.receipt_url = null;
 
-  // 4. Purge delivery address, fare quote, dining mode, and pricing drafts
+  // 4. Purge delivery address, customer info, fare quote, dining mode, and pricing drafts
+  session.customer_name = null;
+  session.contact_number = null;
+  session.phone_number = null;
+  session.phone = null;
+  session.reset_at = Date.now();
   session.quote = null;
   session.quoteToken = null;
   session.checkout = null;

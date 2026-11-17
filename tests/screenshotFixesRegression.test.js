@@ -3,8 +3,21 @@ const { describe, it, before } = require('node:test');
 const assert = require('node:assert');
 const nlpEngine = require('../src/services/nlpEngine');
 const geminiService = require('../src/services/geminiService');
-const { getSession, saveSession } = require('../src/services/sessionManager');
+const { getSession, saveSession, resetUserSession } = require('../src/services/sessionManager');
+const orderService = require('../src/services/orderService');
+const { botMessages } = require('../src/services/botMessages');
+const messengerService = require('../src/services/messengerService');
 const db = require('../database/db');
+
+const sentMessages = [];
+const originalCallSendAPI = messengerService.callSendAPI;
+messengerService.callSendAPI = async (psid, messagePayload, options) => {
+  sentMessages.push({ psid: String(psid), messagePayload, options });
+  if (typeof originalCallSendAPI === 'function') {
+    return originalCallSendAPI(psid, messagePayload, options).catch(() => ({ recipient_id: String(psid), message_id: `mid.test.${Date.now()}` }));
+  }
+  return { recipient_id: String(psid), message_id: `mid.test.${Date.now()}` };
+};
 
 describe('Screenshot Bug Fixes & Multi-Key AI Pool Verification', () => {
   before(async () => {
@@ -544,5 +557,93 @@ describe('Screenshot Bug Fixes & Multi-Key AI Pool Verification', () => {
     await nlpEngine.handleTextInput(psid, session, 'Hello po');
     assert.strictEqual(session.is_bot_paused, false, 'Must be unpaused after 30+ min timeout');
     assert.notStrictEqual(session.state, 'PENDING_ADMIN_QUOTE', 'State must not remain stuck in PENDING_ADMIN_QUOTE');
+  });
+
+  it('30. Empty Cart Checkout Guard: Rejects checkout and NEVER displays ₱0.00 Order Summary', async () => {
+    const psid = `TEST_EMPTY_CHECKOUT_${Date.now()}`;
+    const session = await getSession(psid);
+    session.cart = [];
+    session.customer_name = 'Yza';
+    session.phone_number = '09123456789';
+
+    // A. AI PROCEED_CHECKOUT
+    const aiRes = await nlpEngine.executeAiAssistantTurn(psid, session, 'Check out', {
+      aiResponse: {
+        reply_message: 'Sige po! Pwede na po nating i-process ang inyong checkout.',
+        detected_action: 'PROCEED_CHECKOUT',
+        action_payload: {}
+      }
+    });
+    assert.strictEqual(aiRes.intent, 'AI_PROCEED_CHECKOUT_EMPTY');
+    assert.match(aiRes.replyLog, /wala pa po kayong laman sa inyong cart/i);
+    assert.doesNotMatch(aiRes.replyLog, /TOTAL AMOUNT DUE/i);
+
+    // B. finalizeOrderSummaryAndPayment with empty cart
+    session.cart = [];
+    session.order_subtotal = 0;
+    const finRes = await nlpEngine.finalizeOrderSummaryAndPayment(psid, session);
+    assert.strictEqual(finRes.intent, 'CHECKOUT_EMPTY');
+    assert.match(finRes.replyLog, /hindi pa po tayo makakapag-checkout/i);
+    assert.doesNotMatch(finRes.replyLog, /TOTAL AMOUNT DUE:\s*₱?0\.00/i);
+    assert.strictEqual(session.state, 'IDLE');
+  });
+
+  it('31. Zombie / Cancelled Order Filter: handleTrackOrder informs of no active order when latest order is cancelled', async () => {
+    const psid = `TEST_ZOMBIE_TRACK_${Date.now()}`;
+    const session = await getSession(psid);
+
+    const [rows] = await db.query(`SELECT id, name, price FROM menu_items WHERE is_available = 1 LIMIT 1`);
+    const item = rows[0];
+    const created = await orderService.createOrder(psid, {
+      customerName: 'Yza',
+      customerPhone: '09123456789',
+      orderType: 'delivery',
+      paymentMethod: 'cash',
+      deliveryAddress: 'Hulo, Mandaluyong',
+      items: [{ menuItemId: item.id, quantity: 1 }],
+      deliveryFee: 0,
+      totalAmount: Number(item.price)
+    });
+
+    // Mark order as cancelled in DB
+    await db.query(`UPDATE orders SET status = 'cancelled' WHERE id = ?`, [created.orderId || created.id]);
+    session.activeOrderNumber = null;
+
+    sentMessages.length = 0;
+    await nlpEngine.handleTrackOrder(psid, session);
+    assert.ok(sentMessages.length > 0);
+    const replyText = sentMessages[sentMessages.length - 1].messagePayload.text;
+
+    assert.match(replyText, /Wala po kayong aktibong order sa ngayon/i);
+    assert.match(replyText, /na-cancel na po/i);
+    assert.doesNotMatch(replyText, /Ito po ay na-cancel po!\s*Total:/i, 'Must not report cancelled order as an active ongoing order');
+  });
+
+  it('32. resetUserSession purges customer_name, contact_number, cart, address, and stamps reset_at', async () => {
+    const psid = `TEST_RESET_PURGE_${Date.now()}`;
+    const session = await getSession(psid);
+    session.customer_name = 'Yza';
+    session.contact_number = '09123456789';
+    session.phone_number = '09123456789';
+    session.cart = [{ id: 1, name: 'Cheesy Bacon Fries', price: 159, quantity: 1 }];
+    session.address = 'El Patron Pares, Marikina';
+
+    const resetSession = await resetUserSession(psid);
+    assert.strictEqual(resetSession.customer_name, null);
+    assert.strictEqual(resetSession.contact_number, null);
+    assert.strictEqual(resetSession.phone_number, null);
+    assert.strictEqual(resetSession.cart.length, 0);
+    assert.strictEqual(resetSession.address, '');
+    assert.ok(resetSession.reset_at > 0);
+  });
+
+  it('33. botMessages Taglish Polish: cartEmpty and removedEmpty return polite Taglish, never robotic English', () => {
+    const emptyMsg = botMessages.cartEmpty();
+    assert.match(emptyMsg.text, /Wala pa po kayong laman sa inyong cart/i);
+    assert.doesNotMatch(emptyMsg.text, /Your cart is empty/i);
+
+    const remMsg = botMessages.removedEmpty(1, 'Cheesy Bacon Fries');
+    assert.match(remMsg.text, /Naalis na po ang 1x Cheesy Bacon Fries/i);
+    assert.doesNotMatch(remMsg.text, /Cart is empty/i);
   });
 });

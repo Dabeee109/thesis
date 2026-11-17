@@ -73,7 +73,7 @@ const botMessages = {
   },
 
   cartEmpty: () => ({
-    text: 'Your cart is empty.',
+    text: 'Wala pa po kayong laman sa inyong cart. Maaari po kayong pumili mula sa ating menu!',
     quickReplies: [
       { title: '☕ Menu', payload: 'MENU_HOME' }
     ]
@@ -101,7 +101,7 @@ const botMessages = {
   }),
 
   removedEmpty: (qty, name) => ({
-    text: `Removed ${qty}x ${name}. Cart is empty.`,
+    text: `Naalis na po ang ${qty}x ${name}. Wala na pong laman ang inyong cart.`,
     quickReplies: [
       { title: '☕ Menu', payload: 'MENU_HOME' }
     ]

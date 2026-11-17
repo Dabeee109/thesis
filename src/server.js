@@ -89,6 +89,21 @@ app.get(['/rider-portal.html', '/rider-portal', '/rider.html', '/rider'], (req, 
   res.sendFile(path.join(__dirname, '../public/rider-portal.html'));
 });
 
+// Privacy Policy Route Aliases (Meta Platform App Review & RA 10173 Compliance)
+app.get(['/privacy', '/privacy.html', '/privacy-policy', '/privacy-policy.html'], (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/privacy.html'));
+});
+
+// Terms of Service Route Aliases (Meta Platform App Review & RA 8792 / RA 7394 Compliance)
+app.get(['/terms', '/terms.html', '/terms-of-service', '/terms-of-service.html', '/tos'], (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/terms.html'));
+});
+
+// User Data Deletion Instructions Route Aliases (Meta Platform App Review Compliance)
+app.get(['/deletion', '/deletion.html', '/data-deletion', '/data-deletion.html', '/user-data-deletion'], (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/deletion.html'));
+});
+
 // Dedicated Payment Proof Image Route (recovers from DB or generates digital receipt if wiped on Render disk)
 app.get('/uploads/payments/:filename', async (req, res) => {
   const filename = path.basename(req.params.filename || '');
