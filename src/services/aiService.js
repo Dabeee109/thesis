@@ -27,8 +27,8 @@ try {
   } catch (__) {}
 }
 
-const PRIMARY_AI_MODEL = 'gemini-flash-lite-latest';
-const FALLBACK_AI_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.8-flash'];
+const PRIMARY_AI_MODEL = 'gemini-3.8-flash';
+const FALLBACK_AI_MODELS = ['gemini-3.5-flash-lite', 'gemini-flash-lite-latest'];
 const MAX_CONVERSATION_MESSAGES = 8;
 const MODEL_COOLDOWN_MS = 30 * 60 * 1000;
 
@@ -384,6 +384,9 @@ async function loadOperationalContext(psid, session = null) {
       distanceKm: session?.delivery_distance_km ?? session?.distance_km ?? null,
       deliveryFee: session?.delivery_fee ?? session?.deliveryFee ?? null
     },
+    lastRecommendedItems: Array.isArray(session?.last_recommended_items)
+      ? session.last_recommended_items
+      : (session?.last_recommended_item ? [session.last_recommended_item] : []),
     latestOrder
   };
 }
@@ -436,6 +439,16 @@ function buildAssistantSystemInstruction(context = {}) {
 - STRICT 100% PURE TEXT UX: NEVER include quick replies, button templates, or structured menus in replies. Every message must be natural, readable plain conversational text.
 - STRICT PROFESSIONAL PERSONA (NO STREET SLANG): Always speak in polite, respectful, professional Taglish ("Magandang araw po", "Opo", "Sige po", "Maraming salamat po"). NEVER use street slang or internet jargon such as "Awtos", "Awtos po!", "lods", "lodi", "matsala", "awit", "charot", "besh", "pare", or "goods".
 - Seamlessly understand typos (e.g., "chesecake" -> "Biscoff Cheesecake", "spansh late" -> "Spanish Latte"), text shortcuts ("pde ba mgpa-dlvr"), Taglish code-switching, and local Filipino terms.
+- CONVERSATIONAL CONTINUITY & ANAPHORA RESOLUTION (CRITICAL):
+  - Last Recommended Items to customer: ${Array.isArray(context.lastRecommendedItems) && context.lastRecommendedItems.length > 0 ? context.lastRecommendedItems.join(', ') : 'None yet'}.
+  - When the customer says agreement or acceptance phrases referring to previous suggestions or recommendations, such as:
+    "sige lahat yan", "sige lahat", "lahat yan", "kunin ko yan", "sige yun", "isa nung una", "order ko na yan", "kunin ko lahat yan", "sige yan na lang", "sige":
+    YOU MUST SET detected_action = "ADD_ITEM"!
+    Populate extracted_data.items with ALL the recommended items (or the item referred to) with quantity: 1.
+    Reply with warm confirmation like: "Sige po! Idinagdag ko na po sa inyong cart ang ating mga nirekomenda..."
+  - STRICT NEGATIVE CONSTRAINT (NEVER CONFUSE NAMES/ADDRESSES WITH CONVERSATIONAL PHRASES):
+    NEVER, EVER extract conversational agreement words or phrases (such as "sige lahat yan", "lahat yan", "sige po", "oo", "kuya", "patingin", "wait lang") as customer_name, address, or note!
+    A customer_name MUST be an actual person's name (e.g. Francis, Maria, John). If unsure, leave customer_name as null!
 - OPEN-DOMAIN BANTER & SMOOTH PIVOT: If the customer talks about their day, cracks a joke, or asks for life advice, respond empathetically and engagingly FIRST, then smoothly segue back to cafe favorites.
 - NON-EXISTENT ITEM GUARD: If the customer asks for an item NOT in the LIVE MENU CATALOG below (e.g. sushi, spaghetti, ramen, tacos), NEVER hallucinate or add it! Explicitly and politely inform them that Diner's Cafe does not serve it, and suggest 1-2 available menu items. Set detected_action = "NONE".
 - OUT-OF-STOCK & QUANTITY LIMIT GUARD: Menu item availability is 100% recipe-driven based on raw ingredients. NEVER sell, recommend, or add [OUT OF STOCK - DO NOT SELL] items. Politely inform the customer that it is sold out and recommend available alternatives. If a customer orders more servings than currently available (e.g., ordering 4 when only 2 servings remain), politely inform them of the maximum servings available and offer to prepare up to the remaining amount.
@@ -610,9 +623,15 @@ function parseAssistantJson(rawText) {
     else if (/cash|cod|kaliwaan/i.test(pm)) paymentMode = 'Cash';
   }
 
-  const customerName = rawData.customer_name ? String(rawData.customer_name).trim() : null;
+  let customerName = rawData.customer_name ? String(rawData.customer_name).trim() : null;
+  if (customerName && /^(?:sige\s+lahat\s*yan|sige\s*lahat|lahat\s*yan|sige|oo|opo|kuya|patingin|cart|menu|wait|hello|hi|yes|no)\b/i.test(customerName)) {
+    customerName = null;
+  }
   const phoneNumber = rawData.phone_number ? String(rawData.phone_number).trim() : null;
-  const address = rawData.address ? String(rawData.address).trim() : null;
+  let address = rawData.address ? String(rawData.address).trim() : null;
+  if (address && /^(?:sige\s+lahat\s*yan|sige\s*lahat|lahat\s*yan|sige|oo|opo|kuya|patingin)\b/i.test(address)) {
+    address = null;
+  }
   const landmark = rawData.landmark ? String(rawData.landmark).trim() : null;
   const arrivingTime = rawData.arriving_time ? String(rawData.arriving_time).trim() : null;
   const note = rawData.note ? String(rawData.note).trim() : null;

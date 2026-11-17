@@ -125,4 +125,33 @@ describe('Screenshot Bug Fixes & Multi-Key AI Pool Verification', () => {
     assert.notStrictEqual(res.intent, 'DINING_MODE_TAKE_OUT', 'Must not treat one-shot order as standalone dining mode selection');
     assert.doesNotMatch(res.replyLog || '', /Eto po ang aming menu para makapili kayo/i, 'Must not dump the full menu list');
   });
+
+  it('8. "sige lahat yan" resolves to ADD_ITEM from last_recommended_items and never sets customer_name', async () => {
+    const psid = `TEST_SIGE_LAHAT_${Date.now()}`;
+    const session = await getSession(psid);
+    session.last_recommended_items = ['Classic Burger', 'Biscoff Cheesecake'];
+    session.cart = [];
+
+    const res = await nlpEngine.executeAiAssistantTurn(psid, session, 'sige lahat yan', {
+      aiResponse: {
+        reply_message: 'Sige po! Idinagdag ko na po ang Classic Burger at Biscoff Cheesecake sa inyong cart.',
+        detected_action: 'SET_DETAILS',
+        action_payload: {
+          customer_name: 'sige lahat yan',
+          items: []
+        }
+      }
+    });
+
+    assert.notStrictEqual(session.customer_name, 'sige lahat yan', 'Must NOT set customer_name to sige lahat yan');
+    assert.strictEqual(session.cart.length >= 1, true, 'Cart must contain the recommended items');
+    assert.ok(session.cart.some(it => it.name.includes('Classic Burger') || it.name.includes('Biscoff Cheesecake')));
+  });
+
+  it('9. Gemini AI primary model is upgraded to gemini-3.8-flash', () => {
+    const aiService = require('../src/services/aiService');
+    const geminiService = require('../src/services/geminiService');
+    assert.strictEqual(aiService.PRIMARY_AI_MODEL, 'gemini-3.8-flash');
+    assert.strictEqual(geminiService.PRIMARY_MODEL, 'gemini-3.8-flash');
+  });
 });

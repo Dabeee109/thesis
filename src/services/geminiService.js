@@ -13,10 +13,10 @@ const {
   buildFewShotPromptBlock
 } = require('./baristaTrainingData');
 
-// Default to gemini-3.5-flash-lite for fast sub-1-second latency and high free-tier limits (Feature 3)
-const PRIMARY_MODEL = 'gemini-3.5-flash-lite';
-const FALLBACK_MODEL = 'gemini-flash-lite-latest';
-const TERTIARY_MODEL = 'gemini-3.8-flash';
+// High-intelligence Gemini 3.8 Flash model for superior Taglish understanding and human-like barista dialogue
+const PRIMARY_MODEL = 'gemini-3.8-flash';
+const FALLBACK_MODEL = 'gemini-3.5-flash-lite';
+const TERTIARY_MODEL = 'gemini-flash-lite-latest';
 
 // Structured JSON Schema enforced by Gemini API response_format (Feature 4 Multi-Item Array)
 const BARISTA_RESPONSE_SCHEMA = {

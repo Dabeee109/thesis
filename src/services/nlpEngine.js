@@ -208,9 +208,9 @@ function buildInvalidDiscountReply(reason) {
   return `Paumanhin po, hindi po maaaring gamitin ang ${reason} para sa 20% Senior Citizen / PWD discount. Tanging valid at hindi expired na Senior Citizen (OSCA) o PWD ID na nakapangalan sa mismong customer na kakain ang tinatanggap, at kailangan po itong ipakita nang pisikal sa rider o counter pagka-deliver o pick-up. Itutuloy po ba natin ang order nang walang discount?`;
 }
 
-const NON_NAME_FILLERS = /^(?:nice|ok|okay|(?:ok|okay)\s*na(?:\s*po)?|sige|sige\s*po|cge|geh|ge|yes|yep|opo|oo|salamat|thanks|thank\s*you|ty|k|noted|copy|alright|good|ayos|g|wala|walaw|walaa|wla|meron|mayroon|none|patingin|hi|hello|hey|yo|pakibigay|note|notes|oo[,.]?\s*tama(?:\s*po)?|tama(?:\s*po)?|may\s*babaguhin|proceed|confirm|done|oo\s*pala|ay\s*oo\s*pala|ay\s*oo|pala|hala\s*oo\s*pala|nakalimutan\s*ko.*)$/i;
+const NON_NAME_FILLERS = /^(?:nice|ok|okay|(?:ok|okay)\s*na(?:\s*po)?|sige|sige\s*po|sige\s+lahat(?:\s*yan)?|lahat\s*yan|lahat|kunin\s*ko(?:\s*lahat|\s*yan)?|order\s*ko\s*na\s*yan|sige\s*yun(?:\s*na\s*lang)?|cge|geh|ge|yes|yep|opo|oo|salamat|thanks|thank\s*you|ty|k|noted|copy|alright|good|ayos|g|wala|walaw|walaa|wla|meron|mayroon|none|patingin|hi|hello|hey|yo|pakibigay|note|notes|oo[,.]?\s*tama(?:\s*po)?|tama(?:\s*po)?|may\s*babaguhin|proceed|confirm|done|oo\s*pala|ay\s*oo\s*pala|ay\s*oo|pala|hala\s*oo\s*pala|nakalimutan\s*ko.*)$/i;
 
-const NON_NAME_PATTERNS = /\b(?:pick[\s-]*up|pickup|take[\s-]*out|takeout|dine[\s-]*in|delivery|deliver|padeliver|dadaan|daraan|punta|pupunta|kukunin|mamaya|order|cancel|pabili|menu|cart|wala|meron|ano|saan|kailan|kelan|oras|\d{1,2}\s*(?:am|pm)|minutes?|mins?|hours?|hrs?|street|st|ave|road|city|tondo|manila|store|milktea|milk\s*tea|burger|pizza|coffee|kape|fries|wrap|shakes?|drinks?|classic|bacon|wintermelon|okinawa|matcha|latte|macchiato|americano|espresso|add[\s-]*ons?|pearls?|nata|cheese|pudding|addons?|addons?|lang|oo\s*pala|nakalimutan|number\s*ko|phone\s*ko)\b/i;
+const NON_NAME_PATTERNS = /\b(?:sige\s+lahat\s*yan|sige\s*lahat|lahat\s*yan|kunin\s*ko\s*lahat|kunin\s*ko\s*yan|pick[\s-]*up|pickup|take[\s-]*out|takeout|dine[\s-]*in|delivery|deliver|padeliver|dadaan|daraan|punta|pupunta|kukunin|mamaya|order|cancel|pabili|menu|cart|wala|meron|ano|saan|kailan|kelan|oras|\d{1,2}\s*(?:am|pm)|minutes?|mins?|hours?|hrs?|street|st|ave|road|city|tondo|manila|store|milktea|milk\s*tea|burger|pizza|coffee|kape|fries|wrap|shakes?|drinks?|classic|bacon|wintermelon|okinawa|matcha|latte|macchiato|americano|espresso|add[\s-]*ons?|pearls?|nata|cheese|pudding|addons?|addons?|lang|oo\s*pala|nakalimutan|number\s*ko|phone\s*ko)\b/i;
 
 function extractRealName(text) {
   if (!text || typeof text !== 'string') return '';
@@ -6965,7 +6965,8 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
       return null;
     }
 
-    const { reply_message, detected_action } = aiRes;
+    const reply_message = aiRes.reply_message;
+    let detected_action = aiRes.detected_action;
     const action_payload = aiRes.extracted_data || aiRes.action_payload || {};
     const extracted_data = action_payload;
     console.log(`🤖 [GEMINI AI REPLIED] Model: ${aiRes.model || 'Gemini'} | Action: ${detected_action} | Reply: "${reply_message.slice(0, 80)}..."`);
@@ -6977,6 +6978,14 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
     }
     if (action_payload.payment_mode === 'GCash' || action_payload.payment_mode === 'Cash') {
       session.payment_mode = action_payload.payment_mode;
+    }
+
+    // Intercept "sige lahat yan", "lahat yan", "kunin ko yan" if customer is accepting previous recommendations
+    const isAcceptingRecommendations = /\b(?:sige\s+lahat\s*yan|sige\s*lahat|lahat\s*yan|kunin\s*ko\s*lahat|kunin\s*ko\s*yan|order\s*ko\s*na\s*yan|sige\s*yun\s*na\s*lang|sige\s*yan)\b/i.test(rawText);
+    if (isAcceptingRecommendations && session.last_recommended_items && session.last_recommended_items.length > 0) {
+      detected_action = 'ADD_ITEM';
+      action_payload.items = session.last_recommended_items.map(name => ({ item_name: name, quantity: 1, addon: null }));
+      action_payload.customer_name = null;
     }
 
     switch (detected_action) {
@@ -7009,9 +7018,23 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
       }
 
       case 'RECOMMEND_ITEM': {
-        if (action_payload.item_name || action_payload.items) {
-          session.last_recommended_item = action_payload.item_name || (Array.isArray(action_payload.items) ? action_payload.items[0] : null);
+        const recItems = [];
+        if (Array.isArray(action_payload.items)) {
+          recItems.push(...action_payload.items.map(it => typeof it === 'string' ? it : it?.item_name).filter(Boolean));
         }
+        if (action_payload.item_name) {
+          recItems.push(action_payload.item_name);
+        }
+        try {
+          const [mRows] = await db.query(`SELECT name FROM menu_items WHERE is_available = 1`);
+          for (const r of (mRows || [])) {
+            if (new RegExp(`\\b${r.name.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\b`, 'i').test(reply_message)) {
+              recItems.push(r.name);
+            }
+          }
+        } catch (_) {}
+        session.last_recommended_items = Array.from(new Set(recItems));
+        session.last_recommended_item = recItems[0] || session.last_recommended_item;
         await sendTextMessage(psid, reply_message);
         await saveSession(session);
         return {
@@ -7088,7 +7111,7 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
       }
 
       case 'ADD_ITEM': {
-        const requestedList = (Array.isArray(action_payload.items) && action_payload.items.length > 0)
+        let requestedList = (Array.isArray(action_payload.items) && action_payload.items.length > 0)
           ? action_payload.items
           : (action_payload.item_name
             ? [{
@@ -7097,6 +7120,10 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
               addon: action_payload.addon
             }]
             : []);
+
+        if (requestedList.length === 0 && session.last_recommended_items && session.last_recommended_items.length > 0 && /\b(?:sige|lahat|kunin|yan|order|yun)\b/i.test(rawText)) {
+          requestedList = session.last_recommended_items.map(name => ({ item_name: name, quantity: 1, addon: null }));
+        }
 
         if (requestedList.length > 0) {
           const [allMenuRows] = await db.query(`
@@ -7448,7 +7475,10 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
         const rawPhone = action_payload.phone_number || action_payload.phone || action_payload.contact_number || parsedFallback.contact || '';
         const validPhone = normalizePhone(rawPhone) || normalizePhone(rawText) || rawPhone;
 
-        const resolvedName = action_payload.customer_name || parsedFallback.name || session.customer_name;
+        let resolvedName = action_payload.customer_name || parsedFallback.name || session.customer_name;
+        if (resolvedName && /^(?:sige\s+lahat\s*yan|sige\s*lahat|lahat\s*yan|sige|oo|opo|kuya|patingin)\b/i.test(resolvedName)) {
+          resolvedName = session.customer_name || null;
+        }
         if (resolvedName && (!session.customer_name || /(?:name|pangalan|ako\s*si)\b/i.test(rawText) || (action_payload.customer_name && action_payload.customer_name !== session.customer_name))) {
           session.customer_name = resolvedName;
           session.name = resolvedName;
