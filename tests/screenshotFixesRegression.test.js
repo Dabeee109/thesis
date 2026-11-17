@@ -646,4 +646,59 @@ describe('Screenshot Bug Fixes & Multi-Key AI Pool Verification', () => {
     assert.match(remMsg.text, /Naalis na po ang 1x Cheesy Bacon Fries/i);
     assert.doesNotMatch(remMsg.text, /Cart is empty/i);
   });
+
+  it('34. promptDrinkAddons immediately adds the base drink to session.cart (No Ghost Cart)', async () => {
+    const psid = `TEST_DRINK_CART_${Date.now()}`;
+    const session = await getSession(psid);
+    session.cart = [];
+    const drinkItem = { id: 101, name: 'Matcha Milktea', price: 1.0, category: 'Drinks & Milktea' };
+
+    await nlpEngine.promptDrinkAddons(psid, session, drinkItem, 1);
+    assert.strictEqual(session.cart.length, 1, 'Base drink must be in session.cart immediately');
+    assert.strictEqual(session.cart[0].name, 'Matcha Milktea');
+    assert.strictEqual(session.cart[0].price, 1.0);
+    assert.strictEqual(session.state, 'AWAITING_DRINK_ADDON');
+  });
+
+  it('35. Saying "Wala. Check out na" while AWAITING_DRINK_ADDON proceeds to checkout and retains cart', async () => {
+    const psid = `TEST_DECLINE_CHECKOUT_${Date.now()}`;
+    const session = await getSession(psid);
+    session.cart = [];
+    const drinkItem = { id: 101, name: 'Matcha Milktea', price: 1.0, category: 'Drinks & Milktea' };
+    await nlpEngine.promptDrinkAddons(psid, session, drinkItem, 1);
+
+    sentMessages.length = 0;
+    const res = await nlpEngine.handleAddonSelection(psid, session, 'Wala. Check out na');
+    assert.strictEqual(session.cart.length, 1, 'Cart must keep the base drink');
+    assert.strictEqual(session.cart[0].name, 'Matcha Milktea');
+    assert.notStrictEqual(res?.intent, 'CHECKOUT_EMPTY', 'Must NOT trigger empty cart');
+    assert.doesNotMatch(JSON.stringify(sentMessages), /Wala pa po kayong laman sa inyong cart/i);
+  });
+
+  it('36. finalizeOrderSummaryAndPayment allows items with ₱1.00 base price to check out without subtotal block', async () => {
+    const psid = `TEST_ONE_PESO_CHECKOUT_${Date.now()}`;
+    const session = await getSession(psid);
+    session.customer_name = 'Test User';
+    session.contact_number = '09123456789';
+    session.dining_mode = 'Dine In';
+    session.cart = [{ id: 101, name: 'Matcha Milktea', price: 1.0, unitPrice: 1.0, quantity: 1 }];
+
+    const res = await nlpEngine.finalizeOrderSummaryAndPayment(psid, session);
+    assert.notStrictEqual(res.intent, 'CHECKOUT_EMPTY', '₱1.00 item must not trigger CHECKOUT_EMPTY');
+  });
+
+  it('37. Selecting an add-on (e.g. Pearls) updates the base drink with +₱20 without duplicating items in cart', async () => {
+    const psid = `TEST_ADDON_UPDATE_${Date.now()}`;
+    const session = await getSession(psid);
+    session.cart = [];
+    const drinkItem = { id: 101, name: 'Matcha Milktea', price: 99.0, category: 'Drinks & Milktea' };
+    await nlpEngine.promptDrinkAddons(psid, session, drinkItem, 1);
+
+    sentMessages.length = 0;
+    await nlpEngine.handleAddonSelection(psid, session, 'Pearls');
+    assert.strictEqual(session.cart.length, 1, 'Must still be 1 item in cart, not 2');
+    assert.strictEqual(session.cart[0].name, 'Matcha Milktea (w/ Pearls)');
+    assert.strictEqual(session.cart[0].price, 119.0, 'Price must be 99 + 20 = 119');
+    assert.deepStrictEqual(session.cart[0].addons, ['Pearls']);
+  });
 });

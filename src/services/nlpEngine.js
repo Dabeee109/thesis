@@ -767,7 +767,7 @@ async function dispatchPersonalGcashCheckout(psid, session, draftData = {}) {
  */
 async function finalizeOrderSummaryAndPayment(psid, session, options = {}) {
   const subtotal = session.order_subtotal || (session.cart ? calculateCartSubtotal(session.cart) : 0);
-  if (!session.cart || session.cart.length === 0 || subtotal <= 0) {
+  if (!session.cart || session.cart.length === 0) {
     session.state = 'IDLE';
     session.current_step = 'IDLE';
     session.checkout_step = null;
@@ -2421,7 +2421,7 @@ async function handleMessageEventUnlocked(psid, incomingText = '', payload = nul
         return handleCancellationRequest(psid, session, text);
       }
 
-      // If customer is NOT already in active pre-order shopping flow or completing a GCash proof, check AI or show closed notice
+      // If customer is NOT already in active pre-order shopping flow, completing a GCash proof, or selecting add-ons/details
       const isCompletingGcashProof = Boolean(
         session.pendingGCashOrder ||
         session.checkout_step === 'AWAITING_PAYMENT_PROOF' ||
@@ -2429,7 +2429,15 @@ async function handleMessageEventUnlocked(psid, incomingText = '', payload = nul
         session.current_step === 'AWAITING_PAYMENT_PROOF' ||
         eventPayload === 'CANCEL_PENDING_GCASH'
       );
-      if (!session.is_preorder && !isCompletingGcashProof) {
+      const isCompletingOrderFlow = Boolean(
+        session.is_preorder ||
+        isCompletingGcashProof ||
+        session.current_drink_item ||
+        session.state === 'AWAITING_DRINK_ADDON' ||
+        session.current_step === 'AWAITING_DRINK_ADDON' ||
+        (session.cart && session.cart.length > 0)
+      );
+      if (!isCompletingOrderFlow) {
         // Let Conversational AI answer questions, FAQs, and menu inquiries intelligently even during off-hours
         if (text && (process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured()) {
           const aiTurn = await executeAiAssistantTurn(psid, session, text);
@@ -5685,10 +5693,19 @@ function detectAddonInText(text) {
  * Prompt customer if they want to add add-ons for drinks & milk tea
  */
 async function promptDrinkAddons(psid, session, item, quantity) {
+  const qty = Math.max(1, parseInt(quantity, 10) || 1);
+  if (!session.cart) session.cart = [];
+
+  // Add the base drink to cart immediately so cart is never empty if customer skips, declines, or checks out directly
+  const baseDrink = {
+    ...item,
+    name: item.name.replace(/\s*\(w\/\s*[^)]+\)/i, '').trim(),
+    addons: [],
+    addOns: []
+  };
+  addToCart(session.cart, baseDrink, qty);
+
   if (!isDrinkOrMilktea(item)) {
-    const qty = Math.max(1, parseInt(quantity, 10) || 1);
-    if (!session.cart) session.cart = [];
-    addToCart(session.cart, item, qty);
     session.pendingItem = null;
     session.state = 'AWAITING_CHECKOUT_CONFIRM';
     session.current_step = 'AWAITING_CHECKOUT_CONFIRM';
@@ -5698,8 +5715,8 @@ async function promptDrinkAddons(psid, session, item, quantity) {
     await sendTextMessage(psid, addedMsg.text);
     return addedMsg.text;
   }
-  session.current_drink_item = { item, quantity };
-  session.pendingDrinkOrder = { item, quantity };
+  session.current_drink_item = { item: baseDrink, quantity: qty };
+  session.pendingDrinkOrder = { item: baseDrink, quantity: qty };
   session.pendingItem = null;
   session.state = 'AWAITING_DRINK_ADDON';
   session.current_step = 'AWAITING_DRINK_ADDON';
@@ -5762,20 +5779,33 @@ Alin po rito ang nais ninyong idagdag? (O sabihin lamang ang 'Wala' kung ayaw ma
     return;
   }
 
-  // Scenario B: User Declines ("Wala", "No", "Skip", "Wag na", etc.)
+  // Scenario B: User Declines ("Wala", "No", "Skip", "Wag na", etc.) or requests Checkout ("Check out na", "Wala. Check out na")
   const isDecline = (
     /ADDON_NONE/i.test(input) ||
-    /^(?:wala|wala\s*po|no|none|skip|ayaw|wag|huwag|wag\s*na|huwag\s*na|hindi|plain|only|no\s*thanks|pass|ayoko|ayaw\s*ko|wala\s*na|wala\s*na\s*po)$/i.test(input) ||
-    /\b(?:wala\s*na|wag\s*na|huwag\s*na|no\s*add[\s-]*ons?|ayaw\s*ng\s*add[\s-]*ons?)\b/i.test(input)
+    /^(?:wala|wala\s*po|no|none|skip|ayaw|wag|huwag|wag\s*na|huwag\s*na|hindi|plain|only|no\s*thanks|pass|ayoko|ayaw\s*ko|wala\s*na|wala\s*na\s*po|ayan\s*lang|ayan\s*langgg+|wala\s*ayan\s*lang+|wala\s*ayan\s*langgg+)$/i.test(input) ||
+    /\b(?:wala\s*na|wag\s*na|huwag\s*na|no\s*add[\s-]*ons?|ayaw\s*ng\s*add[\s-]*ons?|ayan\s*lang|wala\s*ayan\s*lang)\b/i.test(input) ||
+    /\b(?:wala|ayaw|wag|huwag|skip|no)\b.*\b(?:check\s*out|checkout|dine\s*in|delivery|pick\s*up)\b/i.test(input)
   );
 
-  if (isDecline) {
+  const wantsCheckout = /\b(?:check\s*out|checkout|bayad|order\s*na)\b/i.test(input);
+
+  if (isDecline || wantsCheckout) {
     if (!session.cart) session.cart = [];
-    const drinkToCart = { ...item };
-    addToCart(session.cart, drinkToCart, qty);
+    const inCart = session.cart.some(c => (c.id === item.id || c.menuItemId === item.id || c.name === item.name));
+    if (!inCart) {
+      addToCart(session.cart, item, qty);
+    }
 
     session.current_drink_item = null;
     session.pendingDrinkOrder = null;
+
+    if (wantsCheckout) {
+      session.state = 'COLLECTING_CUSTOMER_INFO';
+      session.current_step = 'COLLECTING_CUSTOMER_INFO';
+      await saveSession(session);
+      return await startCheckoutFlow(psid, session, input);
+    }
+
     session.state = 'COLLECTING_CUSTOMER_INFO';
     session.current_step = 'COLLECTING_CUSTOMER_INFO';
     await saveSession(session);
@@ -5804,14 +5834,29 @@ Alin po rito ang nais ninyong idagdag? (O sabihin lamang ang 'Wala' kung ayaw ma
 
   if (selectedAddon) {
     if (!session.cart) session.cart = [];
-    const modifiedName = `${item.name} (w/ ${selectedAddon})`;
-    const drinkToCart = {
-      ...item,
-      name: modifiedName,
-      addons: [selectedAddon],
-      addOns: [{ name: selectedAddon, price: 20.0 }]
-    };
-    addToCart(session.cart, drinkToCart, qty);
+    const baseName = item.name.replace(/\s*\(w\/\s*[^)]+\)/i, '').trim();
+    const cartIdx = (session.cart.findLastIndex)
+      ? session.cart.findLastIndex(c => (c.id === item.id || c.menuItemId === item.id || (c.name && c.name.startsWith(baseName))))
+      : session.cart.findIndex(c => (c.id === item.id || c.menuItemId === item.id || (c.name && c.name.startsWith(baseName))));
+
+    if (cartIdx >= 0) {
+      session.cart[cartIdx].name = `${baseName} (w/ ${selectedAddon})`;
+      session.cart[cartIdx].price = Number(item.price || 0) + 20.0;
+      session.cart[cartIdx].unitPrice = Number(item.price || 0) + 20.0;
+      session.cart[cartIdx].addons = [selectedAddon];
+      session.cart[cartIdx].addOns = [{ name: selectedAddon, price: 20.0 }];
+    } else {
+      const modifiedName = `${baseName} (w/ ${selectedAddon})`;
+      const drinkToCart = {
+        ...item,
+        name: modifiedName,
+        price: Number(item.price || 0) + 20.0,
+        unitPrice: Number(item.price || 0) + 20.0,
+        addons: [selectedAddon],
+        addOns: [{ name: selectedAddon, price: 20.0 }]
+      };
+      addToCart(session.cart, drinkToCart, qty);
+    }
 
     session.current_drink_item = null;
     session.pendingDrinkOrder = null;
@@ -6422,6 +6467,18 @@ async function renderCartSummary(psid, session) {
  * Task 6: Customer Details, Breakdown, and Payment (R2, R3)
  */
 async function startCheckoutFlow(psid, session, rawText = '') {
+  if (session.current_drink_item && session.current_drink_item.item) {
+    if (!session.cart) session.cart = [];
+    const dItem = session.current_drink_item.item;
+    const dQty = session.current_drink_item.quantity || 1;
+    const alreadyIn = session.cart.some(c => (c.id === dItem.id || c.menuItemId === dItem.id || c.name === dItem.name));
+    if (!alreadyIn) {
+      addToCart(session.cart, dItem, dQty);
+    }
+    session.current_drink_item = null;
+    session.pendingDrinkOrder = null;
+  }
+
   if (!session.cart || session.cart.length === 0) {
     session.state = 'IDLE';
     session.current_step = 'IDLE';
@@ -7470,6 +7527,18 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
       }
 
       case 'PROCEED_CHECKOUT': {
+        if (session.current_drink_item && session.current_drink_item.item) {
+          if (!session.cart) session.cart = [];
+          const dItem = session.current_drink_item.item;
+          const dQty = session.current_drink_item.quantity || 1;
+          const alreadyIn = session.cart.some(c => (c.id === dItem.id || c.menuItemId === dItem.id || c.name === dItem.name));
+          if (!alreadyIn) {
+            addToCart(session.cart, dItem, dQty);
+          }
+          session.current_drink_item = null;
+          session.pendingDrinkOrder = null;
+        }
+
         if (!session.cart || session.cart.length === 0) {
           session.state = 'IDLE';
           session.current_step = 'IDLE';
