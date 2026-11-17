@@ -164,14 +164,12 @@ Name:
 Phone number:
 Address:
 Landmark:
-Payment mode: (Cash or GCash)
 note:`;
   } else {
     return `Pakibigay po ang sumusunod para sa inyong order:
 Name:
 Phone number:
 Arriving time:
-Payment mode: (Cash or GCash)
 note:`;
   }
 }
@@ -2435,6 +2433,10 @@ async function handleMessageEventUnlocked(psid, incomingText = '', payload = nul
         session.current_drink_item ||
         session.state === 'AWAITING_DRINK_ADDON' ||
         session.current_step === 'AWAITING_DRINK_ADDON' ||
+        session.state === 'AWAITING_ORDER_SUMMARY_CONFIRM' ||
+        session.current_step === 'AWAITING_ORDER_SUMMARY_CONFIRM' ||
+        session.state === 'AWAITING_PAYMENT_MODE' ||
+        session.current_step === 'AWAITING_PAYMENT_MODE' ||
         (session.cart && session.cart.length > 0)
       );
       if (!isCompletingOrderFlow) {
@@ -2591,6 +2593,10 @@ async function handlePayload(psid, session, payload) {
 
   if (payload === 'CONFIRM_ADDRESS_NO') {
     return handleTextInput(psid, session, '2');
+  }
+
+  if (payload === 'PAYMENT_CASH' || payload === 'PAYMENT_GCASH') {
+    return handleTextInput(psid, session, payload);
   }
 
   if (payload === 'SWITCH_TO_PICKUP') {
@@ -4315,7 +4321,7 @@ async function handleTextInput(psid, session, rawText, options = {}) {
         session.customer_name = customerName;
         session.contact_number = contactNumber;
         session.phone_number = contactNumber;
-        session.payment_mode = parsed.paymentMode || session.payment_mode || parsePaymentModeValue(rawText) || 'Cash';
+        session.payment_mode = parsed.paymentMode || session.payment_mode || parsePaymentModeValue(rawText) || null;
         session.customer_notes = parsed.note || session.customer_notes || '';
         session.note = session.customer_notes;
         session.arriving_time = parsed.arrivingTime || parsed.arriving_time || session.arriving_time || '';
@@ -4353,8 +4359,8 @@ async function handleTextInput(psid, session, rawText, options = {}) {
         });
       }
 
-      // For Dine In / Pick-up: Skip address confirmation, auto-assign store address, set fee 0, and proceed directly to discount
-      const paymentMode = parsed.paymentMode || session.payment_mode || parsePaymentModeValue(rawText) || 'Cash';
+      // For Dine In / Pick-up: Skip address confirmation, auto-assign store address, set fee 0
+      const paymentMode = parsed.paymentMode || session.payment_mode || parsePaymentModeValue(rawText);
       session.customer_name = customerName;
       session.contact_number = contactNumber;
       session.phone_number = contactNumber;
@@ -4363,12 +4369,30 @@ async function handleTextInput(psid, session, rawText, options = {}) {
       session.delivery_fee = 0;
       session.deliveryFee = 0;
       session.order_subtotal = subtotal;
-      session.payment_mode = paymentMode;
+      if (paymentMode) {
+        session.payment_mode = paymentMode;
+      }
       if (!session.details) session.details = {};
       session.details.name = customerName;
       session.details.phone = contactNumber;
       session.details.address = addressStr;
-      session.details.paymentMode = paymentMode;
+      if (paymentMode) {
+        session.details.paymentMode = paymentMode;
+      }
+
+      if (!session.payment_mode) {
+        session.state = 'AWAITING_PAYMENT_MODE';
+        session.current_step = 'AWAITING_PAYMENT_MODE';
+        session.checkout_step = 'AWAITING_PAYMENT_MODE';
+        await saveSession(session);
+
+        const askPaymentMsg = "Ano po ang gagamitin ninyong Payment Mode para sa inyong order: Cash o GCash?";
+        await sendQuickReplies(psid, askPaymentMsg, [
+          { title: '💵 Cash', payload: 'PAYMENT_CASH' },
+          { title: '📱 GCash', payload: 'PAYMENT_GCASH' }
+        ]);
+        return { intent: 'AWAITING_PAYMENT_MODE', confidence: 1.0, replyLog: askPaymentMsg };
+      }
 
       session.state = 'AWAITING_DISCOUNT_CONFIRMATION';
       session.current_step = 'AWAITING_DISCOUNT_CONFIRMATION';
@@ -4767,6 +4791,17 @@ async function handleTextInput(psid, session, rawText, options = {}) {
       }
     }
 
+    const payModeChange = parsePaymentModeValue(rawText);
+    if (payModeChange) {
+      session.payment_mode = payModeChange;
+      if (!session.details) session.details = {};
+      session.details.paymentMode = payModeChange;
+      await saveSession(session);
+      const ackMsg = `Sige po, pinalitan ko na ang inyong Payment Mode sa **${payModeChange}**!`;
+      await sendTextMessage(psid, ackMsg);
+      return await finalizeOrderSummaryAndPayment(psid, session);
+    }
+
     if (isAffirmative) {
       return await executeFinalOrderPlacement(psid, session, rawText);
     } else if (isEdit) {
@@ -4954,6 +4989,32 @@ async function handleTextInput(psid, session, rawText, options = {}) {
         if (parsePaymentModeValue(rawText) === 'Xendit') {
           await placeCustomerOrder(psid, session, 'xendit');
           return { intent: 'PAY_XENDIT', confidence: 1.0 };
+        }
+      }
+      if (session.state === 'AWAITING_PAYMENT_MODE' || session.current_step === 'AWAITING_PAYMENT_MODE' || session.checkout_step === 'AWAITING_PAYMENT_MODE') {
+        const isGcash = /PAYMENT_GCASH|\b(?:gcash|g-?cash|online|e-?wallet)\b/i.test(rawText);
+        const isCash = /PAYMENT_CASH|\b(?:cash|cod|kaliwaan|abono)\b/i.test(rawText);
+        if (isGcash || isCash) {
+          session.payment_mode = isGcash ? 'GCash' : 'Cash';
+          if (!session.details) session.details = {};
+          session.details.paymentMode = session.payment_mode;
+          await saveSession(session);
+
+          if (!session.discount) {
+            session.state = 'AWAITING_DISCOUNT_CONFIRMATION';
+            session.current_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+            session.checkout_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+            await saveSession(session);
+
+            const askDiscountMsg = 'Mayroon po ba kayong Senior Citizen o PWD ID para sa 20% discount?';
+            await sendQuickReplies(psid, askDiscountMsg, [
+              { title: 'Mayroon', payload: 'DISCOUNT_YES' },
+              { title: 'Wala po', payload: 'DISCOUNT_NO' }
+            ]);
+            return { intent: 'AWAITING_DISCOUNT_CONFIRMATION', confidence: 1.0, replyLog: askDiscountMsg };
+          } else {
+            return await finalizeOrderSummaryAndPayment(psid, session);
+          }
         }
       }
     }
@@ -8143,6 +8204,13 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
 
         await saveSession(session);
 
+        if (session.state === 'AWAITING_ORDER_SUMMARY_CONFIRM' || session.current_step === 'AWAITING_ORDER_SUMMARY_CONFIRM') {
+          if (reply_message) {
+            await sendTextMessage(psid, reply_message);
+          }
+          return await finalizeOrderSummaryAndPayment(psid, session);
+        }
+
         const isAwaitingDiscountAlready = session.state === 'AWAITING_DISCOUNT_CONFIRMATION' || session.current_step === 'AWAITING_DISCOUNT_CONFIRMATION' || session.state === 'AWAITING_DISCOUNT_PROOF';
 
         // If customer is in discount confirmation step and said "wala", resolve discount cleanly and proceed to summary
@@ -8165,7 +8233,30 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
           return { intent: 'COLLECTING_CUSTOMER_INFO_PROMPT', confidence: 1.0, replyLog: prompt, aiAction: 'SET_DETAILS' };
         }
 
-        // If customer has items in cart and has provided key checkout info, advance directly to discount check
+        // If customer has items in cart and has provided key checkout info: ask Payment Mode first if missing
+        if (session.cart && session.cart.length > 0 && session.customer_name && (session.phone_number || session.contact_number) && !session.payment_mode && !isAwaitingDiscountAlready) {
+          session.state = 'AWAITING_PAYMENT_MODE';
+          session.current_step = 'AWAITING_PAYMENT_MODE';
+          session.checkout_step = 'AWAITING_PAYMENT_MODE';
+          await saveSession(session);
+
+          const sanitizedAck = `Maraming salamat po, ${session.customer_name}! Naitala ko na po ang inyong order details.`;
+          await sendTextMessage(psid, sanitizedAck);
+
+          const askPaymentMsg = "Ano po ang gagamitin ninyong Payment Mode para sa inyong order: Cash o GCash?";
+          await sendQuickReplies(psid, askPaymentMsg, [
+            { title: '💵 Cash', payload: 'PAYMENT_CASH' },
+            { title: '📱 GCash', payload: 'PAYMENT_GCASH' }
+          ]);
+          return {
+            intent: 'AWAITING_PAYMENT_MODE',
+            confidence: 0.98,
+            replyLog: askPaymentMsg,
+            aiAction: 'SET_DETAILS'
+          };
+        }
+
+        // If customer has items in cart and has provided key checkout info + payment mode, advance directly to discount check
         if (session.cart && session.cart.length > 0 && session.customer_name && (session.phone_number || session.contact_number) && !options.aiResponse && !isAwaitingDiscountAlready && !session.discount) {
           session.state = 'AWAITING_DISCOUNT_CONFIRMATION';
           session.current_step = 'AWAITING_DISCOUNT_CONFIRMATION';
@@ -8190,7 +8281,9 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
 
         // If phone number is missing, strictly enforce collection before confirming order
         if (session.cart && session.cart.length > 0 && (!session.phone_number && !session.contact_number)) {
-          const askPhoneMsg = `Pakibigay po ang inyong active Philippine Contact Number (hal. 09XXXXXXXXX) para matawagan po kayo ng aming staff/rider pagka-dispatch ng inyong order.`;
+          const askPhoneMsg = isDeliveryDiningMode(session.dining_mode)
+            ? `Pakibigay po ang inyong active Philippine Contact Number (hal. 09XXXXXXXXX) para matawagan po kayo ng aming staff/rider pagka-dispatch ng inyong order.`
+            : `Pakibigay po ang inyong active Philippine Contact Number (hal. 09XXXXXXXXX) para matawagan po kayo ng aming staff pagkahanda ng inyong order.`;
           const finalReply = (reply_message.includes('09') || /phone|contact|number/i.test(reply_message))
             ? reply_message
             : `${reply_message}\n\n${askPhoneMsg}`;
@@ -8217,7 +8310,9 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
 
       case 'CONFIRM_ORDER': {
         if (!session.phone_number && !session.contact_number) {
-          const askPhone = "Bago po natin i-confirm ang inyong order, pakibigay po ang inyong active Philippine Contact Number (09XXXXXXXXX) para matawagan po kayo:";
+          const askPhone = isDeliveryDiningMode(session.dining_mode)
+            ? "Bago po natin i-confirm ang inyong order, pakibigay po ang inyong active Philippine Contact Number (09XXXXXXXXX) para matawagan po kayo ng aming staff/rider pagka-dispatch:"
+            : "Bago po natin i-confirm ang inyong order, pakibigay po ang inyong active Philippine Contact Number (09XXXXXXXXX) para matawagan po kayo ng aming staff pagkahanda:";
           await sendTextMessage(psid, askPhone);
           session.state = 'COLLECTING_CUSTOMER_INFO';
           session.current_step = 'COLLECTING_CUSTOMER_INFO';
@@ -8225,7 +8320,7 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
           return { intent: 'AWAITING_CUSTOMER_PHONE', confidence: 0.98, replyLog: askPhone, aiAction: 'SET_DETAILS' };
         }
         await sendTextMessage(psid, reply_message);
-        const confirmRes = await finalizeOrderSummaryAndPayment(psid, session);
+        const confirmRes = await executeFinalOrderPlacement(psid, session, rawText);
         return {
           ...(confirmRes || { intent: 'AI_CONFIRM_ORDER', confidence: 0.98 }),
           replyLog: reply_message,

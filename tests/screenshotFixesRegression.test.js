@@ -701,4 +701,78 @@ describe('Screenshot Bug Fixes & Multi-Key AI Pool Verification', () => {
     assert.strictEqual(session.cart[0].price, 119.0, 'Price must be 99 + 20 = 119');
     assert.deepStrictEqual(session.cart[0].addons, ['Pearls']);
   });
+
+  it('38. Details format is distinct: Delivery asks for Address/Landmark; Dine-in/Pick-up asks for Arriving time', () => {
+    const deliveryPrompt = nlpEngine.getCheckoutInfoPrompt({ dining_mode: 'Delivery' });
+    const dineInPrompt = nlpEngine.getCheckoutInfoPrompt({ dining_mode: 'Dine In' });
+    const pickupPrompt = nlpEngine.getCheckoutInfoPrompt({ dining_mode: 'Pick-up' });
+
+    assert.ok(deliveryPrompt.includes('Address:'));
+    assert.ok(deliveryPrompt.includes('Landmark:'));
+    assert.ok(!deliveryPrompt.includes('Arriving time:'));
+
+    assert.ok(dineInPrompt.includes('Arriving time:'));
+    assert.ok(!dineInPrompt.includes('Address:'));
+    assert.ok(!dineInPrompt.includes('Landmark:'));
+
+    assert.ok(pickupPrompt.includes('Arriving time:'));
+    assert.ok(!pickupPrompt.includes('Address:'));
+  });
+
+  it('39. Once guest details are given without payment mode, bot asks for Payment Mode (Cash or GCash)', async () => {
+    const psid = `TEST_ASK_PAYMENT_${Date.now()}`;
+    const session = await getSession(psid);
+    session.cart = [{ id: 101, name: 'Matcha Milktea', price: 99.0, quantity: 1 }];
+    session.dining_mode = 'Dine In';
+    session.state = 'COLLECTING_CUSTOMER_INFO';
+    session.payment_mode = null;
+
+    sentMessages.length = 0;
+    const res = await nlpEngine.handleTextInput(psid, session, 'Francis Dave, 09281762895, 2:00 PM');
+    assert.strictEqual(session.customer_name, 'Francis Dave');
+    assert.ok(session.contact_number.includes('9281762895'));
+    assert.strictEqual(session.state, 'AWAITING_PAYMENT_MODE');
+    assert.match(res?.replyLog || JSON.stringify(sentMessages), /Cash o GCash/i);
+  });
+
+  it('40. Customer updating payment mode at Order Summary immediately re-renders Updated Order Summary', async () => {
+    const psid = `TEST_UPDATE_SUMMARY_PAYMENT_${Date.now()}`;
+    const session = await getSession(psid);
+    session.customer_name = 'Francis Dave';
+    session.contact_number = '09281762895';
+    session.dining_mode = 'Dine In';
+    session.payment_mode = 'Cash';
+    session.cart = [{ id: 101, name: 'Matcha Milktea', price: 99.0, unitPrice: 99.0, quantity: 1 }];
+    session.state = 'AWAITING_ORDER_SUMMARY_CONFIRM';
+    session.current_step = 'AWAITING_ORDER_SUMMARY_CONFIRM';
+
+    sentMessages.length = 0;
+    await nlpEngine.handleTextInput(psid, session, 'Gcash ang payment ko');
+    assert.strictEqual(session.payment_mode, 'GCash');
+    const sentTexts = sentMessages.map(m => m.messagePayload.text).join('\n');
+    assert.match(sentTexts, /Payment Mode:\s*GCash/i, 'Must re-send updated order summary with GCash');
+    assert.match(sentTexts, /Tama po ba ang lahat ng detalye/i);
+  });
+
+  it('41. "Tama po" in AWAITING_ORDER_SUMMARY_CONFIRM finalizes order without looping back to confirmation prompt', async () => {
+    const psid = `TEST_CONFIRM_NOLOOP_${Date.now()}`;
+    const [itemRows] = await db.query('SELECT id, name, price FROM menu_items WHERE is_available = 1 LIMIT 1');
+    const realItem = (itemRows && itemRows[0]) ? itemRows[0] : { id: 1, name: 'Classic Burger', price: 139 };
+    const session = await getSession(psid);
+    session.customer_name = 'Francis Dave';
+    session.contact_number = '09281762895';
+    session.dining_mode = 'Dine In';
+    session.payment_mode = 'Cash';
+    session.cart = [{ id: realItem.id, menuItemId: realItem.id, name: realItem.name, price: Number(realItem.price), unitPrice: Number(realItem.price), quantity: 1 }];
+    session.state = 'AWAITING_ORDER_SUMMARY_CONFIRM';
+    session.current_step = 'AWAITING_ORDER_SUMMARY_CONFIRM';
+
+    sentMessages.length = 0;
+    const res = await nlpEngine.handleTextInput(psid, session, 'Tama po');
+    assert.strictEqual(res.intent, 'ORDER_PLACED_CASH');
+    assert.strictEqual(session.state, 'IDLE');
+    const sentTexts = sentMessages.map(m => m.messagePayload.text).join('\n');
+    assert.match(sentTexts, /Na-receive na po namin ang inyong order/i);
+    assert.doesNotMatch(sentTexts, /Tama po ba ang lahat ng detalye/i, 'Must NOT repeat the confirmation prompt after user says Tama po');
+  });
 });

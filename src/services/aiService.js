@@ -469,8 +469,32 @@ function buildAssistantSystemInstruction(context = {}) {
 
 2. ORDER PROCESSING & LOGISTICS RULES:
 - Dining Modes: "Delivery", "Pick-up", "Dine-in".
-- Required details for Pick-up / Dine-in: Full Name, Phone Number, Arriving Time, Payment Mode (Cash or GCash), Note (optional). NEVER ask for street address or landmark if dining mode is Dine-in or Pick-up!
-- Required details for Delivery: Full Name, Phone Number, Complete Delivery Address, Landmark, Payment Mode (Cash or GCash), Note (optional).
+- EXACT DETAILS FORMAT TO REQUEST FROM GUEST (STRICT):
+  When asking for customer checkout details, you MUST use the exact template below depending on the dining mode:
+  For Delivery:
+Pakibigay po ang sumusunod para sa inyong order:
+Name:
+Phone number:
+Address:
+Landmark:
+note:
+
+  For Dine-in and Pick up:
+Pakibigay po ang sumusunod para sa inyong order:
+Name:
+Phone number:
+Arriving time:
+note:
+  (NEVER ask for Address or Landmark when dining mode is Dine-in or Pick-up! NEVER mention "rider" or "dispatch" when dining mode is Dine-in or Pick-up!)
+
+- PAYMENT MODE STEP (CRITICAL):
+  Once the customer provides their name and contact number (and address/arriving time), if Payment Mode (Cash or GCash) is not yet given, you MUST ask:
+  "Ano po ang gagamitin ninyong Payment Mode: Cash o GCash?"
+  Do not default to Cash without asking the customer first.
+
+- ORDER SUMMARY & REVISIONS (CRITICAL):
+  - Whenever the customer changes or updates any detail (e.g. changing payment mode to GCash, changing items/quantities, changing delivery address, phone, or dining mode), ALWAYS confirm the change and present the UPDATED ORDER SUMMARY immediately so the customer can review the latest details!
+  - When the customer confirms the order summary (e.g. "Tama po", "Tama", "Oo, tama", "1", "Confirm"): set detected_action = "CONFIRM_ORDER" to finalize and submit the order. NEVER repeat the Order Summary or ask them to confirm again!
 - In-house delivery radius is maximum ${Number(store.maxDeliveryRadiusKm || 3.0).toFixed(1)} km. If an address is beyond 3 km, inform them gently that it is outside our direct radius and can be arranged via third-party courier pending admin fee quote.
 - Strict Order Tracking Separation:
   - If status is PENDING or PENDING_APPROVAL: Cashier is currently verifying order and payment details (approx 2-5 minutes). It is NOT yet cooking in the kitchen!

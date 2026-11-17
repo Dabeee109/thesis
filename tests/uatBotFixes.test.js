@@ -281,11 +281,13 @@ test('QA UAT Critical Bug Fixes Regression Suite (8 Fixes)', async (t) => {
     assert.strictEqual(syncedSession.state, 'AWAITING_DINING_MODE', 'Reset to IDLE then welcomed cleanly on hi');
   });
 
-  await t.test('8. Pure Conversational Text UX: strips quick_replies & updates Payment mode prompt to Cash or GCash', async () => {
+  await t.test('8. Pure Conversational Text UX: distinct Delivery vs Dine-in/Pick-up slot templates & strips quick_replies', async () => {
     const deliveryPrompt = nlpEngine.getCheckoutInfoPrompt({ dining_mode: 'Delivery' });
     const pickupPrompt = nlpEngine.getCheckoutInfoPrompt({ dining_mode: 'Pick-up' });
-    assert.ok(deliveryPrompt.includes('Payment mode: (Cash or GCash)'));
-    assert.ok(pickupPrompt.includes('Payment mode: (Cash or GCash)'));
+    assert.ok(deliveryPrompt.includes('Address:'), 'Delivery prompt must ask for Address');
+    assert.ok(deliveryPrompt.includes('Landmark:'), 'Delivery prompt must ask for Landmark');
+    assert.ok(pickupPrompt.includes('Arriving time:'), 'Pick-up/Dine-in prompt must ask for Arriving time');
+    assert.ok(!pickupPrompt.includes('Address:'), 'Pick-up/Dine-in prompt must NOT ask for Address');
     assert.ok(!deliveryPrompt.includes('Xendit'));
 
     sentMessages.length = 0;
