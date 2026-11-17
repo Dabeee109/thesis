@@ -1,3 +1,4 @@
+process.env.NODE_ENV = 'test';
 const { describe, it, before } = require('node:test');
 const assert = require('node:assert');
 const nlpEngine = require('../src/services/nlpEngine');
@@ -223,5 +224,37 @@ describe('Screenshot Bug Fixes & Multi-Key AI Pool Verification', () => {
     const pool = geminiService.resolveApiKeyPool();
     assert.ok(pool.includes('AIzaSyTestKeySeparate99'), 'Pool must include GEMINI_API_KEY_99');
     delete process.env.GEMINI_API_KEY_99;
+  });
+
+  it('14. "Sa pag babayad gamit gcash kaya mo ba akong matulungan if oorder ako?" never triggers "Your cart is empty."', async () => {
+    const psid = `TEST_GCASH_INQUIRY_${Date.now()}`;
+    const session = await getSession(psid);
+    session.cart = [];
+    session.state = 'IDLE';
+
+    const res = await nlpEngine.handleTextInput(psid, session, 'Sa pag babayad gamit gcash kaya mo ba akong matulungan if oorder ako?');
+    assert.notStrictEqual(res.intent, 'CHECKOUT', 'Must not trigger checkout flow');
+    assert.doesNotMatch(res.replyLog || '', /Your cart is empty/i, 'Must NEVER reply "Your cart is empty." to inquiry');
+    assert.match(res.replyLog || '', /gcash/i, 'Must provide helpful GCash payment assistance');
+  });
+
+  it('15. Emergency Barista Safety Net provides warm cafe guidance without robotic fallback on AI outage', async () => {
+    const psid = `TEST_BARISTA_FALLBACK_${Date.now()}`;
+    const session = await getSession(psid);
+
+    const gcashInq = await nlpEngine.handleEmergencyBaristaFallback(psid, session, 'paano magbayad gamit gcash?');
+    assert.strictEqual(gcashInq.intent, 'AI_EMERGENCY_BARISTA_FALLBACK');
+    assert.match(gcashInq.replyLog, /gcash/i);
+    assert.doesNotMatch(gcashInq.replyLog, /hindi ko po lubos na naintindihan/i);
+
+    const menuInq = await nlpEngine.handleEmergencyBaristaFallback(psid, session, 'ano masarap na kape?');
+    assert.match(menuInq.replyLog, /bestsellers|Latte/i);
+
+    const locationInq = await nlpEngine.handleEmergencyBaristaFallback(psid, session, 'saan kayo located at anong oras bukas?');
+    assert.match(locationInq.replyLog, /Bulacan|8:00 AM/i);
+
+    const chitchat = await nlpEngine.handleEmergencyBaristaFallback(psid, session, 'nag tatanong ako');
+    assert.match(chitchat.replyLog, /Magandang araw po! Nandito po ako upang tulungan kayo/i);
+    assert.doesNotMatch(chitchat.replyLog, /hindi ko po lubos na naintindihan/i);
   });
 });

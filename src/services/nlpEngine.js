@@ -234,10 +234,10 @@ function extractRealName(text) {
   }
   const properNameMatch = str.match(/\b([A-Z][a-z]+(?: [A-Z][a-z]+){0,3})\b/);
   if (properNameMatch &&
-      !NON_NAME_FILLERS.test(properNameMatch[1]) &&
-      !NON_NAME_PATTERNS.test(properNameMatch[1]) &&
-      !/^(?:Pa|Paki|Kuya|Ate|Sir|Boss|Ano|Bakit|Saan|Kailan|Paano|Meron|Wala|Sige|Lahat|Sorry|Bro|Pre|Cash|Gcash|Dine|Delivery|Pickup|Okay|Ok|Menu|Cart|Patingin)/i.test(properNameMatch[1]) &&
-      !normalizePhone(properNameMatch[1])) {
+    !NON_NAME_FILLERS.test(properNameMatch[1]) &&
+    !NON_NAME_PATTERNS.test(properNameMatch[1]) &&
+    !/^(?:Pa|Paki|Kuya|Ate|Sir|Boss|Ano|Bakit|Saan|Kailan|Paano|Meron|Wala|Sige|Lahat|Sorry|Bro|Pre|Cash|Gcash|Dine|Delivery|Pickup|Okay|Ok|Menu|Cart|Patingin)/i.test(properNameMatch[1]) &&
+    !normalizePhone(properNameMatch[1])) {
     return properNameMatch[1].trim();
   }
   if (/\d/.test(str) || str.split(/\s+/).length > 4 || !/^[A-Za-z .'-]{2,40}$/.test(str)) {
@@ -3140,6 +3140,51 @@ async function resolveDeliveryAddressAndFare(psid, session, addressStr, landmark
 }
 
 /**
+ * ☕ Emergency Barista Safety Net
+ * Polished, contextual fallback when LLM API experiences temporary outage or timeout.
+ * Replaces rigid regex errors and robotic "hindi ko po lubos na naintindihan" responses
+ * with warm, polite, and helpful cafe assistance.
+ */
+async function handleEmergencyBaristaFallback(psid, session, rawText = '') {
+  const norm = normalize(rawText);
+  let replyText = '';
+  let quickReplies = [
+    { title: '📋 Tingnan ang Menu', payload: 'MENU_HOME' },
+    { title: '🛒 Tingnan ang Cart', payload: 'VIEW_CART' }
+  ];
+
+  // 1. Payment / GCash inquiry
+  if (/(?:gcash|bayad|babayaran|payment|mode\s*of\s*payment|mop|online\s*payment|cash|cod)/i.test(norm)) {
+    replyText = 'Opo! Tumatanggap po kami ng GCash at Cash on Delivery (COD) o Cash upon pickup sa Diner\'s Cafe. Kapag nag-order po kayo, maaari po kayong magbayad via direct GCash transfer o secure online payment link. Ano po ang nais ninyong orderin mula sa ating menu?';
+  }
+  // 2. Menu / Recommendation / Best Seller inquiry
+  else if (/(?:menu|bestseller|best\s*seller|rekomenda|recommend|masarap|kape|coffee|food|pagkain|inumin|drinks?)/i.test(norm)) {
+    replyText = 'Subukan po ninyo ang aming mga bestsellers tulad ng Spanish Latte, Caramel Macchiato, Beef Tapa, at Crispy Chicken! Maaari po ninyong tingnan ang kumpletong menu o sabihin lang po rito ang inyong order.';
+  }
+  // 3. Store Hours / Location / Contact inquiry
+  else if (/(?:saan|location|address|pwesto|oras|bukas|open|hours|contact|number|telepono)/i.test(norm)) {
+    replyText = 'Bukas po ang Diner\'s Cafe araw-araw mula 8:00 AM hanggang 9:00 PM. Matatagpuan po kami sa San Jose Del Monte, Bulacan. Pwede po kayong mag-order for Dine-in, Takeout, o Delivery!';
+  }
+  // 4. Order placement / Want to order
+  else if (/(?:order|pabili|pa-order|paorder|gusto\s*ko|kuha\s*ako|padala)/i.test(norm)) {
+    replyText = 'Sige po! Pakisabi lamang po ang pangalan ng item at dami (halimbawa: "1 Spanish Latte at 1 Beef Tapa") o i-click po ang "Tingnan ang Menu" sa ibaba para makapili.';
+  }
+  // 5. Default Warm Barista Response
+  else {
+    replyText = 'Magandang araw po! Nandito po ako upang tulungan kayo sa inyong pag-order sa Diner\'s Cafe. Maaari po kayong magtanong tungkol sa ating menu, paraan ng pagbabayad (tulad ng GCash o Cash), o sabihin nang direkta ang inyong order.';
+  }
+
+  await sendQuickReplies(psid, replyText, quickReplies);
+  await saveSession(session);
+  return {
+    intent: 'AI_EMERGENCY_BARISTA_FALLBACK',
+    confidence: 0.95,
+    replyLog: replyText,
+    aiAction: 'NONE'
+  };
+}
+
+/**
  * Handle Free Text Messages in Strict Priority Order (Decision 1)
  */
 async function handleTextInput(psid, session, rawText, options = {}) {
@@ -3435,8 +3480,9 @@ async function handleTextInput(psid, session, rawText, options = {}) {
         return aiTurn;
       }
     } catch (aiErr) {
-      console.warn('[LLM-First Gateway] Error in AI turn, falling through to deterministic fallback:', aiErr.message);
+      console.warn('[LLM-First Gateway] Error in AI turn, executing Emergency Barista Safety Net:', aiErr.message);
     }
+    return await handleEmergencyBaristaFallback(psid, session, rawText);
   }
 
   // 0b. State: 'AWAITING_SUGGESTION_CONFIRMATION' (Bago dumaan sa ibang intent parser)
@@ -4720,9 +4766,11 @@ async function handleTextInput(psid, session, rawText, options = {}) {
   }
 
   // Issue 3: Explicit Checkout intent / triggers (Eliminates "Yes to what" and confirmation trap)
+  const isQuestionOrInquiry = /\b(?:paano|pano|pwede|puwede|kaya|matutulungan|tulungan|if|kung|tanong|ba)\b|\?/i.test(rawText);
   if (
-    /(?:check\s*out|checkout|yes.*checkout|bayad|babayaran|paki\s*checkout)/i.test(norm) ||
-    ['checkout', 'check out', 'pay now', 'im done', 'thats all'].includes(norm)
+    !isQuestionOrInquiry &&
+    (/(?:^|\b)(?:check\s*out|checkout|yes.*checkout|paki\s*checkout|mag-?checkout|bayaran\s*ko\s*na)(?:\b|$)/i.test(norm) ||
+    ['checkout', 'check out', 'pay now', 'im done', 'thats all'].includes(norm))
   ) {
     return startCheckoutFlow(psid, session, rawText);
   }
@@ -4999,9 +5047,7 @@ async function handleTextInput(psid, session, rawText, options = {}) {
         return aiFallbackTurn;
       }
     }
-    const fb = botMessages.fallback();
-    await sendQuickReplies(psid, fb.text, fb.quickReplies);
-    return { intent: 'FALLBACK', confidence: conf };
+    return await handleEmergencyBaristaFallback(psid, session, rawText);
   }
 
   if (intent === 'OUT_OF_SCOPE') {
@@ -6044,10 +6090,8 @@ async function handleOrderItemText(psid, session, rawText, nlu) {
     return { intent: 'ORDER_DETAILS_RECORDED', confidence: 0.95, replyLog: missingItemsMsg };
   }
 
-  // Fallback
-  const fb = botMessages.fallback();
-  await sendQuickReplies(psid, fb.text, fb.quickReplies);
-  return { intent: 'FALLBACK', confidence: 0.3 };
+  // Fallback -> Emergency Barista Safety Net
+  return await handleEmergencyBaristaFallback(psid, session, rawText);
 }
 
 /**
@@ -7044,7 +7088,7 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
               recList.push(r.name);
             }
           }
-        } catch (_) {}
+        } catch (_) { }
       }
     }
     recList = Array.from(new Set(recList));
@@ -7100,7 +7144,7 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
               recItems.push(r.name);
             }
           }
-        } catch (_) {}
+        } catch (_) { }
         session.last_recommended_items = Array.from(new Set(recItems));
         session.last_recommended_item = recItems[0] || session.last_recommended_item;
         await sendTextMessage(psid, reply_message);
@@ -8057,5 +8101,6 @@ module.exports = {
   withPsidLock,
   getMissingCheckoutFields,
   isInvalidDiscountIdClaim,
-  isLikelyAddress
+  isLikelyAddress,
+  handleEmergencyBaristaFallback
 };

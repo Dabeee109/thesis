@@ -721,7 +721,7 @@ async function generateAssistantResponse(psid, messageText, session = null, opti
 
     for (let i = 0; i < models.length; i++) {
       const model = models[i];
-      const perAttemptTimeoutMs = i === models.length - 1 ? timeoutMs : Math.min(timeoutMs, 15000);
+      const perAttemptTimeoutMs = Math.min(timeoutMs, 6000);
 
       try {
         let outputText = '';
@@ -763,17 +763,23 @@ async function generateAssistantResponse(psid, messageText, session = null, opti
         }
 
         if (!outputText && client.models?.generateContent) {
-          const genResponse = await client.models.generateContent({
-            model,
-            contents: input,
-            config: {
-              systemInstruction,
-              responseMimeType: 'application/json',
-              responseSchema: ASSISTANT_RESPONSE_SCHEMA,
-              temperature: 0.7
+          try {
+            const genResponse = await client.models.generateContent({
+              model,
+              contents: input,
+              config: {
+                systemInstruction,
+                responseMimeType: 'application/json',
+                responseSchema: ASSISTANT_RESPONSE_SCHEMA,
+                temperature: 0.7
+              }
+            });
+            outputText = genResponse?.text || '';
+          } catch (genErr) {
+            if (/429|RESOURCE_EXHAUSTED/i.test(genErr.message)) {
+              throw genErr;
             }
-          });
-          outputText = genResponse?.text || '';
+          }
         }
 
         const parsed = parseAssistantJson(outputText);
