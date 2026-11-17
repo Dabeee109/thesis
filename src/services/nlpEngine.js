@@ -1794,7 +1794,7 @@ function isCancelTriggerWord(norm = '', rawText = '', eventPayload = '', session
     'parefund'
   ];
   if (triggerPhrases.some(p => combined === p || combined.includes(p))) return true;
-  if (/\b(?:pa[-\s]?cancel|paki[-\s]?cancel|gusto\s+(?:ko|kong|konh)\s+i[-\s]?cancel|i[-\s]?cancel|kanselahin|ayaw\s+ko\s+na|ayoko\s+na)\b/i.test(combined)) return true;
+  if (/\b(?:pa[-\s]?cancel|paki[-\s]?cancel|gusto\s+(?:ko|kong|konh)\s+i[-\s]?cancel|i[-\s]?cancel|kanselahin|ayaw\s+ko\s+na|ayoko\s+na|wag\s+na\s+(?:lang|lng|pala|pla)|huwag\s+na\s+(?:lang|lng|pala|pla)|cancel\s+na\s+(?:lang|lng|pala|pla))\b/i.test(combined)) return true;
   if (/\b(?:wag\s+na|hayss?\s*wag\s*na)\b.*?\bcancel\b/i.test(combined)) return true;
   if (/\bcancel\b.*?\b(?:order|food|delivery|kape|drink|ko)\b/i.test(combined)) return true;
   if (/\b(?:order|food|delivery)\b.*?\bcancel\b/i.test(combined)) return true;
@@ -3244,11 +3244,12 @@ async function handleTextInput(psid, session, rawText, options = {}) {
   // 0. State: AWAITING_CANCEL_CONFIRMATION (Intercept before any other logic or NLP)
   if (session.state === 'AWAITING_CANCEL_CONFIRMATION' || session.current_step === 'AWAITING_CANCEL_CONFIRMATION') {
     const words = norm.split(/\s+/).filter(Boolean);
-    const affirmativeWords = ['yes', 'oo', 'sige', 'yep', 'opo'];
+    const affirmativeWords = ['yes', 'oo', 'sige', 'yep', 'opo', 'cancel', 'icancel', 'kanselahin'];
     const negativeWords = ['no', 'hindi', 'wag', 'huwag', 'wait'];
 
     const hasAffirmative = affirmativeWords.some(w => words.includes(w) || norm === w) ||
-      classifyShort(rawText) === 'YES';
+      classifyShort(rawText) === 'YES' ||
+      /\b(?:cancel|i[-\s]?cancel|kanselahin|pa[-\s]?cancel|ayaw\s*ko\s*na|ayoko\s*na)\b/i.test(norm);
     const hasNegative = negativeWords.some(w => words.includes(w) || norm === w) ||
       norm.includes('hindi pa') ||
       norm.includes('wag muna') ||
@@ -3284,6 +3285,14 @@ async function handleTextInput(psid, session, rawText, options = {}) {
     const reply = 'Pakisagot lamang ng yes o no kung nais mong i-cancel ang iyong order.';
     await sendTextMessage(psid, reply);
     return { intent: 'AWAITING_CANCEL_CONFIRMATION_RETRY', confidence: 1.0, replyLog: reply };
+  }
+
+  // Boundary out-of-bounds cancellation: instant polite abort without double-prompting yes/no
+  if ((session.state === 'AWAITING_BOUNDARY_PICKUP_SWITCH' || session.checkout_step === 'AWAITING_BOUNDARY_PICKUP_SWITCH' || session.current_step === 'AWAITING_BOUNDARY_PICKUP_SWITCH' || session.state === 'AWAITING_ADDRESS_RETRY') && isCancelTriggerWord(norm, rawText, null, session)) {
+    await resetUserSession(psid, { targetState: 'idle' });
+    const cancelMsg = 'Naiintindihan po namin. Kinansela na po namin ang inyong cart selection. Pasensya na po kung hindi pa abot ng aming in-house delivery ang inyong lokasyon sa ngayon. Maraming salamat po at maaari po kayong mag-order muli anumang oras! ☕';
+    await sendTextMessage(psid, cancelMsg);
+    return { intent: 'BOUNDARY_ORDER_CANCELLED', confidence: 1.0, replyLog: cancelMsg };
   }
 
   // Dynamic Order Cancellation Guard (Status-Based Rules)
@@ -4341,6 +4350,17 @@ async function handleTextInput(psid, session, rawText, options = {}) {
     session.checkout_step === 'AWAITING_BOUNDARY_PICKUP_SWITCH' ||
     session.current_step === 'AWAITING_BOUNDARY_PICKUP_SWITCH'
   ) {
+    // Check if customer wants to cancel or decline out-of-bounds order
+    const isCancelBoundary = isCancelTriggerWord(norm, rawText, null, session) ||
+      /\b(?:pa[-\s]?cancel|cancel|i[-\s]?cancel|kanselahin|wag\s*na|huwag\s*na|ayaw\s*ko\s*na|ayoko\s*na|hindi\s*na\s*lang|hindi\s*na\s*lng|wag\s*na\s*lng|wag\s*na\s*lang)\b/i.test(norm);
+
+    if (isCancelBoundary) {
+      await resetUserSession(psid, { targetState: 'idle' });
+      const cancelMsg = 'Naiintindihan po namin. Kinansela na po namin ang inyong cart selection. Pasensya na po kung hindi pa abot ng aming in-house delivery ang inyong lokasyon sa ngayon. Maraming salamat po at maaari po kayong mag-order muli anumang oras! ☕';
+      await sendTextMessage(psid, cancelMsg);
+      return { intent: 'BOUNDARY_ORDER_CANCELLED', confidence: 1.0, replyLog: cancelMsg };
+    }
+
     if (isThirdPartyDeliveryInsistence(rawText)) {
       return await handleThirdPartyDeliveryHandoff(psid, session);
     }
@@ -4379,6 +4399,9 @@ async function handleTextInput(psid, session, rawText, options = {}) {
       session.current_step = session.state;
       session.checkout_step = null;
       await saveSession(session);
+      const escapeMsg = 'Sige po, lumabas na po tayo sa checkout. May nais pa po ba kayong tingnan o i-order sa ating menu?';
+      await sendTextMessage(psid, escapeMsg);
+      return { intent: 'CHECKOUT_ESCAPE_SUCCESS', confidence: 1.0, replyLog: escapeMsg };
     } else {
       session.state = 'AWAITING_ADDRESS_RETRY';
       session.current_step = 'AWAITING_ADDRESS_RETRY';

@@ -370,4 +370,20 @@ describe('Screenshot Bug Fixes & Multi-Key AI Pool Verification', () => {
     assert.strictEqual(session.state, 'AWAITING_DISCOUNT_CONFIRMATION', 'Must advance to discount confirmation, not boundary switch');
     assert.notStrictEqual(res.intent, 'AWAITING_BOUNDARY_PICKUP_SWITCH', 'Must NEVER trigger boundary violation on Pick-up');
   });
+
+  it('21. Out-of-bounds boundary check: customer typing "pa cancel na lng" cleanly cancels draft cart without robotic fallback', async () => {
+    const psid = `TEST_BOUNDARY_LNG_${Date.now()}`;
+    const session = await getSession(psid);
+    session.dining_mode = 'Delivery';
+    session.orderType = 'delivery';
+    session.state = 'AWAITING_BOUNDARY_PICKUP_SWITCH';
+    session.checkout_step = 'AWAITING_BOUNDARY_PICKUP_SWITCH';
+    session.cart = [{ id: 1, name: 'Burger', price: 100, quantity: 1 }];
+
+    const res = await nlpEngine.handleTextInput(psid, session, 'pa cancel na lng');
+    assert.strictEqual(res.intent, 'BOUNDARY_ORDER_CANCELLED');
+    assert.match(res.replyLog, /Kinansela na po namin/i);
+    assert.doesNotMatch(res.replyLog, /hindi ko po lubos na naintindihan/i);
+    assert.strictEqual(session.cart.length, 0, 'Cart must be cleared on cancellation');
+  });
 });
