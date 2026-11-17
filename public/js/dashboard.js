@@ -371,6 +371,12 @@ function handleRealtimeEvent(eventType, data) {
     loadOrders();
     loadDeliveries();
   }
+  if (eventType === 'COURIER_ESCALATION_NEEDED') {
+    playOrderChime();
+    API.toast(`🛵 Courier Booking Alert: Lampas 3km ang Order #${data.orderNumber} (${data.distanceKm} km)! Kailangan i-quote ang Grab/Lalamove.`, 'warning');
+    loadOrders();
+    loadKPIs();
+  }
   if (eventType === 'INVENTORY_UPDATED' || eventType === 'INGREDIENTS_UPDATED' || eventType === 'INGREDIENT_STOCK_ALERT') {
     if (typeof loadBomInventory === 'function') loadBomInventory();
     if (eventType === 'INVENTORY_UPDATED' && typeof loadMenu === 'function') loadMenu();
@@ -559,7 +565,7 @@ function renderKanban(orders) {
 
   orders.forEach(order => {
     let status = (order.status || 'pending').toLowerCase();
-    if (status === 'paid' || status === 'new' || status === 'unpaid') status = 'pending';
+    if (status === 'paid' || status === 'new' || status === 'unpaid' || status === 'pending_admin_quote' || status === 'pending_approval') status = 'pending';
     if (status === 'cancellation_requested') status = 'preparing';
     if (counts[status] !== undefined) counts[status]++;
     if (!columns[status]) return;
@@ -651,6 +657,20 @@ function renderKanban(orders) {
       `;
     }
 
+    const isThirdPartyQuote = String(order.status || '').toUpperCase() === 'PENDING_ADMIN_QUOTE' ||
+      String(order.customer_notes || '').includes('Grab/Lalamove') ||
+      String(order.note || '').includes('Grab/Lalamove');
+
+    let thirdPartyNotice = '';
+    if (isThirdPartyQuote && status === 'pending') {
+      thirdPartyNotice = `
+        <div style="margin: 6px 0; padding: 6px 8px; background: rgba(249, 115, 22, 0.16); border: 1px dashed #f97316; border-radius: 4px;">
+          <div style="color: #f97316; font-size: 0.76rem; font-weight: 800;">🛵 Grab/Lalamove Quote Needed</div>
+          <div style="font-size: 0.72rem; color: var(--text-secondary); margin-top: 2px;">Distance: ${order.distance_km || '—'} km | Lampas 3km delivery zone</div>
+        </div>
+      `;
+    }
+
     const card = document.createElement('div');
     card.className = `order-card ${status === 'cancelled' ? 'order-card-cancelled' : ''}`;
     card.onclick = () => viewOrderDetails(order.id);
@@ -663,10 +683,12 @@ function renderKanban(orders) {
       <div class="order-items-preview">${itemsSummary || '1x Order item'}</div>
       ${voidNotice}
       ${cancelReqNotice}
+      ${thirdPartyNotice}
       ${order.cancellation_reason ? `<div style="font-size: 0.76rem; color: var(--status-danger); margin-top: 4px;">Reason: ${order.cancellation_reason}</div>` : ''}
       <div class="order-card-footer">
         <div>
           <span class="badge ${order.order_type === 'delivery' ? 'badge-dispatched' : 'badge-preparing'}">${order.order_type}</span>
+          ${isThirdPartyQuote ? `<span class="badge" style="background: rgba(249, 115, 22, 0.2); color: #f97316; border: 1px solid #f97316; margin-left: 4px;">Grab/Lalamove</span>` : ''}
           <span class="order-total" style="margin-left: 8px;">₱${parseFloat(order.total_amount).toFixed(2)}</span>
         </div>
         <div>${actionBtn}</div>
@@ -706,6 +728,8 @@ function renderOrdersTable(orders) {
       <td>
         ${(order.cancel_requested || order.status === 'cancellation_requested') && order.status !== 'cancelled' ? `
           <span class="badge badge-mismatch" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #ef4444;">🚨 Cancel Req</span>
+        ` : String(order.status || '').toUpperCase() === 'PENDING_ADMIN_QUOTE' ? `
+          <span class="badge" style="background: rgba(249, 115, 22, 0.2); color: #f97316; border: 1px solid #f97316;">🛵 3rd-Party Quote</span>
         ` : `
           <span class="badge badge-${order.status}">${order.status}</span>
         `}
@@ -733,6 +757,8 @@ function renderOverviewOrders(orders) {
       <td>
         ${(order.cancel_requested || order.status === 'cancellation_requested') && order.status !== 'cancelled' ? `
           <span class="badge badge-mismatch" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #ef4444;">🚨 Cancel Req</span>
+        ` : String(order.status || '').toUpperCase() === 'PENDING_ADMIN_QUOTE' ? `
+          <span class="badge" style="background: rgba(249, 115, 22, 0.2); color: #f97316; border: 1px solid #f97316;">🛵 3rd-Party Quote</span>
         ` : `
           <span class="badge badge-${order.status}">${order.status}</span>
         `}

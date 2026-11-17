@@ -403,6 +403,7 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
   });
 
   // 11. Send notification record & outbound push to Messenger (Module 2.C)
+  const isPendingAdminQuote = String(initialOrderStatus).toUpperCase() === 'PENDING_ADMIN_QUOTE';
   const pendingApprovalMsg = "Salamat po! Ang inyong order ay **Pending Approval** na sa aming system. I-notify po namin kayo agad oras na ma-verify ng store.";
   await sendNotification(
     effectivePsid,
@@ -411,7 +412,8 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
     pendingApprovalMsg
   );
 
-  if (!orderData.suppressDirectPush && effectivePsid && !effectivePsid.startsWith('POS_MANUAL_')) {
+  const shouldSendDirectPush = !orderData.suppressDirectPush && !isPendingAdminQuote && effectivePsid && !effectivePsid.startsWith('POS_MANUAL_');
+  if (shouldSendDirectPush) {
     await sendTextMessage(effectivePsid, pendingApprovalMsg).catch(err => {
       console.warn('[orderService] Failed to send pending approval push to Messenger:', err.message);
     });

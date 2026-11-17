@@ -51,10 +51,10 @@ async function changeOrderStatus(req, res) {
       else if (s === 'dispatched' || s === 'on_delivery' || s === 'dispatched / on delivery') status = 'dispatched';
       else if (s === 'delivered') status = 'delivered';
       else if (s === 'cancelled' || s === 'canceled') status = 'cancelled';
-      else if (s === 'pending') status = 'pending';
+      else if (s === 'pending' || s === 'pending_admin_quote' || s === 'pending_approval') status = 'pending';
     }
 
-    const validStatuses = ['pending', 'preparing', 'dispatched', 'delivered', 'cancelled'];
+    const validStatuses = ['pending', 'preparing', 'dispatched', 'delivered', 'cancelled', 'pending_admin_quote'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ success: false, message: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
     }
@@ -115,7 +115,7 @@ async function getSummaryKPIs(req, res) {
 
     // Pending Orders Count
     const [pendingOrders] = await db.query(`
-      SELECT COUNT(*) AS count FROM orders WHERE LOWER(COALESCE(status, '')) IN ('pending', 'pending_approval')
+      SELECT COUNT(*) AS count FROM orders WHERE LOWER(COALESCE(status, '')) IN ('pending', 'pending_approval', 'pending_admin_quote')
     `);
 
     // Active Deliveries Count (dispatched / assigned)

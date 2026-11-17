@@ -463,4 +463,28 @@ describe('Screenshot Bug Fixes & Multi-Key AI Pool Verification', () => {
     assert.notStrictEqual(session.state, 'AWAITING_BOUNDARY_PICKUP_SWITCH', 'Must not reset state back to AWAITING_BOUNDARY_PICKUP_SWITCH');
     assert.doesNotMatch(res.replyLog, /lampas sa aming/i, 'Must not re-send out-of-bounds warning message');
   });
+
+  it('26. Third-Party Grab/Lalamove: Single confirmation message sent (no duplicate Pending Approval push) and order is mapped cleanly', async () => {
+    const psid = `TEST_THIRD_PARTY_HANDOFF_${Date.now()}`;
+    const session = await getSession(psid);
+    session.dining_mode = 'Delivery';
+    session.orderType = 'delivery';
+    session.customer_name = 'Francis Dave';
+    session.contact_number = '09273844028';
+    session.address = 'Block 13/14, Block 41 Zone 8, Addition Hills, Mandaluyong';
+    session.delivery_distance_km = 10.77;
+
+    const [rows] = await db.query('SELECT id, name, price FROM menu_items WHERE is_available = 1 LIMIT 1');
+    const item = (rows && rows[0]) ? rows[0] : { id: 10555, name: 'Biscoff Cheesecake', price: 140 };
+    session.cart = [{ id: item.id, menuItemId: item.id, name: item.name, price: item.price, quantity: 1 }];
+    session.state = 'AWAITING_BOUNDARY_PICKUP_SWITCH';
+
+    const res = await nlpEngine.handleTextInput(psid, session, 'Delivery pa din');
+    assert.strictEqual(res.intent, 'PENDING_ADMIN_QUOTE');
+    assert.match(res.replyLog, /third-party delivery/i);
+    assert.match(res.replyLog, /PENDING_ADMIN_QUOTE/i);
+    assert.doesNotMatch(res.replyLog, /Pending Approval na sa aming system/i, 'Must not duplicate generic pending approval message');
+    assert.strictEqual(session.state, 'PENDING_ADMIN_QUOTE');
+    assert.strictEqual(session.cart.length, 0, 'Cart must be cleared after handoff order is placed');
+  });
 });

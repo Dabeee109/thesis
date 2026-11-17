@@ -3032,7 +3032,8 @@ async function handleThirdPartyDeliveryHandoff(psid, session) {
     })),
     paymentMethod,
     customerNotes: handoffNote,
-    status: 'PENDING_ADMIN_QUOTE'
+    status: 'PENDING_ADMIN_QUOTE',
+    suppressDirectPush: true
   });
 
   session.activeOrderNumber = created.orderNumber;
@@ -3044,12 +3045,23 @@ async function handleThirdPartyDeliveryHandoff(psid, session) {
   await saveSession(session);
 
   try {
-    notificationService.broadcastSSE('ORDER_STATUS_CHANGED', {
+    notificationService.broadcastSSE('NEW_ORDER', {
       orderId: created.orderId,
       orderNumber: created.orderNumber,
-      newStatus: 'PENDING_ADMIN_QUOTE',
+      customerName,
+      orderType: 'delivery',
+      totalAmount: created.totalAmount || 0,
+      status: 'pending_admin_quote',
+      isThirdPartyQuote: true,
       distanceKm,
       address
+    });
+    notificationService.broadcastSSE('COURIER_ESCALATION_NEEDED', {
+      orderId: created.orderId,
+      orderNumber: created.orderNumber,
+      distanceKm,
+      address,
+      landmark: session.landmark || session.details?.landmark || null
     });
   } catch (_) { }
 
