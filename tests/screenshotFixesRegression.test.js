@@ -257,4 +257,117 @@ describe('Screenshot Bug Fixes & Multi-Key AI Pool Verification', () => {
     assert.match(chitchat.replyLog, /Magandang araw po! Nandito po ako upang tulungan kayo/i);
     assert.doesNotMatch(chitchat.replyLog, /hindi ko po lubos na naintindihan/i);
   });
+
+  it('16. Screenshot 1 & 2: "pwedeng no pearl?" adds drink at base price ₱99 without pearls, and "99 lang" cleans pearls', async () => {
+    const psid = `TEST_NO_PEARLS_${Date.now()}`;
+    const session = await getSession(psid);
+    session.cart = [];
+
+    // Add item with explicit "no pearl" in rawText
+    const addTurn = await nlpEngine.executeAiAssistantTurn(psid, session, 'Yung classic milktea nalang, pwedeng no pearl?', {
+      aiResponse: {
+        reply_message: 'Sige po! Idinagdag ko na ang Classic Milktea sa inyong cart.',
+        detected_action: 'ADD_ITEM',
+        action_payload: {
+          item_name: 'Classic Milktea',
+          quantity: 1,
+          addon: null
+        }
+      }
+    });
+
+    assert.strictEqual(session.cart.length, 1);
+    assert.strictEqual(session.cart[0].price, 99);
+    assert.doesNotMatch(session.cart[0].name, /\(w\/\s*pearls?\)/i, 'Cart item must not contain (w/ Pearls)');
+
+    // Now test if cart had pearls and customer corrects "Kala ko 99 lang yung classic milktea? No pearl yan ha"
+    session.cart = [{ id: 1, name: 'Classic Milktea (w/ Pearls)', price: 119, quantity: 1, addons: ['Pearls'] }];
+    await nlpEngine.executeAiAssistantTurn(psid, session, 'Kala ko 99 lang yung classic milktea? No pearl yan ha', {
+      aiResponse: {
+        reply_message: 'Tama po kayo, ₱99 lang po ang ating Classic Milktea na walang pearls!',
+        detected_action: 'NONE',
+        action_payload: {}
+      }
+    });
+
+    assert.strictEqual(session.cart[0].price, 99, 'Price must be reset to base ₱99');
+    assert.strictEqual(session.cart[0].name, 'Classic Milktea', 'Pearls suffix must be stripped');
+    assert.deepStrictEqual(session.cart[0].addons, [], 'Addons must be empty');
+  });
+
+  it('17. Screenshot 3, 4, 6: Identity denial phrases clear customer name and never save as customer_name', async () => {
+    const psid = `TEST_IDENTITY_DENIAL_${Date.now()}`;
+    const session = await getSession(psid);
+    session.customer_name = 'Francis';
+    session.contact_number = '09273844028';
+
+    // Denial 1: "Wala pa akong binibigay na details"
+    await nlpEngine.executeAiAssistantTurn(psid, session, 'Wala pa akong binibigay na details', {
+      aiResponse: {
+        reply_message: 'Ay pasensya na po! Sige po, simulan na po natin.',
+        detected_action: 'SET_DETAILS',
+        action_payload: {}
+      }
+    });
+    assert.strictEqual(session.customer_name, null, 'customer_name must be cleared');
+    assert.strictEqual(session.contact_number, null, 'contact_number must be cleared');
+
+    // Denial 2: "Wag mong ibibigay yung order summary na may pangalan, eh hindi naman ako yan"
+    session.customer_name = 'Francis';
+    await nlpEngine.executeAiAssistantTurn(psid, session, 'Wag mong ibibigay yung order summary na may pangalan, eh hindi naman ako yan', {
+      aiResponse: {
+        reply_message: 'Pasensya na po ulit sa paulit-ulit na pagtanong!',
+        detected_action: 'SET_DETAILS',
+        action_payload: {
+          customer_name: 'eh hindi naman ako yan'
+        }
+      }
+    });
+    assert.strictEqual(session.customer_name, null, 'Must reject "eh hindi naman ako yan" and clear name');
+  });
+
+  it('18. Screenshot 7: "Wala" in AWAITING_DISCOUNT_CONFIRMATION cleanly sets discount to None and advances to summary', async () => {
+    const psid = `TEST_DISCOUNT_WALA_${Date.now()}`;
+    const session = await getSession(psid);
+    session.customer_name = 'Dos';
+    session.contact_number = '09123456789';
+    session.phone_number = '09123456789';
+    session.dining_mode = 'Delivery';
+    session.address = 'Tondo Manila';
+    session.landmark = 'DMCI homes landmark';
+    session.cart = [{ id: 1, name: 'Classic Burger', price: 139, quantity: 1 }];
+    session.state = 'AWAITING_DISCOUNT_CONFIRMATION';
+    session.current_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+
+    // User replies "Wala"
+    const res = await nlpEngine.handleTextInput(psid, session, 'Wala');
+    assert.strictEqual(session.discount.applied, false);
+    assert.strictEqual(session.discount.type, 'None');
+    assert.strictEqual(session.discount_amount, 0);
+    assert.strictEqual(session.state, 'AWAITING_ORDER_SUMMARY_CONFIRM', 'Must advance directly to Order Summary confirmation');
+    assert.match(res.replyLog, /ORDER SUMMARY/i, 'Must render Order Summary');
+    assert.match(res.replyLog, /Dos/i, 'Must have customer name Dos');
+    assert.doesNotMatch(res.replyLog, /Mayroon po ba kayong Senior Citizen/i, 'Must NOT re-ask discount question');
+  });
+
+  it('19. Screenshot 8 & 9: Cancel trigger recognizes "paki cancel nalang" and inquiry "Paanong nacancel agad" is not a cancel trigger', () => {
+    assert.strictEqual(nlpEngine.isCancelTriggerWord('paki cancel nalang pala pending approval pa naman yan diba', 'Paki cancel nalang pala pending approval pa naman yan diba?'), true);
+    assert.strictEqual(nlpEngine.isCancelTriggerWord('gusto konh icancel nalang yan', 'Gusto konh icancel nalang yan'), true);
+    assert.strictEqual(nlpEngine.isCancelTriggerWord('paanong nacancel agad e karerequest ko lang', 'Paanong nacancel agad e karerequest ko lang'), false, 'Inquiries about cancellation must not be cancel triggers');
+  });
+
+  it('20. Screenshot 12: Pick-up order with arriving time & note never triggers 3km boundary violation or distance fare', async () => {
+    const psid = `TEST_PICKUP_NOTE_${Date.now()}`;
+    const session = await getSession(psid);
+    session.dining_mode = 'Pick-up';
+    session.orderType = 'pickup';
+    session.cart = [{ id: 1, name: 'Classic Milktea', price: 99, quantity: 1 }];
+    session.customer_name = 'Francis';
+    session.contact_number = '09273844028';
+
+    const res = await nlpEngine.resolveDeliveryAddressAndFare(psid, session, 'ang sarap ko', 'none');
+    assert.strictEqual(session.delivery_fee, 0, 'Pickup delivery fee must be ₱0');
+    assert.strictEqual(session.state, 'AWAITING_DISCOUNT_CONFIRMATION', 'Must advance to discount confirmation, not boundary switch');
+    assert.notStrictEqual(res.intent, 'AWAITING_BOUNDARY_PICKUP_SWITCH', 'Must NEVER trigger boundary violation on Pick-up');
+  });
 });

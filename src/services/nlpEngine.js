@@ -210,11 +210,14 @@ function buildInvalidDiscountReply(reason) {
 
 const NON_NAME_FILLERS = /^(?:nice|ok|okay|(?:ok|okay)\s*na(?:\s*po)?|sige|sige\s*po|sige\s+lahat(?:\s*yan)?|lahat\s*yan|lahat|pa|paki|pa[- ]?add(?:\s+lahat)?|pa[- ]?order|paki[- ]?add|kuya|ate|kuya\s+pa|ate\s+pa|sir|boss|maam|mam|bossing|kunin\s*ko(?:\s*lahat|\s*yan)?|order\s*ko\s*na\s*yan|sige\s*yun(?:\s*na\s*lang)?|cge|geh|ge|yes|yep|opo|oo|salamat|thanks|thank\s*you|ty|k|noted|copy|alright|good|ayos|g|wala|walaw|walaa|wla|meron|mayroon|none|patingin|hi|hello|hey|yo|pakibigay|note|notes|oo[,.]?\s*tama(?:\s*po)?|tama(?:\s*po)?|may\s*babaguhin|proceed|confirm|done|oo\s*pala|ay\s*oo\s*pala|ay\s*oo|pala|hala\s*oo\s*pala|nakalimutan\s*ko.*)$/i;
 
-const NON_NAME_PATTERNS = /\b(?:pa[- ]?add(?:\s+lahat)?|pa[- ]?order|paki[- ]?add|kuya\s+pa|ate\s+pa|recom\w*|rekomendasyon|sige\s+lahat\s*yan|sige\s*lahat|lahat\s*yan|kunin\s*ko\s*lahat|kunin\s*ko\s*yan|pick[\s-]*up|pickup|take[\s-]*out|takeout|dine[\s-]*in|delivery|deliver|padeliver|dadaan|daraan|punta|pupunta|kukunin|mamaya|order|cancel|pabili|menu|cart|wala|meron|ano|saan|kailan|kelan|oras|\d{1,2}\s*(?:am|pm)|minutes?|mins?|hours?|hrs?|street|st|ave|road|city|tondo|manila|store|milktea|milk\s*tea|burger|pizza|coffee|kape|fries|wrap|shakes?|drinks?|classic|bacon|wintermelon|okinawa|matcha|latte|macchiato|americano|espresso|add[\s-]*ons?|pearls?|nata|cheese|pudding|addons?|addons?|lang|oo\s*pala|nakalimutan|number\s*ko|phone\s*ko)\b/i;
+const NON_NAME_PATTERNS = /\b(?:pa[- ]?add(?:\s+lahat)?|pa[- ]?order|paki[- ]?add|kuya\s+pa|ate\s+pa|recom\w*|rekomendasyon|sige\s+lahat\s*yan|sige\s*lahat|lahat\s*yan|kunin\s*ko\s*lahat|kunin\s*ko\s*yan|pick[\s-]*up|pickup|take[\s-]*out|takeout|dine[\s-]*in|delivery|deliver|padeliver|dadaan|daraan|punta|pupunta|kukunin|mamaya|order|cancel|pabili|menu|cart|wala|meron|ano|saan|kailan|kelan|oras|\d{1,2}\s*(?:am|pm)|minutes?|mins?|hours?|hrs?|street|st|ave|road|city|tondo|manila|store|milktea|milk\s*tea|burger|pizza|coffee|kape|fries|wrap|shakes?|drinks?|classic|bacon|wintermelon|okinawa|matcha|latte|macchiato|americano|espresso|add[\s-]*ons?|pearls?|nata|cheese|pudding|addons?|addons?|lang|oo\s*pala|nakalimutan|number\s*ko|phone\s*ko|hindi\s+naman|di\s+naman|hindi\s+ako|di\s+ako|bawal|mali|ayan|ibang\s+tao|sino|bakit|wag\s+mong|huwag\s+mong|eh\s+hindi|ayan\s+ka|wala\s+pa\s+akong|hindi\s+naman\s+ako\s+yan)\b/i;
 
 function extractRealName(text) {
   if (!text || typeof text !== 'string') return '';
   if (/\b(?:oo\s*pala|nakalimutan|number\s*ko|phone\s*ko)\b/i.test(text)) {
+    return '';
+  }
+  if (/\b(?:hindi|di|wag|huwag|mali|ayan|wala\s*pa)\b.*\b(?:ako|pangalan|name|yan|assume|ibang\s*tao|details|binibigay)\b/i.test(text)) {
     return '';
   }
   let str = text.trim();
@@ -253,10 +256,11 @@ function isLikelyAddress(str) {
   const s = str.trim();
   if (s.length < 5 || s.length > 250) return false;
   if (NON_ADDRESS_PATTERNS.test(s)) return false;
+  if (/^(?:ang\s*sarap\s*ko|masarap|sarap|note|notes|none|wala|wala\s*po|ok|okay)$/i.test(s)) return false;
 
   const hasGeoKeyword = /\b(?:street|st\.?|ave\.?|avenue|rd\.?|road|dr\.?|drive|way|blvd\.?|boulevard|lane|ln\.?|brgy\.?|barangay|bgy\.?|subd\.?|subdivision|village|blk\.?|block|lot|phase|purok|sitio|floor|flr\.?|unit|bldg\.?|building|condo|tower|city|tondo|sampaloc|manila|mandaluyong|pasay|makati|quezon|pasig|taguig|caloocan|malabon|navotas|valenzuela|marikina|muntinlupa|paranaque|las\s*pinas|san\s*juan|pateros|corner|cor\.?)\b/i.test(s);
   const hasHouseNumber = /^(?:#?\d+[\w-]*|\bblk\b|\blot\b|\bphase\b)\s+[A-Za-z]/i.test(s);
-  const hasAddressStructure = /\d+.*[a-zA-Z]/.test(s) && (s.includes(',') || s.split(/\s+/).length >= 3);
+  const hasAddressStructure = /\d+.*[a-zA-Z]/.test(s) && (s.includes(',') || s.split(/\s+/).length >= 3) && hasGeoKeyword;
 
   return hasGeoKeyword || hasHouseNumber || hasAddressStructure;
 }
@@ -331,7 +335,8 @@ function parseCustomerInfo(rawText, diningMode) {
     }
   }
   if (!name) {
-    const nameBeforePattern = clean.match(/(?:^|[\s,;])([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:yung|ang|po\s+ang|po\s+yung|po\s+pala(?:\s+(?:ang|yung))?|pala(?:\s+(?:ang|yung))?)\s*(?:name|pangalan)\b/i);
+    const nameBeforePattern = clean.match(/(?:^|[\s,;])([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:ko|yung|ang|po\s+ko|po\s+ang|po\s+yung|po\s+pala(?:\s+(?:ang|yung))?|pala(?:\s+(?:ang|yung))?)\s*(?:name|pangalan)\b/i) ||
+      clean.match(/(?:^|[\s,;])([A-Za-z]{2,30})\s+(?:ang\s+)?pangalan\s+ko\b/i);
     if (nameBeforePattern) {
       const cand = nameBeforePattern[1].trim();
       if (!NON_NAME_FILLERS.test(cand) && !NON_NAME_PATTERNS.test(cand) && !normalizePhone(cand)) {
@@ -480,7 +485,8 @@ function parseCustomerInfo(rawText, diningMode) {
     cleanName.toLowerCase() === 'pa' ||
     cleanName.toLowerCase() === 'kuya pa' ||
     NON_NAME_FILLERS.test(cleanName) ||
-    NON_NAME_PATTERNS.test(cleanName)
+    NON_NAME_PATTERNS.test(cleanName) ||
+    /\b(?:hindi|di|wag|huwag|mali|ayan|wala\s*pa)\b.*\b(?:ako|pangalan|name|yan|assume|ibang\s*tao|details|binibigay)\b/i.test(cleanName)
   ) {
     cleanName = '';
   }
@@ -1763,6 +1769,7 @@ function isCancelTriggerWord(norm = '', rawText = '', eventPayload = '', session
   }
   const combined = `${norm || ''} ${rawText || ''}`.trim();
   if (/\b(?:ayoko\s*na|ayaw\s*ko\s*na)\s*(?:po)?\s*(?:mag[- ]?dagdag|umorder)\b/i.test(combined)) return false;
+  if (/\b(?:paano|paanong|pano|panong|bakit|kailan|kelan)\b.*\b(?:na-?cancel|kinancel|naka-?cancel|na-?kansela|kinansela|na-?void)\b/i.test(combined)) return false;
   const triggerPhrases = [
     'cancel',
     'cancel order',
@@ -1787,7 +1794,7 @@ function isCancelTriggerWord(norm = '', rawText = '', eventPayload = '', session
     'parefund'
   ];
   if (triggerPhrases.some(p => combined === p || combined.includes(p))) return true;
-  if (/\b(?:pa[-\s]?cancel|i[-\s]?cancel|kanselahin|ayaw\s+ko\s+na|ayoko\s+na)\b/i.test(combined)) return true;
+  if (/\b(?:pa[-\s]?cancel|paki[-\s]?cancel|gusto\s+(?:ko|kong|konh)\s+i[-\s]?cancel|i[-\s]?cancel|kanselahin|ayaw\s+ko\s+na|ayoko\s+na)\b/i.test(combined)) return true;
   if (/\b(?:wag\s+na|hayss?\s*wag\s*na)\b.*?\bcancel\b/i.test(combined)) return true;
   if (/\bcancel\b.*?\b(?:order|food|delivery|kape|drink|ko)\b/i.test(combined)) return true;
   if (/\b(?:order|food|delivery)\b.*?\bcancel\b/i.test(combined)) return true;
@@ -1974,6 +1981,24 @@ async function handleCancellationRequest(psid, session, rawText = '') {
       await sendTextMessage(psid, reply);
       return { intent: 'CANCEL_ORDER_REQUESTED', confidence: 1.0, replyLog: reply };
     }
+  }
+
+  if (!activeOrder && psid) {
+    try {
+      const [recentCancelled] = await db.query(
+        `SELECT o.id, o.order_number, o.status 
+         FROM orders o 
+         JOIN customers c ON c.id = o.customer_id 
+         WHERE c.psid = ? 
+         ORDER BY o.id DESC LIMIT 1`,
+        [String(psid)]
+      );
+      if (recentCancelled && recentCancelled.length > 0 && String(recentCancelled[0].status).toLowerCase() === 'cancelled') {
+        const reply = `Ang inyong Order #${recentCancelled[0].order_number} ay matagumpay na pong na-cancel kanina. Wala na po kayong ibang aktibong order sa ngayon. May maitutulong pa ba ako sa inyo?`;
+        await sendTextMessage(psid, reply);
+        return { intent: 'CANCEL_ALREADY_DONE', confidence: 1.0, replyLog: reply };
+      }
+    } catch (_) { }
   }
 
   const reply = "Wala po kayong kasalukuyang aktibong order na maaaring i-cancel. May maitutulong pa ba ako sa inyo?";
@@ -3047,6 +3072,32 @@ async function resolveDeliveryAddressAndFare(psid, session, addressStr, landmark
   const paymentMode = meta.paymentMode || session.payment_mode || 'Cash';
   const customerNote = meta.customerNote !== undefined ? meta.customerNote : (session.customer_notes || '');
 
+  const currentMode = session.dining_mode || (session.orderType === 'delivery' ? 'Delivery' : 'Dine In');
+  if (currentMode === 'Pick-up' || currentMode === 'Dine In') {
+    const storeAddr = getStoreAddress();
+    session.address = storeAddr;
+    session.delivery_address = storeAddr;
+    session.delivery_fee = 0;
+    session.deliveryFee = 0;
+    session.customer_name = customerName;
+    session.contact_number = contactNumber;
+    session.phone_number = contactNumber;
+    session.payment_mode = paymentMode;
+    if (!session.discount) {
+      session.state = 'AWAITING_DISCOUNT_CONFIRMATION';
+      session.current_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+      session.checkout_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+      await saveSession(session);
+      const askDiscountMsg = 'Mayroon po ba kayong Senior Citizen o PWD ID para sa 20% discount?';
+      await sendQuickReplies(psid, askDiscountMsg, [
+        { title: 'Mayroon', payload: 'DISCOUNT_YES' },
+        { title: 'Wala po', payload: 'DISCOUNT_NO' }
+      ]);
+      return { intent: 'AWAITING_DISCOUNT_CONFIRMATION', confidence: 1.0, replyLog: askDiscountMsg };
+    }
+    return await finalizeOrderSummaryAndPayment(psid, session);
+  }
+
   session.customer_name = customerName;
   session.contact_number = contactNumber;
   session.phone_number = contactNumber;
@@ -3467,11 +3518,15 @@ async function handleTextInput(psid, session, rawText, options = {}) {
   const isPureShortAnswer = /^(?:1|2|oo|opo|yes|hindi|no)$/i.test(norm) &&
     ['AWAITING_SUGGESTION_CONFIRMATION', 'AWAITING_ADDRESS_CONFIRMATION', 'AWAITING_ORDER_SUMMARY_CONFIRM', 'AWAITING_CANCEL_CONFIRMATION'].includes(session.state);
 
+  const isDiscountStateReply = ['AWAITING_DISCOUNT_CONFIRMATION', 'AWAITING_DISCOUNT_PROOF'].includes(session.state) &&
+    /\b(?:wala|walaw|walaa|wla|wala\s*po|meron|mayroon|none|senior|pwd|id|skip|pass|ayaw|wag\s*na|oo\s*pala|wala\s*nga)\b/i.test(norm);
+
   const isDirectDeterministicPayload = options?.payload ||
     /^CONFIRM_/i.test(rawText) ||
     /^DISCOUNT_/i.test(rawText) ||
     /^ORDER_TYPE_/i.test(rawText) ||
-    isPureShortAnswer;
+    isPureShortAnswer ||
+    isDiscountStateReply;
 
   if (!isDirectDeterministicPayload && (process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured()) {
     try {
@@ -4458,7 +4513,23 @@ async function handleTextInput(psid, session, rawText, options = {}) {
       if (isNo) {
         session.discount = { applied: false, type: 'None', amount: 0 };
         session.discount_amount = 0;
-        return await finalizeOrderSummaryAndPayment(psid, session);
+        await saveSession(session);
+
+        const hasName = Boolean(session.customer_name);
+        const hasPhone = Boolean(session.contact_number || session.phone_number);
+        const isDelivery = isDeliveryDiningMode(session.dining_mode);
+        const hasAddress = isDelivery ? Boolean(session.address || session.delivery_address) : true;
+
+        if (hasName && hasPhone && hasAddress) {
+          return await finalizeOrderSummaryAndPayment(psid, session);
+        }
+
+        session.state = 'COLLECTING_CUSTOMER_INFO';
+        session.current_step = 'COLLECTING_CUSTOMER_INFO';
+        await saveSession(session);
+        const prompt = getCheckoutInfoPrompt(session);
+        await sendTextMessage(psid, prompt);
+        return { intent: 'COLLECTING_CUSTOMER_INFO_PROMPT', confidence: 1.0, replyLog: prompt };
       }
 
       if (isYes) {
@@ -6253,12 +6324,32 @@ async function startCheckoutFlow(psid, session, rawText = '') {
     }
   }
 
-  // If customer name and phone are already captured, go directly to Order Summary
-  if (session.customer_name && (session.contact_number || session.phone_number)) {
+  // Node K: If discount eligibility hasn't been checked yet, ask Senior / PWD discount first
+  if (!session.discount) {
+    session.state = 'AWAITING_DISCOUNT_CONFIRMATION';
+    session.current_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+    session.checkout_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+    await saveSession(session);
+
+    const askDiscountMsg = 'Mayroon po ba kayong Senior Citizen o PWD ID para sa 20% discount?';
+    await sendQuickReplies(psid, askDiscountMsg, [
+      { title: 'Mayroon', payload: 'DISCOUNT_YES' },
+      { title: 'Wala po', payload: 'DISCOUNT_NO' }
+    ]);
+    return { intent: 'AWAITING_DISCOUNT_CONFIRMATION', confidence: 1.0, replyLog: askDiscountMsg };
+  }
+
+  // Node O & P: Check if customer details are complete
+  const hasName = Boolean(session.customer_name);
+  const hasPhone = Boolean(session.contact_number || session.phone_number);
+  const isDelivery = isDeliveryDiningMode(session.dining_mode);
+  const hasAddress = isDelivery ? Boolean(session.address || session.delivery_address) : true;
+
+  if (hasName && hasPhone && hasAddress) {
     return await finalizeOrderSummaryAndPayment(psid, session);
   }
 
-  // Issue 3: Immediately transition to COLLECTING_CUSTOMER_INFO and prompt cleanly without "Yes to what?"
+  // Slot-filling (Node O & Q): Ask missing details
   session.state = 'COLLECTING_CUSTOMER_INFO';
   session.current_step = 'COLLECTING_CUSTOMER_INFO';
   await saveSession(session);
@@ -7100,6 +7191,19 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
       action_payload.customer_name = null;
     }
 
+    // Cart Clean-Up: If user mentions "no pearl", "walang pearl", or "99 lang", strip pearls and reset price to base ₱99
+    if (session.cart && session.cart.length > 0 && /\b(?:no|walang|wala|without|wag|huwag|alisin|tanggalin)\s+(?:pearls?|sago|sinkers?|addons?)|99\s*(?:lang|na\s*lang)\b/i.test(rawText)) {
+      for (const item of session.cart) {
+        if (item.name && /\(w\/\s*pearls?\)/i.test(item.name)) {
+          item.name = item.name.replace(/\s*\(w\/\s*pearls?\)/i, '').trim();
+          item.addons = [];
+          item.addOns = [];
+          item.price = 99.0;
+        }
+      }
+      await saveSession(session);
+    }
+
     switch (detected_action) {
       case 'CLEAR_CART': {
         const clearRes = await handleClearCartAction(psid, session);
@@ -7350,13 +7454,19 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
 
             // Strict Category Guard: Drink add-ons/sinkers only ever apply to Drinks & Milktea
             const isDrink = isDrinkOrMilktea(dbItem);
-            const rawAddon = (isDrink && reqEntry.addon) ? String(reqEntry.addon).trim() : null;
-            const resolvedAddon = rawAddon ? (detectAddonInText(rawAddon) || rawAddon) : null;
+            const isExplicitNoAddon = /\b(?:no|walang|wala|without|wag|huwag|alisin|tanggalin)\s+(?:pearls?|tapioca|sago|nata|cream\s*cheese|sinkers?|addons?|add-ons?)\b/i.test(rawText || '') ||
+              /\b(?:no\s*pearls?|walang\s*pearls?|without\s*pearls?)\b/i.test(reqEntry.addon || '');
+
+            let rawAddon = (isDrink && reqEntry.addon && !isExplicitNoAddon) ? String(reqEntry.addon).trim() : null;
+            let resolvedAddon = rawAddon ? (detectAddonInText(rawAddon) || rawAddon) : null;
+            if (isExplicitNoAddon) {
+              resolvedAddon = null;
+            }
 
             const isInCheckoutOrSummary = ['AWAITING_ORDER_SUMMARY_CONFIRM', 'COLLECTING_CUSTOMER_INFO', 'AWAITING_DISCOUNT_CONFIRMATION'].includes(session.state);
 
-            // Single-item Drinks & Milktea with no add-on triggers AWAITING_DRINK_ADDON upsell only if NOT a correction and NOT in checkout/summary
-            if (requestedList.length === 1 && ambiguousItems.length === 0 && isDrink && !resolvedAddon && !isQuantityCorrection && !isInCheckoutOrSummary) {
+            // Single-item Drinks & Milktea with no add-on triggers AWAITING_DRINK_ADDON upsell only if NOT a correction, NOT explicit no-addon, and NOT in checkout/summary
+            if (requestedList.length === 1 && ambiguousItems.length === 0 && isDrink && !resolvedAddon && !isExplicitNoAddon && !isQuantityCorrection && !isInCheckoutOrSummary) {
               await sendTextMessage(psid, reply_message);
               await promptDrinkAddons(psid, session, dbItem, qty);
               promptedSingleUpsell = true;
@@ -7370,7 +7480,12 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
                 addons: [resolvedAddon],
                 addOns: [{ name: resolvedAddon, price: 20.0 }]
               }
-              : dbItem;
+              : {
+                ...dbItem,
+                name: dbItem.name.replace(/\s*\(w\/\s*[^)]+\)/i, '').trim(),
+                addons: [],
+                addOns: []
+              };
 
             if (isQuantityCorrection) {
               const existingIdx = session.cart.findIndex(c => (c.menuItemId === dbItem.id || c.id === dbItem.id || String(c.name || '').toLowerCase().includes(dbItem.name.toLowerCase())));
@@ -7584,19 +7699,37 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
       case 'SET_DETAILS': {
         const parsedFallback = parseCustomerInfo(rawText, session.dining_mode);
 
+        const isDenyingIdentity = /\b(?:hindi|di|wag|huwag|mali|ayan|wala\s*pa)\b.*\b(?:ako|pangalan|name|yan|assume|ibang\s*tao|details|binibigay)\b/i.test(rawText) ||
+          /\b(?:wala\s*pa\s*akong\s*binibigay|paano\s*mo\s*nasabing|hindi\s*naman\s*ako\s*yan|di\s*naman\s*ako\s*yan)\b/i.test(rawText);
+
+        if (isDenyingIdentity) {
+          session.customer_name = null;
+          session.name = null;
+          session.phone_number = null;
+          session.phone = null;
+          session.contact_number = null;
+          if (session.details) {
+            session.details.name = null;
+            session.details.phone = null;
+          }
+          if (psid) {
+            await db.query('UPDATE customers SET first_name = NULL, last_name = NULL, phone_number = NULL WHERE psid = ?', [String(psid)]).catch(() => {});
+          }
+        }
+
         const rawPhone = action_payload.phone_number || action_payload.phone || action_payload.contact_number || parsedFallback.contact || '';
         const validPhone = normalizePhone(rawPhone) || normalizePhone(rawText) || rawPhone;
 
-        let resolvedName = action_payload.customer_name || parsedFallback.name || session.customer_name;
-        if (resolvedName && /^(?:sige\s+lahat\s*yan|sige\s*lahat|lahat\s*yan|sige|oo|opo|kuya|patingin)\b/i.test(resolvedName)) {
-          resolvedName = session.customer_name || null;
+        let resolvedName = !isDenyingIdentity ? (action_payload.customer_name || parsedFallback.name || session.customer_name) : null;
+        if (resolvedName && (NON_NAME_PATTERNS.test(resolvedName) || NON_NAME_FILLERS.test(resolvedName) || /^(?:sige\s+lahat\s*yan|sige\s*lahat|lahat\s*yan|sige|oo|opo|kuya|patingin|eh\s+hindi\s+naman\s+ako\s+yan)\b/i.test(resolvedName))) {
+          resolvedName = !isDenyingIdentity ? (session.customer_name || null) : null;
         }
         if (resolvedName && (!session.customer_name || /(?:name|pangalan|ako\s*si)\b/i.test(rawText) || (action_payload.customer_name && action_payload.customer_name !== session.customer_name))) {
           session.customer_name = resolvedName;
           session.name = resolvedName;
         }
 
-        if (validPhone) {
+        if (validPhone && !isDenyingIdentity) {
           const phoneToSave = action_payload.phone_number || validPhone;
           session.phone_number = phoneToSave;
           session.phone = phoneToSave;
@@ -7740,8 +7873,30 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
 
         await saveSession(session);
 
+        const isAwaitingDiscountAlready = session.state === 'AWAITING_DISCOUNT_CONFIRMATION' || session.current_step === 'AWAITING_DISCOUNT_CONFIRMATION' || session.state === 'AWAITING_DISCOUNT_PROOF';
+
+        // If customer is in discount confirmation step and said "wala", resolve discount cleanly and proceed to summary
+        if (isAwaitingDiscountAlready && /\b(?:wala|walaw|walaa|wla|none|no|nope|hindi|wag\s*na)\b/i.test(rawText)) {
+          session.discount = { applied: false, type: 'None', amount: 0 };
+          session.discount_amount = 0;
+          await saveSession(session);
+          const hasName = Boolean(session.customer_name);
+          const hasPhone = Boolean(session.contact_number || session.phone_number);
+          const isDeliv = isDeliveryDiningMode(session.dining_mode);
+          const hasAddress = isDeliv ? Boolean(session.address || session.delivery_address) : true;
+          if (hasName && hasPhone && hasAddress) {
+            return await finalizeOrderSummaryAndPayment(psid, session);
+          }
+          session.state = 'COLLECTING_CUSTOMER_INFO';
+          session.current_step = 'COLLECTING_CUSTOMER_INFO';
+          await saveSession(session);
+          const prompt = getCheckoutInfoPrompt(session);
+          await sendTextMessage(psid, prompt);
+          return { intent: 'COLLECTING_CUSTOMER_INFO_PROMPT', confidence: 1.0, replyLog: prompt, aiAction: 'SET_DETAILS' };
+        }
+
         // If customer has items in cart and has provided key checkout info, advance directly to discount check
-        if (session.cart && session.cart.length > 0 && session.customer_name && (session.phone_number || session.contact_number) && !options.aiResponse) {
+        if (session.cart && session.cart.length > 0 && session.customer_name && (session.phone_number || session.contact_number) && !options.aiResponse && !isAwaitingDiscountAlready && !session.discount) {
           session.state = 'AWAITING_DISCOUNT_CONFIRMATION';
           session.current_step = 'AWAITING_DISCOUNT_CONFIRMATION';
           session.checkout_step = 'AWAITING_DISCOUNT_CONFIRMATION';
