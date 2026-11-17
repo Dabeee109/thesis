@@ -24,7 +24,7 @@ try {
 } catch (_) {
   try {
     CAFE_PERSONA_CONFIG = require('../config/botPersona').CAFE_PERSONA_CONFIG;
-  } catch (__) {}
+  } catch (__) { }
 }
 
 const PRIMARY_AI_MODEL = 'gemini-3.8-flash';
@@ -240,7 +240,7 @@ async function loadOperationalContext(psid, session = null) {
   let storeSettings = storeSettingsService.getCachedStoreSettings();
   try {
     storeSettings = await storeSettingsService.getStoreSettings();
-  } catch (_) {}
+  } catch (_) { }
 
   let storeSchedule = {
     isOpen: true,
@@ -253,7 +253,7 @@ async function loadOperationalContext(psid, session = null) {
   try {
     await systemSettingsService.getSystemSettings();
     storeSchedule = systemSettingsService.isStoreOpen();
-  } catch (_) {}
+  } catch (_) { }
 
   let menuItems = [];
   try {
@@ -285,7 +285,7 @@ async function loadOperationalContext(psid, session = null) {
         JOIN ingredients i ON i.ingredient_id = r.ingredient_id
       `);
       recipes = Array.isArray(recipeRows) ? recipeRows : [];
-    } catch (_) {}
+    } catch (_) { }
 
     const recipesByMenu = new Map();
     for (const r of recipes) {
@@ -401,29 +401,29 @@ function buildAssistantSystemInstruction(context = {}) {
 
   const menuCatalogBlock = menuItems.length > 0
     ? menuItems.map(item => {
-        const maxServings = Number(item.max_servings ?? item.stock ?? 0);
-        const isVisible = (item.is_available === 1 || item.is_available === true);
-        const isOrderable = isVisible && maxServings > 0;
-        let flag = '[OUT OF STOCK - DO NOT SELL]';
-        if (isOrderable) {
-          flag = maxServings < 15
-            ? `[LOW ON STOCK | Servings: ${maxServings}]`
-            : `[AVAILABLE | Servings: ${maxServings}]`;
-        }
-        const price = Number(item.price || 0).toFixed(2);
-        return `- ${item.name} | ₱${price} | Category: ${item.category || 'Cafe'} | ${flag} | ${item.description || 'Freshly prepared cafe specialty'}`;
-      }).join('\n')
+      const maxServings = Number(item.max_servings ?? item.stock ?? 0);
+      const isVisible = (item.is_available === 1 || item.is_available === true);
+      const isOrderable = isVisible && maxServings > 0;
+      let flag = '[OUT OF STOCK - DO NOT SELL]';
+      if (isOrderable) {
+        flag = maxServings < 15
+          ? `[LOW ON STOCK | Servings: ${maxServings}]`
+          : `[AVAILABLE | Servings: ${maxServings}]`;
+      }
+      const price = Number(item.price || 0).toFixed(2);
+      return `- ${item.name} | ₱${price} | Category: ${item.category || 'Cafe'} | ${flag} | ${item.description || 'Freshly prepared cafe specialty'}`;
+    }).join('\n')
     : '- Menu catalog is temporarily empty.';
 
   const cartBlock = cart.length > 0
     ? cart.map(c => {
-        const qty = parseInt(c.quantity, 10) || 1;
-        const unit = Number(c.price || c.unitPrice || 0);
-        const addonText = Array.isArray(c.addOns) && c.addOns.length > 0
-          ? ` (Add-on: ${c.addOns.map(a => a.name || a).join(', ')})`
-          : '';
-        return `${qty}x ${c.name}${addonText} (₱${(unit * qty).toFixed(2)})`;
-      }).join(', ')
+      const qty = parseInt(c.quantity, 10) || 1;
+      const unit = Number(c.price || c.unitPrice || 0);
+      const addonText = Array.isArray(c.addOns) && c.addOns.length > 0
+        ? ` (Add-on: ${c.addOns.map(a => a.name || a).join(', ')})`
+        : '';
+      return `${qty}x ${c.name}${addonText} (₱${(unit * qty).toFixed(2)})`;
+    }).join(', ')
     : 'Empty';
 
   const orderBlock = context.latestOrder
@@ -447,8 +447,9 @@ function buildAssistantSystemInstruction(context = {}) {
     Populate extracted_data.items with ALL the recommended items (or the item referred to) with quantity: 1.
     Reply with warm confirmation like: "Sige po! Idinagdag ko na po sa inyong cart ang ating mga nirekomenda..."
   - STRICT NEGATIVE CONSTRAINT (NEVER CONFUSE NAMES/ADDRESSES WITH CONVERSATIONAL PHRASES):
-    NEVER, EVER extract conversational agreement words or phrases (such as "sige lahat yan", "lahat yan", "sige po", "oo", "kuya", "patingin", "wait lang") as customer_name, address, or note!
-    A customer_name MUST be an actual person's name (e.g. Francis, Maria, John). If unsure, leave customer_name as null!
+    NEVER, EVER extract polite Filipino prefixes, honorifics, or conversational phrases (such as "pa", "paki", "pa-add", "pa add", "pa-order", "kuya", "ate", "kuya pa", "sir", "boss", "sige lahat yan", "lahat yan", "sige po", "oo", "patingin", "wait lang") as customer_name, address, or note!
+    Words like "pa", "paki", "pa-add" are polite request markers ("paki-add"), NOT a person's name!
+    A customer_name MUST be an actual person's real name (e.g. Francis, Maria, John). If unsure, leave customer_name as null!
 - OPEN-DOMAIN BANTER & SMOOTH PIVOT: If the customer talks about their day, cracks a joke, or asks for life advice, respond empathetically and engagingly FIRST, then smoothly segue back to cafe favorites.
 - NON-EXISTENT ITEM GUARD: If the customer asks for an item NOT in the LIVE MENU CATALOG below (e.g. sushi, spaghetti, ramen, tacos), NEVER hallucinate or add it! Explicitly and politely inform them that Diner's Cafe does not serve it, and suggest 1-2 available menu items. Set detected_action = "NONE".
 - OUT-OF-STOCK & QUANTITY LIMIT GUARD: Menu item availability is 100% recipe-driven based on raw ingredients. NEVER sell, recommend, or add [OUT OF STOCK - DO NOT SELL] items. Politely inform the customer that it is sold out and recommend available alternatives. If a customer orders more servings than currently available (e.g., ordering 4 when only 2 servings remain), politely inform them of the maximum servings available and offer to prepare up to the remaining amount.
@@ -529,8 +530,8 @@ ACTION DEFINITIONS:
 - DELAY_COMPLAINT: Customer expresses frustration or asks why order is taking long.
 - SUBMIT_FEEDBACK: Customer gives a rating, review, or feedback on food/service. Extract feedback_text.
 - PROCEED_CHECKOUT: Customer indicates readiness to checkout.${(CAFE_PERSONA_CONFIG && Array.isArray(CAFE_PERSONA_CONFIG.fewShotExamples) && CAFE_PERSONA_CONFIG.fewShotExamples.length > 0)
-  ? '\n\n7. FEW-SHOT CONVERSATIONAL EXAMPLES:\n' + CAFE_PERSONA_CONFIG.fewShotExamples.map((ex, idx) => `[Example ${idx + 1}: ${ex.scenario}]\nCustomer: "${ex.customer}"\nTarget Response: "${ex.assistant}"`).join('\n\n')
-  : ''}`;
+      ? '\n\n7. FEW-SHOT CONVERSATIONAL EXAMPLES:\n' + CAFE_PERSONA_CONFIG.fewShotExamples.map((ex, idx) => `[Example ${idx + 1}: ${ex.scenario}]\nCustomer: "${ex.customer}"\nTarget Response: "${ex.assistant}"`).join('\n\n')
+      : ''}`;
 }
 
 /**
@@ -624,7 +625,12 @@ function parseAssistantJson(rawText) {
   }
 
   let customerName = rawData.customer_name ? String(rawData.customer_name).trim() : null;
-  if (customerName && /^(?:sige\s+lahat\s*yan|sige\s*lahat|lahat\s*yan|sige|oo|opo|kuya|patingin|cart|menu|wait|hello|hi|yes|no)\b/i.test(customerName)) {
+  if (customerName && (
+    /^(?:pa|paki|pa[- ]?add|pa[- ]?order|paki[- ]?add|kuya|ate|kuya\s+pa|ate\s+pa|sir|boss|maam|mam|bossing|sige\s+lahat\s*yan|sige\s*lahat|lahat\s*yan|sige|oo|opo|patingin|cart|menu|wait|hello|hi|yes|no)\b/i.test(customerName) ||
+    customerName.length < 2 ||
+    customerName.toLowerCase() === 'pa' ||
+    customerName.toLowerCase() === 'kuya pa'
+  )) {
     customerName = null;
   }
   const phoneNumber = rawData.phone_number ? String(rawData.phone_number).trim() : null;
@@ -710,7 +716,7 @@ async function generateAssistantResponse(psid, messageText, session = null, opti
   for (let kIdx = 0; kIdx < healthyKeys.length; kIdx++) {
     const selectedKey = healthyKeys[kIdx];
     const client = options.client || (geminiService.getClientForKey ? geminiService.getClientForKey(selectedKey) : getGenAIClient());
-    if (!client || !client.interactions?.create) continue;
+    if (!client || (!client.interactions?.create && !client.models?.generateContent)) continue;
     let keyHitQuota = false;
 
     for (let i = 0; i < models.length; i++) {
@@ -718,34 +724,57 @@ async function generateAssistantResponse(psid, messageText, session = null, opti
       const perAttemptTimeoutMs = i === models.length - 1 ? timeoutMs : Math.min(timeoutMs, 15000);
 
       try {
-        const interaction = await client.interactions.create(
-          {
-            model,
-            input,
-            system_instruction: systemInstruction,
-            generation_config: {
-              temperature: 0.7
-            },
-            response_format: {
-              type: 'text',
-              mime_type: 'application/json',
-              schema: ASSISTANT_RESPONSE_SCHEMA
-            }
-          },
-          {
-            timeout_ms: perAttemptTimeoutMs,
-            retries: { strategy: 'none' }
-          }
-        );
+        let outputText = '';
+        if (client.interactions?.create) {
+          try {
+            const interaction = await client.interactions.create(
+              {
+                model,
+                input,
+                system_instruction: systemInstruction,
+                generation_config: {
+                  temperature: 0.7
+                },
+                response_format: {
+                  type: 'text',
+                  mime_type: 'application/json',
+                  schema: ASSISTANT_RESPONSE_SCHEMA
+                }
+              },
+              {
+                timeout_ms: perAttemptTimeoutMs,
+                retries: { strategy: 'none' }
+              }
+            );
 
-        const outputText = interaction?.output_text ||
-          interaction?.steps
-            ?.filter(s => s.type === 'model_output')
-            ?.flatMap(s => s.content || [])
-            ?.filter(c => c.type === 'text' && c.text)
-            ?.map(c => c.text)
-            ?.join('') ||
-          '';
+            outputText = interaction?.output_text ||
+              interaction?.steps
+                ?.filter(s => s.type === 'model_output')
+                ?.flatMap(s => s.content || [])
+                ?.filter(c => c.type === 'text' && c.text)
+                ?.map(c => c.text)
+                ?.join('') ||
+              '';
+          } catch (interactErr) {
+            if (/429|RESOURCE_EXHAUSTED/i.test(interactErr.message)) {
+              throw interactErr;
+            }
+          }
+        }
+
+        if (!outputText && client.models?.generateContent) {
+          const genResponse = await client.models.generateContent({
+            model,
+            contents: input,
+            config: {
+              systemInstruction,
+              responseMimeType: 'application/json',
+              responseSchema: ASSISTANT_RESPONSE_SCHEMA,
+              temperature: 0.7
+            }
+          });
+          outputText = genResponse?.text || '';
+        }
 
         const parsed = parseAssistantJson(outputText);
         if (parsed) {
@@ -953,7 +982,7 @@ INSPECTION RULES:
         verification.rejection_reason = 'Limit of 2 discount uses per day exceeded for this ID card.';
         verification.discount_rate = 0.00;
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   return verification;

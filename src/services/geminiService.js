@@ -102,13 +102,20 @@ const MODEL_COOLDOWN_MS = 2 * 60 * 1000;
  * @returns {string[]}
  */
 function resolveApiKeyPool() {
-  const rawPool = (process.env.GEMINI_API_KEYS || '').split(',')
+  const envKeys = [];
+  for (const [k, v] of Object.entries(process.env)) {
+    if (/^GEMINI.*KEY/i.test(k) && typeof v === 'string') {
+      envKeys.push(...v.split(','));
+    }
+  }
+  const rawPool = envKeys
+    .concat((process.env.GEMINI_API_KEYS || '').split(','))
     .concat(process.env.GEMINI_API_KEY ? [process.env.GEMINI_API_KEY] : [])
     .concat(Array.isArray(config.geminiApiKeys) ? config.geminiApiKeys : [])
     .concat(config.geminiApiKey ? [config.geminiApiKey] : []);
 
   const keys = Array.from(new Set(
-    rawPool.map(k => (k || '').trim()).filter(k => k && k !== 'your_gemini_api_key_here')
+    rawPool.map(k => (k || '').trim().replace(/^['"]|['"]$/g, '')).filter(k => k && k !== 'your_gemini_api_key_here')
   ));
   return keys;
 }

@@ -154,4 +154,74 @@ describe('Screenshot Bug Fixes & Multi-Key AI Pool Verification', () => {
     assert.strictEqual(aiService.PRIMARY_AI_MODEL, 'gemini-3.8-flash');
     assert.strictEqual(geminiService.PRIMARY_MODEL, 'gemini-3.8-flash');
   });
+
+  it('10. "Pa add lahat ng recomedation mo" adds recommended items to cart, NEVER sets customer_name to "Pa" or "Kuya Pa"', async () => {
+    const psid = `TEST_PA_ADD_${Date.now()}`;
+    const session = await getSession(psid);
+    session.last_recommended_items = ['Classic Burger', 'Biscoff Cheesecake'];
+    session.cart = [];
+    session.customer_name = null;
+
+    const res = await nlpEngine.executeAiAssistantTurn(psid, session, 'Pa add lahat ng recomedation mo', {
+      aiResponse: {
+        reply_message: 'Sige po! Idinagdag ko na po ang Classic Burger at Biscoff Cheesecake sa inyong cart.',
+        detected_action: 'SET_DETAILS',
+        action_payload: {
+          customer_name: 'Pa',
+          items: []
+        }
+      }
+    });
+
+    assert.strictEqual(session.customer_name, null, 'Must NEVER set customer_name to "Pa"');
+    assert.strictEqual(session.cart.length >= 1, true, 'Cart must have the recommended items added');
+    assert.ok(session.cart.some(it => it.name.includes('Classic Burger') || it.name.includes('Biscoff Cheesecake')));
+  });
+
+  it('11. Inquiries like "Ano ba mga d mo kayang gawin?" do NOT loop back to "will this be for Dine In, Delivery, or Take Out?"', async () => {
+    const psid = `TEST_CAPABILITIES_INQ_${Date.now()}`;
+    const session = await getSession(psid);
+    session.current_step = 'INITIAL';
+    session.dining_mode = null;
+
+    const res = await nlpEngine.handleTextInput(psid, session, 'Ano ba mga d mo kayang gawin?');
+    assert.notStrictEqual(res.intent, 'AWAITING_DINING_MODE_GATEWAY', 'Must not trap inquiry into rigid dining mode greeting');
+    assert.doesNotMatch(res.replyLog || '', /Ask ko lang po muna bago tayo magsimula, will this be for Dine In, Delivery, or Take Out\?/i);
+  });
+
+  it('12. "Sige nga dine in ako" sets session.dining_mode = "Dine In" and persists cleanly without appending dining mode question', async () => {
+    const psid = `TEST_DINE_IN_${Date.now()}`;
+    const session = await getSession(psid);
+    session.dining_mode = null;
+
+    await nlpEngine.executeAiAssistantTurn(psid, session, 'Sige nga dine in ako', {
+      aiResponse: {
+        reply_message: 'Sige po, Dine-in ang napili ninyo. Ano po ang gusto ninyong i-order mula sa ating menu ngayon?',
+        detected_action: 'NONE',
+        action_payload: {}
+      }
+    });
+
+    assert.strictEqual(session.dining_mode, 'Dine In');
+    assert.strictEqual(session.orderType, 'dine_in');
+
+    // Subsequent inquiry must NOT have the appended question
+    const recTurn = await nlpEngine.executeAiAssistantTurn(psid, session, 'Ano bang ma recomend mo saakin dyan?', {
+      aiResponse: {
+        reply_message: 'Para po sa rekomendasyon, subukan po natin ang ating Biscoff Cheesecake at Bacon Burger!',
+        detected_action: 'NONE',
+        action_payload: {}
+      }
+    });
+
+    assert.doesNotMatch(recTurn.replyLog || '', /Bago po tayo mag-order, ask ko lang po: will this be for Dine In/i);
+  });
+
+  it('13. Multi-key pool detects separate GEMINI_API_KEY_1..4 variables', () => {
+    const geminiService = require('../src/services/geminiService');
+    process.env.GEMINI_API_KEY_99 = 'AIzaSyTestKeySeparate99';
+    const pool = geminiService.resolveApiKeyPool();
+    assert.ok(pool.includes('AIzaSyTestKeySeparate99'), 'Pool must include GEMINI_API_KEY_99');
+    delete process.env.GEMINI_API_KEY_99;
+  });
 });
