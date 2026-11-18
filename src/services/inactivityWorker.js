@@ -63,6 +63,20 @@ async function checkInactivity(deps = {}) {
 
     if (!session) continue;
 
+    // Do NOT send abandonment/inactivity warnings or reset session if customer has an active order being prepared/delivered
+    try {
+      const [activeOrders] = await db.query(
+        `SELECT o.id, o.status FROM orders o
+         JOIN customers c ON c.id = o.customer_id
+         WHERE c.psid = ? AND LOWER(COALESCE(o.status, '')) IN ('pending', 'pending_approval', 'preparing', 'in_kitchen', 'dispatched', 'ready', 'accepted')
+         LIMIT 1`,
+        [String(psid)]
+      );
+      if (activeOrders && activeOrders.length > 0) {
+        continue;
+      }
+    } catch (_) { }
+
     // Process sessions that have an active draft order, active state, or recent chat interaction within 2 hours
     const hasCart = Array.isArray(session.cart) && session.cart.length > 0;
     const hasActiveState = session.state && session.state !== 'IDLE' && session.state !== 'idle';

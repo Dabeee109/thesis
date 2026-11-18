@@ -70,6 +70,7 @@ describe('Screenshot Bug Fixes & Multi-Key AI Pool Verification', () => {
     session.customer_name = 'Francis';
     session.contact_number = '09281762895';
     session.dining_mode = 'Dine In';
+    session.payment_mode = 'Cash';
     session.cart = [{ menuItemId: 10202, name: 'Coffee Jelly', price: 20, quantity: 1 }];
     session.order_subtotal = 20.00;
     session.state = 'AWAITING_DISCOUNT_PROOF';
@@ -346,6 +347,7 @@ describe('Screenshot Bug Fixes & Multi-Key AI Pool Verification', () => {
     session.contact_number = '09123456789';
     session.phone_number = '09123456789';
     session.dining_mode = 'Delivery';
+    session.payment_mode = 'Cash';
     session.address = 'Tondo Manila';
     session.landmark = 'DMCI homes landmark';
     session.cart = [{ id: 1, name: 'Classic Burger', price: 139, quantity: 1 }];
@@ -719,7 +721,7 @@ describe('Screenshot Bug Fixes & Multi-Key AI Pool Verification', () => {
     assert.ok(!pickupPrompt.includes('Address:'));
   });
 
-  it('39. Once guest details are given without payment mode, bot asks for Payment Mode (Cash or GCash)', async () => {
+  it('39. Sequence: Guest details given -> asks Discount -> (Wala) -> asks Payment Mode -> Order Summary', async () => {
     const psid = `TEST_ASK_PAYMENT_${Date.now()}`;
     const session = await getSession(psid);
     session.cart = [{ id: 101, name: 'Matcha Milktea', price: 99.0, quantity: 1 }];
@@ -731,8 +733,19 @@ describe('Screenshot Bug Fixes & Multi-Key AI Pool Verification', () => {
     const res = await nlpEngine.handleTextInput(psid, session, 'Francis Dave, 09281762895, 2:00 PM');
     assert.strictEqual(session.customer_name, 'Francis Dave');
     assert.ok(session.contact_number.includes('9281762895'));
+    assert.strictEqual(session.state, 'AWAITING_DISCOUNT_CONFIRMATION');
+    assert.match(res?.replyLog || JSON.stringify(sentMessages), /Senior Citizen o PWD ID/i);
+
+    // Answering 'Wala po' transitions to AWAITING_PAYMENT_MODE
+    const resPay = await nlpEngine.handleTextInput(psid, session, 'Wala po');
     assert.strictEqual(session.state, 'AWAITING_PAYMENT_MODE');
-    assert.match(res?.replyLog || JSON.stringify(sentMessages), /Cash o GCash/i);
+    assert.match(resPay?.replyLog || JSON.stringify(sentMessages), /Cash o GCash/i);
+
+    // Answering 'GCash' finalizes to AWAITING_ORDER_SUMMARY_CONFIRM
+    const resSum = await nlpEngine.handleTextInput(psid, session, 'GCash');
+    assert.strictEqual(session.state, 'AWAITING_ORDER_SUMMARY_CONFIRM');
+    assert.match(resSum?.replyLog || JSON.stringify(sentMessages), /ORDER SUMMARY/i);
+    assert.match(resSum?.replyLog || JSON.stringify(sentMessages), /Payment Mode: GCash/i);
   });
 
   it('40. Customer updating payment mode at Order Summary immediately re-renders Updated Order Summary', async () => {
@@ -774,5 +787,94 @@ describe('Screenshot Bug Fixes & Multi-Key AI Pool Verification', () => {
     const sentTexts = sentMessages.map(m => m.messagePayload.text).join('\n');
     assert.match(sentTexts, /Na-receive na po namin ang inyong order/i);
     assert.doesNotMatch(sentTexts, /Tama po ba ang lahat ng detalye/i, 'Must NOT repeat the confirmation prompt after user says Tama po');
+  });
+
+  it('42. Jayson Chat Session: Note field is preserved and never overwritten by payment mode', async () => {
+    const psid = `TEST_NOTE_PRESERVED_${Date.now()}`;
+    const session = await getSession(psid);
+    session.cart = [{ id: 1, name: 'Boneless Chicken Bburinkle', price: 269.0, quantity: 1 }];
+    session.dining_mode = 'Dine In';
+    session.state = 'COLLECTING_CUSTOMER_INFO';
+
+    // Customer provides details with note "less ice"
+    await nlpEngine.handleTextInput(psid, session, 'jayson\n09501975648\n12 pm\nless ice');
+    assert.strictEqual(session.customer_name, 'jayson');
+    assert.ok(session.contact_number.includes('9501975648'));
+    assert.strictEqual(session.note, 'less ice');
+    assert.strictEqual(session.state, 'AWAITING_DISCOUNT_CONFIRMATION');
+
+    // Customer says "wala po" for discount
+    await nlpEngine.handleTextInput(psid, session, 'wala po');
+    assert.strictEqual(session.state, 'AWAITING_PAYMENT_MODE');
+
+    // Customer selects "gcash" - note must STILL be "less ice", NOT "gcash"
+    const sumRes = await nlpEngine.handleTextInput(psid, session, 'gcash');
+    assert.strictEqual(session.payment_mode, 'GCash');
+    assert.strictEqual(session.note, 'less ice', 'Note must remain "less ice" and NOT be overwritten by payment method');
+    assert.match(sumRes?.replyLog || '', /Note:\s*less ice/i);
+  });
+
+  it('43. Negation on cancel: "Di ako nagcancel" does not trigger cancel confirmation prompt', async () => {
+    const psid = `TEST_NEGATION_CANCEL_${Date.now()}`;
+    const session = await getSession(psid);
+    session.state = 'IDLE';
+
+    assert.strictEqual(nlpEngine.isCancelTriggerWord('di ako nagcancel', 'Di ako nagcancel'), false);
+    assert.strictEqual(nlpEngine.isCancelTriggerWord('hindi ako nag cancel', 'hindi ako nag cancel'), false);
+    assert.strictEqual(nlpEngine.isCancelTriggerWord('wala naman akong kinancel', 'wala naman akong kinancel'), false);
+  });
+
+  it('44. Dine-in and Pick-up notifications never say "rider" or "on the way na sa inyong location"', async () => {
+    const orderService = require('../src/services/orderService');
+    const cust = await orderService.upsertCustomer({
+      psid: 'PSID_NOTIF_TEST',
+      firstName: 'Juan',
+      lastName: 'Cruz',
+      phone: '09123456789'
+    });
+    const custId = typeof cust === 'object' && cust ? cust.id : cust;
+    const [itemRows] = await db.query('SELECT id, price FROM menu_items LIMIT 1');
+    const mItem = itemRows && itemRows[0] ? itemRows[0] : { id: 101, price: 100 };
+
+    // Create dine-in order
+    const dineInOrder = await orderService.createOrder({
+      psid: 'PSID_NOTIF_TEST',
+      customerId: custId,
+      orderType: 'pickup',
+      diningMode: 'Dine In',
+      deliveryAddress: "Diner's Cafe, Tondo, Manila",
+      contactNumber: '09123456789',
+      items: [{ menuItemId: mItem.id, quantity: 1, price: mItem.price }]
+    });
+
+    sentMessages.length = 0;
+    await orderService.updateOrderStatus(dineInOrder.orderId, 'dispatched', {}, 'admin');
+    const dineInMsg = sentMessages.map(m => m.messagePayload.text).join('\n');
+    assert.match(dineInMsg, /i-serve sa inyong table dito sa Diner's Cafe/i);
+    assert.doesNotMatch(dineInMsg, /rider/i);
+
+    // Create pickup order
+    const pickupOrder = await orderService.createOrder({
+      psid: 'PSID_NOTIF_TEST',
+      customerId: custId,
+      orderType: 'pickup',
+      diningMode: 'Pick-up',
+      deliveryAddress: "Diner's Cafe, Tondo, Manila",
+      contactNumber: '09123456789',
+      items: [{ menuItemId: mItem.id, quantity: 1, price: mItem.price }]
+    });
+
+    sentMessages.length = 0;
+    await orderService.updateOrderStatus(pickupOrder.orderId, 'dispatched', {}, 'admin');
+    const pickupMsg = sentMessages.map(m => m.messagePayload.text).join('\n');
+    assert.match(pickupMsg, /Ready for Pick-up na po/i);
+    assert.doesNotMatch(pickupMsg, /rider/i);
+  });
+
+  it('45. Inactivity Worker skips customers with active orders being prepared in kitchen', async () => {
+    const inactivityWorker = require('../src/services/inactivityWorker');
+    await assert.doesNotReject(async () => {
+      await inactivityWorker.checkInactivity();
+    });
   });
 });

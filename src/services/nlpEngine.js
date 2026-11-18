@@ -431,6 +431,14 @@ function parseCustomerInfo(rawText, diningMode) {
       }
     }
 
+    if (!isDeliveryDiningMode(diningMode) && !arrivingTime) {
+      const timeIdx = lines.findIndex(l => /^(?:around\s*)?\d{1,2}(?::\d{2})?\s*(?:am|pm|nn|noon)$/i.test(l.trim()) || /\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i.test(l.trim()));
+      if (timeIdx !== -1) {
+        arrivingTime = lines[timeIdx].trim();
+        lines.splice(timeIdx, 1);
+      }
+    }
+
     if (needsAddress && !address) {
       const isPhoneOnly = l => Boolean(normalizePhone(l)) || /^\+?[\d\s-]{7,}$/.test(l) || (contact && l.replace(/\D/g, '') === String(contact).replace(/\D/g, ''));
       const isNameCandidate = l => !NON_NAME_FILLERS.test(l) && !/\d{2,}/.test(l) && l.trim().split(/\s+/).length <= 4 && !/\b(?:street|st|avenue|ave|road|rd|barangay|brgy|village|subd|subdivision|blk|block|lot|phase|city|manila|mandaluyong|pasay|makati|quezon|tondo|sampaloc|table|counter)\b/i.test(l);
@@ -463,7 +471,17 @@ function parseCustomerInfo(rawText, diningMode) {
   }
 
   if (!note && lines.length > 0) {
-    const noteCandidates = lines.filter(l => !NON_NAME_FILLERS.test(l) && l.length > 3 && !normalizePhone(l) && l !== name && l !== address);
+    const noteCandidates = lines.filter(l => {
+      const trimmed = l.trim();
+      if (NON_NAME_FILLERS.test(trimmed)) return false;
+      if (trimmed.length <= 3) return false;
+      if (normalizePhone(trimmed)) return false;
+      if (trimmed === name || trimmed === address || trimmed === arrivingTime || trimmed === landmark) return false;
+      if (/^(?:around\s*)?\d{1,2}(?::\d{2})?\s*(?:am|pm|nn|noon)$/i.test(trimmed) || /\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i.test(trimmed)) return false;
+      if (/^(?:gcash|g-?cash|cash|cod|kaliwaan|maya)$/i.test(trimmed)) return false;
+      if (/^(?:delivery|pickup|pick[\s-]*up|takeout|take[\s-]*out|dine[\s-]*in|dinein)$/i.test(trimmed)) return false;
+      return true;
+    });
     if (noteCandidates.length > 0) {
       note = noteCandidates.join(', ');
     }
@@ -1777,6 +1795,7 @@ function isCancelTriggerWord(norm = '', rawText = '', eventPayload = '', session
   const combined = `${norm || ''} ${rawText || ''}`.trim();
   if (/\b(?:ayoko\s*na|ayaw\s*ko\s*na)\s*(?:po)?\s*(?:mag[- ]?dagdag|umorder)\b/i.test(combined)) return false;
   if (/\b(?:paano|paanong|pano|panong|bakit|kailan|kelan)\b.*\b(?:na-?cancel|kinancel|naka-?cancel|na-?kansela|kinansela|na-?void)\b/i.test(combined)) return false;
+  if (/\b(?:di|hindi|wala)\b.*?\b(?:nag[\s-]?cancel|nagpa[\s-]?cancel|kinancel|kinansela|nagkakansela)\b/i.test(combined)) return false;
   const triggerPhrases = [
     'cancel',
     'cancel order',
@@ -2618,6 +2637,19 @@ async function handlePayload(psid, session, payload) {
   if (payload === 'DISCOUNT_NO') {
     session.discount = { applied: false, type: 'None', amount: 0 };
     session.discount_amount = 0;
+    await saveSession(session);
+    if (!session.payment_mode) {
+      session.state = 'AWAITING_PAYMENT_MODE';
+      session.current_step = 'AWAITING_PAYMENT_MODE';
+      session.checkout_step = 'AWAITING_PAYMENT_MODE';
+      await saveSession(session);
+      const askPaymentMsg = "Ano po ang gagamitin ninyong Payment Mode para sa inyong order: Cash o GCash?";
+      await sendQuickReplies(psid, askPaymentMsg, [
+        { title: '💵 Cash', payload: 'PAYMENT_CASH' },
+        { title: '📱 GCash', payload: 'PAYMENT_GCASH' }
+      ]);
+      return;
+    }
     await finalizeOrderSummaryAndPayment(psid, session);
     return;
   }
@@ -4380,6 +4412,20 @@ async function handleTextInput(psid, session, rawText, options = {}) {
         session.details.paymentMode = paymentMode;
       }
 
+      if (!session.discount) {
+        session.state = 'AWAITING_DISCOUNT_CONFIRMATION';
+        session.current_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+        session.checkout_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+        await saveSession(session);
+
+        const askDiscountMsg = 'Mayroon po ba kayong Senior Citizen o PWD ID para sa 20% discount?';
+        await sendQuickReplies(psid, askDiscountMsg, [
+          { title: 'Mayroon', payload: 'DISCOUNT_YES' },
+          { title: 'Wala po', payload: 'DISCOUNT_NO' }
+        ]);
+        return { intent: 'AWAITING_DISCOUNT_CONFIRMATION', confidence: 1.0, replyLog: askDiscountMsg };
+      }
+
       if (!session.payment_mode) {
         session.state = 'AWAITING_PAYMENT_MODE';
         session.current_step = 'AWAITING_PAYMENT_MODE';
@@ -4394,17 +4440,7 @@ async function handleTextInput(psid, session, rawText, options = {}) {
         return { intent: 'AWAITING_PAYMENT_MODE', confidence: 1.0, replyLog: askPaymentMsg };
       }
 
-      session.state = 'AWAITING_DISCOUNT_CONFIRMATION';
-      session.current_step = 'AWAITING_DISCOUNT_CONFIRMATION';
-      session.checkout_step = 'AWAITING_DISCOUNT_CONFIRMATION';
-      await saveSession(session);
-
-      const askDiscountMsg = 'Mayroon po ba kayong Senior Citizen o PWD ID para sa 20% discount?';
-      await sendQuickReplies(psid, askDiscountMsg, [
-        { title: 'Mayroon', payload: 'DISCOUNT_YES' },
-        { title: 'Wala po', payload: 'DISCOUNT_NO' }
-      ]);
-      return { intent: 'AWAITING_DISCOUNT_CONFIRMATION', confidence: 1.0, replyLog: askDiscountMsg };
+      return await finalizeOrderSummaryAndPayment(psid, session);
     }
   }
 
@@ -4496,17 +4532,35 @@ async function handleTextInput(psid, session, rawText, options = {}) {
       session.address = storeAddr;
       if (session.details) session.details.address = storeAddr;
 
-      session.state = 'AWAITING_DISCOUNT_CONFIRMATION';
-      session.current_step = 'AWAITING_DISCOUNT_CONFIRMATION';
-      session.checkout_step = 'AWAITING_DISCOUNT_CONFIRMATION';
-      await saveSession(session);
+      if (!session.discount) {
+        session.state = 'AWAITING_DISCOUNT_CONFIRMATION';
+        session.current_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+        session.checkout_step = 'AWAITING_DISCOUNT_CONFIRMATION';
+        await saveSession(session);
 
-      const switchedMsg = 'Na-switch na po ang inyong order sa Store Pick-up (Delivery Fee: ₱0.00). Mayroon po ba kayong Senior Citizen o PWD ID para sa 20% discount?';
-      await sendQuickReplies(psid, switchedMsg, [
-        { title: 'Mayroon', payload: 'DISCOUNT_YES' },
-        { title: 'Wala po', payload: 'DISCOUNT_NO' }
-      ]);
-      return { intent: 'AWAITING_DISCOUNT_CONFIRMATION', confidence: 1.0, replyLog: switchedMsg };
+        const switchedMsg = 'Na-switch na po ang inyong order sa Store Pick-up (Delivery Fee: ₱0.00). Mayroon po ba kayong Senior Citizen o PWD ID para sa 20% discount?';
+        await sendQuickReplies(psid, switchedMsg, [
+          { title: 'Mayroon', payload: 'DISCOUNT_YES' },
+          { title: 'Wala po', payload: 'DISCOUNT_NO' }
+        ]);
+        return { intent: 'AWAITING_DISCOUNT_CONFIRMATION', confidence: 1.0, replyLog: switchedMsg };
+      }
+
+      if (!session.payment_mode) {
+        session.state = 'AWAITING_PAYMENT_MODE';
+        session.current_step = 'AWAITING_PAYMENT_MODE';
+        session.checkout_step = 'AWAITING_PAYMENT_MODE';
+        await saveSession(session);
+
+        const switchedMsg = 'Na-switch na po ang inyong order sa Store Pick-up (Delivery Fee: ₱0.00). Ano po ang gagamitin ninyong Payment Mode para sa inyong order: Cash o GCash?';
+        await sendQuickReplies(psid, switchedMsg, [
+          { title: '💵 Cash', payload: 'PAYMENT_CASH' },
+          { title: '📱 GCash', payload: 'PAYMENT_GCASH' }
+        ]);
+        return { intent: 'AWAITING_PAYMENT_MODE', confidence: 1.0, replyLog: switchedMsg };
+      }
+
+      return await finalizeOrderSummaryAndPayment(psid, session);
     }
 
     if (shouldEscapeCheckoutState(rawText, session)) {
@@ -4645,6 +4699,20 @@ async function handleTextInput(psid, session, rawText, options = {}) {
         };
         session.discount_amount = computedDiscount;
         await saveSession(session);
+
+        if (!session.payment_mode) {
+          session.state = 'AWAITING_PAYMENT_MODE';
+          session.current_step = 'AWAITING_PAYMENT_MODE';
+          session.checkout_step = 'AWAITING_PAYMENT_MODE';
+          await saveSession(session);
+          const askPaymentMsg = "Salamat po! Na-apply na po ang inyong 20% Senior Citizen / PWD discount. Ano po ang gagamitin ninyong Payment Mode para sa inyong order: Cash o GCash?";
+          await sendQuickReplies(psid, askPaymentMsg, [
+            { title: '💵 Cash', payload: 'PAYMENT_CASH' },
+            { title: '📱 GCash', payload: 'PAYMENT_GCASH' }
+          ]);
+          return { intent: 'AWAITING_PAYMENT_MODE', confidence: 1.0, replyLog: askPaymentMsg };
+        }
+
         return await finalizeOrderSummaryAndPayment(psid, session);
       }
 
@@ -4659,6 +4727,18 @@ async function handleTextInput(psid, session, rawText, options = {}) {
         const hasAddress = isDelivery ? Boolean(session.address || session.delivery_address) : true;
 
         if (hasName && hasPhone && hasAddress) {
+          if (!session.payment_mode) {
+            session.state = 'AWAITING_PAYMENT_MODE';
+            session.current_step = 'AWAITING_PAYMENT_MODE';
+            session.checkout_step = 'AWAITING_PAYMENT_MODE';
+            await saveSession(session);
+            const askPaymentMsg = "Ano po ang gagamitin ninyong Payment Mode para sa inyong order: Cash o GCash?";
+            await sendQuickReplies(psid, askPaymentMsg, [
+              { title: '💵 Cash', payload: 'PAYMENT_CASH' },
+              { title: '📱 GCash', payload: 'PAYMENT_GCASH' }
+            ]);
+            return { intent: 'AWAITING_PAYMENT_MODE', confidence: 1.0, replyLog: askPaymentMsg };
+          }
           return await finalizeOrderSummaryAndPayment(psid, session);
         }
 
@@ -4701,6 +4781,19 @@ async function handleTextInput(psid, session, rawText, options = {}) {
     if (isNo) {
       session.discount = { applied: false, type: 'None', amount: 0 };
       session.discount_amount = 0;
+      await saveSession(session);
+      if (!session.payment_mode) {
+        session.state = 'AWAITING_PAYMENT_MODE';
+        session.current_step = 'AWAITING_PAYMENT_MODE';
+        session.checkout_step = 'AWAITING_PAYMENT_MODE';
+        await saveSession(session);
+        const askPaymentMsg = "Ano po ang gagamitin ninyong Payment Mode para sa inyong order: Cash o GCash?";
+        await sendQuickReplies(psid, askPaymentMsg, [
+          { title: '💵 Cash', payload: 'PAYMENT_CASH' },
+          { title: '📱 GCash', payload: 'PAYMENT_GCASH' }
+        ]);
+        return { intent: 'AWAITING_PAYMENT_MODE', confidence: 1.0, replyLog: askPaymentMsg };
+      }
       return await finalizeOrderSummaryAndPayment(psid, session);
     }
 
@@ -4725,6 +4818,20 @@ async function handleTextInput(psid, session, rawText, options = {}) {
       idNumber: idText
     };
     session.discount_amount = computedDiscount;
+    await saveSession(session);
+
+    if (!session.payment_mode) {
+      session.state = 'AWAITING_PAYMENT_MODE';
+      session.current_step = 'AWAITING_PAYMENT_MODE';
+      session.checkout_step = 'AWAITING_PAYMENT_MODE';
+      await saveSession(session);
+      const askPaymentMsg = "Salamat po! Na-apply na po ang inyong 20% Senior Citizen / PWD discount. Ano po ang gagamitin ninyong Payment Mode para sa inyong order: Cash o GCash?";
+      await sendQuickReplies(psid, askPaymentMsg, [
+        { title: '💵 Cash', payload: 'PAYMENT_CASH' },
+        { title: '📱 GCash', payload: 'PAYMENT_GCASH' }
+      ]);
+      return { intent: 'AWAITING_PAYMENT_MODE', confidence: 1.0, replyLog: askPaymentMsg };
+    }
 
     return await finalizeOrderSummaryAndPayment(psid, session);
   }
@@ -4942,6 +5049,30 @@ async function handleTextInput(psid, session, rawText, options = {}) {
     }
   }
 
+  // State: 'AWAITING_PAYMENT_MODE'
+  if (
+    session.state === 'AWAITING_PAYMENT_MODE' ||
+    session.current_step === 'AWAITING_PAYMENT_MODE' ||
+    session.checkout_step === 'AWAITING_PAYMENT_MODE'
+  ) {
+    const isGcash = /PAYMENT_GCASH|\b(?:gcash|g-?cash|online|e-?wallet)\b/i.test(rawText);
+    const isCash = /PAYMENT_CASH|\b(?:cash|cod|kaliwaan|abono)\b/i.test(rawText);
+    if (isGcash || isCash) {
+      session.payment_mode = isGcash ? 'GCash' : 'Cash';
+      if (!session.details) session.details = {};
+      session.details.paymentMode = session.payment_mode;
+      await saveSession(session);
+
+      return await finalizeOrderSummaryAndPayment(psid, session);
+    }
+    const askPaymentMsg = "Ano po ang gagamitin ninyong Payment Mode para sa inyong order: Cash o GCash?";
+    await sendQuickReplies(psid, askPaymentMsg, [
+      { title: '💵 Cash', payload: 'PAYMENT_CASH' },
+      { title: '📱 GCash', payload: 'PAYMENT_GCASH' }
+    ]);
+    return { intent: 'AWAITING_PAYMENT_MODE', confidence: 1.0, replyLog: askPaymentMsg };
+  }
+
   // Details flow states: check for interruption words (cancel, back, stop, menu, cart, track, hi)
   const isDetailsState = [
     'AWAITING_NAME',
@@ -4989,32 +5120,6 @@ async function handleTextInput(psid, session, rawText, options = {}) {
         if (parsePaymentModeValue(rawText) === 'Xendit') {
           await placeCustomerOrder(psid, session, 'xendit');
           return { intent: 'PAY_XENDIT', confidence: 1.0 };
-        }
-      }
-      if (session.state === 'AWAITING_PAYMENT_MODE' || session.current_step === 'AWAITING_PAYMENT_MODE' || session.checkout_step === 'AWAITING_PAYMENT_MODE') {
-        const isGcash = /PAYMENT_GCASH|\b(?:gcash|g-?cash|online|e-?wallet)\b/i.test(rawText);
-        const isCash = /PAYMENT_CASH|\b(?:cash|cod|kaliwaan|abono)\b/i.test(rawText);
-        if (isGcash || isCash) {
-          session.payment_mode = isGcash ? 'GCash' : 'Cash';
-          if (!session.details) session.details = {};
-          session.details.paymentMode = session.payment_mode;
-          await saveSession(session);
-
-          if (!session.discount) {
-            session.state = 'AWAITING_DISCOUNT_CONFIRMATION';
-            session.current_step = 'AWAITING_DISCOUNT_CONFIRMATION';
-            session.checkout_step = 'AWAITING_DISCOUNT_CONFIRMATION';
-            await saveSession(session);
-
-            const askDiscountMsg = 'Mayroon po ba kayong Senior Citizen o PWD ID para sa 20% discount?';
-            await sendQuickReplies(psid, askDiscountMsg, [
-              { title: 'Mayroon', payload: 'DISCOUNT_YES' },
-              { title: 'Wala po', payload: 'DISCOUNT_NO' }
-            ]);
-            return { intent: 'AWAITING_DISCOUNT_CONFIRMATION', confidence: 1.0, replyLog: askDiscountMsg };
-          } else {
-            return await finalizeOrderSummaryAndPayment(psid, session);
-          }
         }
       }
     }
@@ -6563,7 +6668,41 @@ async function startCheckoutFlow(psid, session, rawText = '') {
     }
   }
 
-  // Node K: If discount eligibility hasn't been checked yet, ask Senior / PWD discount first
+  // 1. Dining Mode Muna: Itatanong kung Delivery, Pick-up, o Dine-in
+  if (!session.dining_mode) {
+    session.state = 'AWAITING_DINING_MODE';
+    session.current_step = 'AWAITING_DINING_MODE';
+    session.checkout_step = 'AWAITING_DINING_MODE';
+    await saveSession(session);
+    const askDiningMsg = 'Sige po! Para sa ating checkout, ano po ang gagamitin nating dining mode: Delivery, Pick-up, o Dine-in po?';
+    await sendQuickReplies(psid, askDiningMsg, [
+      { title: 'Delivery', payload: 'DINING_DELIVERY' },
+      { title: 'Pick-up', payload: 'DINING_PICKUP' },
+      { title: 'Dine-in', payload: 'DINING_DINE_IN' }
+    ]);
+    return { intent: 'AWAITING_DINING_MODE', confidence: 1.0, replyLog: askDiningMsg };
+  }
+
+  // 2. Details ayon sa Dining Mode:
+  // Pag Delivery: Name, Phone number, Address, Landmark, note.
+  // Pag Dine-in / Pick-up: Name, Phone number, Arriving time, note.
+  const hasName = Boolean(session.customer_name);
+  const hasPhone = Boolean(session.contact_number || session.phone_number);
+  const isDelivery = isDeliveryDiningMode(session.dining_mode);
+  const hasAddress = isDelivery ? Boolean(session.address || session.delivery_address) : true;
+
+  if (!hasName || !hasPhone || !hasAddress) {
+    session.state = 'COLLECTING_CUSTOMER_INFO';
+    session.current_step = 'COLLECTING_CUSTOMER_INFO';
+    session.checkout_step = 'COLLECTING_CUSTOMER_INFO';
+    await saveSession(session);
+    const prompt = getCheckoutInfoPrompt(session);
+    await sendTextMessage(psid, prompt);
+    return { intent: 'COLLECTING_CUSTOMER_INFO_PROMPT', confidence: 1.0, replyLog: prompt };
+  }
+
+  // 3. Discount Prompt (Senior / PWD):
+  // Tinatanong pag natapos masagot ng customer ang details.
   if (!session.discount) {
     session.state = 'AWAITING_DISCOUNT_CONFIRMATION';
     session.current_step = 'AWAITING_DISCOUNT_CONFIRMATION';
@@ -6578,15 +6717,26 @@ async function startCheckoutFlow(psid, session, rawText = '') {
     return { intent: 'AWAITING_DISCOUNT_CONFIRMATION', confidence: 1.0, replyLog: askDiscountMsg };
   }
 
-  // Node O & P: Check if customer details are complete
-  const hasName = Boolean(session.customer_name);
-  const hasPhone = Boolean(session.contact_number || session.phone_number);
-  const isDelivery = isDeliveryDiningMode(session.dining_mode);
-  const hasAddress = isDelivery ? Boolean(session.address || session.delivery_address) : true;
+  // 4. Mode of Payment:
+  // Kapag WALA: Agad magtatanong ng Mode of Payment (Cash o GCash).
+  // Kapag MERON: Maghihingi muna ng ID verification; pagka-verify, saka magtatanong ng Mode of Payment.
+  if (!session.payment_mode) {
+    session.state = 'AWAITING_PAYMENT_MODE';
+    session.current_step = 'AWAITING_PAYMENT_MODE';
+    session.checkout_step = 'AWAITING_PAYMENT_MODE';
+    await saveSession(session);
 
-  if (hasName && hasPhone && hasAddress) {
-    return await finalizeOrderSummaryAndPayment(psid, session);
+    const askPaymentMsg = 'Ano po ang gagamitin ninyong Payment Mode para sa inyong order: Cash o GCash?';
+    await sendQuickReplies(psid, askPaymentMsg, [
+      { title: '💵 Cash', payload: 'PAYMENT_CASH' },
+      { title: '📱 GCash', payload: 'PAYMENT_GCASH' }
+    ]);
+    return { intent: 'AWAITING_PAYMENT_MODE', confidence: 1.0, replyLog: askPaymentMsg };
   }
+
+  // 5. Order Summary:
+  // Lalabas ang buod na may tamang details, discount, at napiling payment mode.
+  return await finalizeOrderSummaryAndPayment(psid, session);
 
   // Slot-filling (Node O & Q): Ask missing details
   session.state = 'COLLECTING_CUSTOMER_INFO';
@@ -7318,6 +7468,17 @@ async function handleTrackOrder(psid, session) {
 
   let o = (activeRows && activeRows.length > 0) ? activeRows[0] : null;
 
+  // 1b. Check if session has a pending GCash checkout awaiting payment proof
+  if (!o && (session.checkout_step === 'AWAITING_PAYMENT_PROOF' || session.pendingGCashOrder || session.state === 'AWAITING_PAYMENT_PROOF')) {
+    const pendingTotal = session.pendingGCashOrder?.grandTotal || session.order_total || session.checkout?.total || 0;
+    const pendingMsg = `Kasalukuyan pong naghihintay ang inyong order ng verification sa GCash payment (Total: ₱${Number(pendingTotal).toFixed(2)}). Pakisend po rito ang screenshot ng inyong GCash receipt o i-type ang 13-digit Reference Number para maipasa agad ito sa kusina!`;
+    await sendQuickReplies(psid, pendingMsg, [
+      { title: '❌ Cancel Checkout', payload: 'CANCEL_PENDING_GCASH' },
+      { title: '📋 Menu', payload: 'MENU_HOME' }
+    ]);
+    return;
+  }
+
   // 2. If no active order, check if there was a past terminal order
   if (!o) {
     const [recentRows] = await db.query(
@@ -7464,6 +7625,54 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
       detected_action = 'ADD_ITEM';
       action_payload.items = recList.map(name => ({ item_name: name, quantity: 1, addon: null }));
       action_payload.customer_name = null;
+    }
+
+    const isOrderBestseller = !isRecommendationInquiry &&
+      /\b(?:add|pa[- ]?add|dagdag|idagdag|isama|pabili|order|bigyan)\b.*?\b(?:best\s*seller|bestseller|patok|recom\w*)\b/i.test(rawText);
+
+    if (isOrderBestseller) {
+      try {
+        let catFilter = '';
+        if (/\b(?:drinks?|inumin|milktea|milk\s*tea|coffee|kape)\b/i.test(rawText)) {
+          catFilter = "AND (LOWER(c.name) LIKE '%drink%' OR LOWER(c.name) LIKE '%milktea%' OR LOWER(c.name) LIKE '%coffee%' OR LOWER(m.category) LIKE '%drink%')";
+        } else if (/\b(?:food|pagkain|burger|meal|ulam)\b/i.test(rawText)) {
+          catFilter = "AND (LOWER(c.name) LIKE '%burger%' OR LOWER(c.name) LIKE '%meal%' OR LOWER(c.name) LIKE '%pizza%')";
+        }
+        const [bsRows] = await db.query(`
+          SELECT m.id, m.name, m.price
+          FROM menu_items m
+          LEFT JOIN categories c ON c.id = m.category_id
+          LEFT JOIN inventory i ON i.menu_item_id = m.id
+          WHERE m.is_available = 1 AND COALESCE(i.stock_quantity, m.stock_quantity, 0) > 0 AND COALESCE(m.is_deleted, 0) = 0
+            AND COALESCE(LOWER(c.name), '') != 'add-ons'
+            ${catFilter}
+          ORDER BY m.is_bestseller DESC, m.id ASC
+          LIMIT 1
+        `);
+        if (bsRows && bsRows.length > 0) {
+          detected_action = 'ADD_ITEM';
+          if (!action_payload.items || action_payload.items.length === 0) {
+            action_payload.items = [{ item_name: bsRows[0].name, quantity: 1, addon: null }];
+          }
+        }
+      } catch (_) { }
+    }
+
+    // Safety Net: If reply_message states an item was added to the cart, ensure it is in action_payload.items & detected_action = 'ADD_ITEM'
+    if (/(?:idinagdag|naidagdag|added|nilagay)\s+(?:ko\s+na\s+)?(?:po\s+)?(?:ang\s+|yung\s+|ung\s+)?.*?(?:sa\s+inyong\s+cart|sa\s+cart)/i.test(reply_message)) {
+      try {
+        const [availMenu] = await db.query(`SELECT name FROM menu_items WHERE is_available = 1 AND COALESCE(is_deleted, 0) = 0`);
+        const mentionedItems = (availMenu || []).filter(m => new RegExp(`\\b${m.name.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\b`, 'i').test(reply_message));
+        if (mentionedItems.length > 0) {
+          detected_action = 'ADD_ITEM';
+          if (!action_payload.items) action_payload.items = [];
+          for (const mi of mentionedItems) {
+            if (!action_payload.items.some(it => String(it.item_name || '').toLowerCase() === mi.name.toLowerCase())) {
+              action_payload.items.push({ item_name: mi.name, quantity: 1, addon: null });
+            }
+          }
+        }
+      } catch (_) { }
     }
 
     if (isRecommendationInquiry && detected_action === 'ADD_ITEM') {
@@ -8092,7 +8301,7 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
         }
 
         const resolvedNote = action_payload.note || parsedFallback.note;
-        if (resolvedNote) {
+        if (resolvedNote && !/^(?:gcash|g-?cash|cash|cod|kaliwaan|maya)$/i.test(resolvedNote.trim())) {
           session.note = resolvedNote;
           session.customer_notes = resolvedNote;
         }
@@ -8205,58 +8414,43 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
         await saveSession(session);
 
         if (session.state === 'AWAITING_ORDER_SUMMARY_CONFIRM' || session.current_step === 'AWAITING_ORDER_SUMMARY_CONFIRM') {
-          if (reply_message) {
-            await sendTextMessage(psid, reply_message);
+          let ack = reply_message ? reply_message.split(/---|\bORDER SUMMARY\b|\bbuod\b/i)[0].trim() : '';
+          if (!ack) {
+            ack = `Sige po, na-update ko na ang inyong detalye!`;
           }
+          await sendTextMessage(psid, ack);
           return await finalizeOrderSummaryAndPayment(psid, session);
         }
 
         const isAwaitingDiscountAlready = session.state === 'AWAITING_DISCOUNT_CONFIRMATION' || session.current_step === 'AWAITING_DISCOUNT_CONFIRMATION' || session.state === 'AWAITING_DISCOUNT_PROOF';
 
-        // If customer is in discount confirmation step and said "wala", resolve discount cleanly and proceed to summary
+        // If customer is in discount confirmation step and said "wala", resolve discount cleanly and proceed to payment mode
         if (isAwaitingDiscountAlready && /\b(?:wala|walaw|walaa|wla|none|no|nope|hindi|wag\s*na)\b/i.test(rawText)) {
           session.discount = { applied: false, type: 'None', amount: 0 };
           session.discount_amount = 0;
           await saveSession(session);
-          const hasName = Boolean(session.customer_name);
-          const hasPhone = Boolean(session.contact_number || session.phone_number);
-          const isDeliv = isDeliveryDiningMode(session.dining_mode);
-          const hasAddress = isDeliv ? Boolean(session.address || session.delivery_address) : true;
-          if (hasName && hasPhone && hasAddress) {
-            return await finalizeOrderSummaryAndPayment(psid, session);
+          if (!session.payment_mode) {
+            session.state = 'AWAITING_PAYMENT_MODE';
+            session.current_step = 'AWAITING_PAYMENT_MODE';
+            session.checkout_step = 'AWAITING_PAYMENT_MODE';
+            await saveSession(session);
+
+            const askPaymentMsg = "Ano po ang gagamitin ninyong Payment Mode para sa inyong order: Cash o GCash?";
+            await sendQuickReplies(psid, askPaymentMsg, [
+              { title: '💵 Cash', payload: 'PAYMENT_CASH' },
+              { title: '📱 GCash', payload: 'PAYMENT_GCASH' }
+            ]);
+            return {
+              intent: 'AWAITING_PAYMENT_MODE',
+              confidence: 0.98,
+              replyLog: askPaymentMsg,
+              aiAction: 'SET_DETAILS'
+            };
           }
-          session.state = 'COLLECTING_CUSTOMER_INFO';
-          session.current_step = 'COLLECTING_CUSTOMER_INFO';
-          await saveSession(session);
-          const prompt = getCheckoutInfoPrompt(session);
-          await sendTextMessage(psid, prompt);
-          return { intent: 'COLLECTING_CUSTOMER_INFO_PROMPT', confidence: 1.0, replyLog: prompt, aiAction: 'SET_DETAILS' };
+          return await finalizeOrderSummaryAndPayment(psid, session);
         }
 
-        // If customer has items in cart and has provided key checkout info: ask Payment Mode first if missing
-        if (session.cart && session.cart.length > 0 && session.customer_name && (session.phone_number || session.contact_number) && !session.payment_mode && !isAwaitingDiscountAlready) {
-          session.state = 'AWAITING_PAYMENT_MODE';
-          session.current_step = 'AWAITING_PAYMENT_MODE';
-          session.checkout_step = 'AWAITING_PAYMENT_MODE';
-          await saveSession(session);
-
-          const sanitizedAck = `Maraming salamat po, ${session.customer_name}! Naitala ko na po ang inyong order details.`;
-          await sendTextMessage(psid, sanitizedAck);
-
-          const askPaymentMsg = "Ano po ang gagamitin ninyong Payment Mode para sa inyong order: Cash o GCash?";
-          await sendQuickReplies(psid, askPaymentMsg, [
-            { title: '💵 Cash', payload: 'PAYMENT_CASH' },
-            { title: '📱 GCash', payload: 'PAYMENT_GCASH' }
-          ]);
-          return {
-            intent: 'AWAITING_PAYMENT_MODE',
-            confidence: 0.98,
-            replyLog: askPaymentMsg,
-            aiAction: 'SET_DETAILS'
-          };
-        }
-
-        // If customer has items in cart and has provided key checkout info + payment mode, advance directly to discount check
+        // If customer has items in cart and has provided key checkout info: ask Discount prompt FIRST if missing
         if (session.cart && session.cart.length > 0 && session.customer_name && (session.phone_number || session.contact_number) && !options.aiResponse && !isAwaitingDiscountAlready && !session.discount) {
           session.state = 'AWAITING_DISCOUNT_CONFIRMATION';
           session.current_step = 'AWAITING_DISCOUNT_CONFIRMATION';
@@ -8275,6 +8469,26 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
             intent: 'AWAITING_DISCOUNT_CONFIRMATION',
             confidence: 0.98,
             replyLog: askDiscountMsg,
+            aiAction: 'SET_DETAILS'
+          };
+        }
+
+        // Once discount is addressed: ask Payment Mode if missing
+        if (session.cart && session.cart.length > 0 && session.customer_name && (session.phone_number || session.contact_number) && !options.aiResponse && !session.payment_mode) {
+          session.state = 'AWAITING_PAYMENT_MODE';
+          session.current_step = 'AWAITING_PAYMENT_MODE';
+          session.checkout_step = 'AWAITING_PAYMENT_MODE';
+          await saveSession(session);
+
+          const askPaymentMsg = "Ano po ang gagamitin ninyong Payment Mode para sa inyong order: Cash o GCash?";
+          await sendQuickReplies(psid, askPaymentMsg, [
+            { title: '💵 Cash', payload: 'PAYMENT_CASH' },
+            { title: '📱 GCash', payload: 'PAYMENT_GCASH' }
+          ]);
+          return {
+            intent: 'AWAITING_PAYMENT_MODE',
+            confidence: 0.98,
+            replyLog: askPaymentMsg,
             aiAction: 'SET_DETAILS'
           };
         }

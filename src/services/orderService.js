@@ -631,7 +631,16 @@ async function updateOrderStatus(orderId, newStatus, extraData = {}) {
       });
     }
   } else if (normStatus === 'dispatched') {
-    notifMessage = "Update po sa inyong order: Ang inyong order ay Dispatched na! Hawak na po ito ng ating rider at on the way na sa inyong location.";
+    const isDineIn = /dine[\s-]*in/i.test(order.dining_mode || order.order_type || '');
+    const isPickup = !isDineIn && /pick[\s-]*up|take[\s-]*out/i.test(order.dining_mode || order.order_type || '');
+
+    if (isDineIn) {
+      notifMessage = `Update po sa inyong order: Handa na po ang inyong order para i-serve sa inyong table dito sa Diner's Cafe! Maraming salamat po!`;
+    } else if (isPickup) {
+      notifMessage = `Update po sa inyong order: Ready for Pick-up na po ang inyong order sa counter ng Diner's Cafe! Pwede niyo na po itong kunin anumang oras.`;
+    } else {
+      notifMessage = "Update po sa inyong order: Ang inyong order ay Dispatched na! Hawak na po ito ng ating rider at on the way na sa inyong location.";
+    }
     await sendNotification(order.psid, 'dispatched', `Order #${order.order_number} Dispatched`, notifMessage);
     if (order.psid && !order.psid.startsWith('POS_MANUAL_')) {
       await sendTextMessage(order.psid, notifMessage).catch(err => {
@@ -656,7 +665,13 @@ async function updateOrderStatus(orderId, newStatus, extraData = {}) {
       !String(order.psid).startsWith('WEB_') &&
       feedbackStatus !== 'sent'
     ) {
-      const completionMsg = `Na-deliver na po ang inyong Order #${order.order_number}! Maraming salamat po sa pag-order sa Diner's Cafe. Mag-type lamang po ng 'Menu' kung nais ninyong umorder muli.`;
+      const isDineIn = /dine[\s-]*in/i.test(order.dining_mode || order.order_type || '');
+      const isPickup = !isDineIn && /pick[\s-]*up|take[\s-]*out/i.test(order.dining_mode || order.order_type || '');
+      const completionMsg = isDineIn
+        ? `Nai-serve na po ang inyong Order #${order.order_number}! Maraming salamat po sa pagkain dito sa Diner's Cafe. Mag-type lamang po ng 'Menu' kung nais ninyong umorder muli.`
+        : isPickup
+          ? `Na-claim na po ang inyong Order #${order.order_number}! Maraming salamat po sa pag-order sa Diner's Cafe. Mag-type lamang po ng 'Menu' kung nais ninyong umorder muli.`
+          : `Na-deliver na po ang inyong Order #${order.order_number}! Maraming salamat po sa pag-order sa Diner's Cafe. Mag-type lamang po ng 'Menu' kung nais ninyong umorder muli.`;
       await sendTextMessage(order.psid, completionMsg).catch(err => {
         console.warn('[orderService] Failed to send delivery completion push:', err.message);
       });
