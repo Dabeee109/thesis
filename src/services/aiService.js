@@ -547,7 +547,7 @@ ACTION DEFINITIONS:
 - ADD_ITEM: Customer wants to add item(s) to cart, confirms recommendation, or one-shot order. Populate extracted_data.items with all items requested.
 - SET_ADDON: Customer chooses or asks for a drink add-on/sinker (Pearls, Nata, Coffee Jelly, Cream Cheese, Egg Pudding).
 - VIEW_CART: Customer asks to inspect their cart.
-- CLEAR_CART: Customer explicitly requests to remove, delete, or empty their entire cart.
+- CLEAR_CART: Customer explicitly requests to remove, delete, or empty their entire cart (e.g. "clear cart", "empty cart", "burahin ang cart"). NEVER use CLEAR_CART for short negative responses like "wag na", "wala", "no", "skip", or "pass" — those simply decline an add-on or upsell, NOT clearing the cart!
 - VIEW_MENU: Customer asks to see the menu or list of offerings.
 - RECOMMEND_ITEM: Customer asks for suggestions, specials, or bestsellers.
 - SEND_PICTURE: Customer asks to see a photo of a specific dish/drink.

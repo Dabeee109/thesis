@@ -5,6 +5,7 @@ const nlpEngine = require('../src/services/nlpEngine');
 const geminiService = require('../src/services/geminiService');
 const { getSession, saveSession, resetUserSession } = require('../src/services/sessionManager');
 const orderService = require('../src/services/orderService');
+const { calculateCartSubtotal } = require('../src/services/cartService');
 const { botMessages } = require('../src/services/botMessages');
 const messengerService = require('../src/services/messengerService');
 const db = require('../database/db');
@@ -22,6 +23,8 @@ messengerService.callSendAPI = async (psid, messagePayload, options) => {
 describe('Screenshot Bug Fixes & Multi-Key AI Pool Verification', () => {
   before(async () => {
     await db.query("UPDATE customers SET cart_json = '[]', conversation_state = 'IDLE', updated_at = datetime('now', '-5 hours')").catch(() => {});
+    await db.query("UPDATE menu_items SET is_available = 1, stock_quantity = 50 WHERE name = 'Biscoff Cheesecake'").catch(() => {});
+    await db.query("UPDATE inventory SET stock_quantity = 50 WHERE menu_item_id = (SELECT id FROM menu_items WHERE name = 'Biscoff Cheesecake')").catch(() => {});
   });
 
   it('1. Multi-key pool detects and loads all 4 Gemini API keys', () => {
@@ -700,7 +703,8 @@ describe('Screenshot Bug Fixes & Multi-Key AI Pool Verification', () => {
     await nlpEngine.handleAddonSelection(psid, session, 'Pearls');
     assert.strictEqual(session.cart.length, 1, 'Must still be 1 item in cart, not 2');
     assert.strictEqual(session.cart[0].name, 'Matcha Milktea (w/ Pearls)');
-    assert.strictEqual(session.cart[0].price, 119.0, 'Price must be 99 + 20 = 119');
+    assert.strictEqual(session.cart[0].price + 20.0, 119.0, 'Base price 99 + 20 add-on must be 119');
+    assert.strictEqual(calculateCartSubtotal(session.cart), 119.0, 'Cart subtotal must be 119');
     assert.deepStrictEqual(session.cart[0].addons, ['Pearls']);
   });
 
@@ -833,7 +837,7 @@ describe('Screenshot Bug Fixes & Multi-Key AI Pool Verification', () => {
       phone: '09123456789'
     });
     const custId = typeof cust === 'object' && cust ? cust.id : cust;
-    const [itemRows] = await db.query('SELECT id, price FROM menu_items LIMIT 1');
+    const [itemRows] = await db.query('SELECT id, price FROM menu_items WHERE is_available = 1 LIMIT 1');
     const mItem = itemRows && itemRows[0] ? itemRows[0] : { id: 101, price: 100 };
 
     // Create dine-in order
@@ -876,5 +880,57 @@ describe('Screenshot Bug Fixes & Multi-Key AI Pool Verification', () => {
     await assert.doesNotReject(async () => {
       await inactivityWorker.checkInactivity();
     });
+  });
+
+  it('46. Declining drink add-ons with "Wag na" in AWAITING_DRINK_ADDON retains drink in cart and NEVER clears cart to ₱0.00', async () => {
+    const psid = `TEST_WAG_NA_RETAIN_${Date.now()}`;
+    const session = await getSession(psid);
+    const [milkteaRows] = await db.query("SELECT id, name, price FROM menu_items WHERE name LIKE '%Classic Milktea%' LIMIT 1");
+    const milktea = milkteaRows && milkteaRows[0] ? milkteaRows[0] : { id: 10837, name: 'Classic Milktea', price: 99 };
+
+    session.cart = [{ id: milktea.id, menuItemId: milktea.id, name: milktea.name, price: Number(milktea.price), quantity: 1 }];
+    session.current_drink_item = { item: milktea, quantity: 1 };
+    session.state = 'AWAITING_DRINK_ADDON';
+    session.current_step = 'AWAITING_DRINK_ADDON';
+    await saveSession(session);
+
+    sentMessages.length = 0;
+    const res = await nlpEngine.handleTextInput(psid, session, 'Wag na');
+    const updated = await getSession(psid);
+    assert.strictEqual(updated.cart.length, 1, 'Milktea must remain in cart');
+    assert.strictEqual(updated.cart[0].name, milktea.name);
+    assert.doesNotMatch(res?.replyLog || '', /Na-clear na po ang inyong cart/i, 'Must NOT clear cart on "Wag na"');
+    assert.notStrictEqual(updated.state, 'AWAITING_DRINK_ADDON');
+  });
+
+  it('47. "Pa add ako ng best seller nyo na meal" adds the bestseller meal to cart and is NOT wiped as an inquiry', async () => {
+    const psid = `TEST_ADD_BESTSELLER_MEAL_${Date.now()}`;
+    const session = await getSession(psid);
+    session.cart = [{ id: 10837, menuItemId: 10837, name: 'Classic Milktea', price: 99, quantity: 1 }];
+    session.state = 'IDLE';
+    await saveSession(session);
+
+    sentMessages.length = 0;
+    const res = await nlpEngine.handleTextInput(psid, session, 'Pa add ako ng best seller nyo na meal');
+    const updated = await getSession(psid);
+    assert.strictEqual(updated.cart.length >= 2, true, 'Cart must now contain both the milktea and the meal');
+    const hasMeal = updated.cart.some(c => /burger|steak|ribs|meal|chicken/i.test(c.name));
+    assert.strictEqual(hasMeal, true, 'Cart must have added a meal item');
+    assert.doesNotMatch(res?.replyLog || '', /Wala pa po kayong laman sa inyong cart/i);
+  });
+
+  it('48. "add moko ng best seller nyo sa drinks" adds bestseller drink to cart', async () => {
+    const psid = `TEST_ADD_BESTSELLER_DRINK_${Date.now()}`;
+    const session = await getSession(psid);
+    session.cart = [{ id: 1, menuItemId: 1, name: 'Boneless Chicken Bburinkle', price: 269, quantity: 1 }];
+    session.state = 'IDLE';
+    await saveSession(session);
+
+    sentMessages.length = 0;
+    await nlpEngine.handleTextInput(psid, session, 'add moko ng best seller nyo sa drinks');
+    const updated = await getSession(psid);
+    assert.strictEqual(updated.cart.length >= 2, true, 'Cart must contain both chicken and drinks');
+    const hasDrink = updated.cart.some(c => /cheesecake|biscoff|milktea|tea|coffee/i.test(c.name));
+    assert.strictEqual(hasDrink, true, 'Cart must contain the bestseller drink');
   });
 });

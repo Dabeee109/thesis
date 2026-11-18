@@ -277,7 +277,7 @@ function localNluParse(text) {
   } else if (/\b(?:my\s*cart|view\s*cart|cart|magkano\s*na|what did i order)\b/i.test(lower) || lower === 'cart') {
     intent = 'VIEW_CART';
     confidence = 0.6;
-  } else if (/\b(?:menu|show\s*menu|what(?:'s|\s+is)\s+available|do you have|drinks|food|pastries)\b/i.test(lower)) {
+  } else if (!/\b(?:order|pabili|add|pa[- ]?add|i-?add|dagdag|isama)\b/i.test(lower) && /\b(?:menu|show\s*menu|what(?:'s|\s+is)\s+available|do you have|drinks|food|pastries)\b/i.test(lower)) {
     intent = 'BROWSE_MENU';
     confidence = 0.6;
   } else if (/\b(?:track|where(?:'s|\s+is)\s+my\s+order|order\s+status|asan\s+na)\b/i.test(lower)) {

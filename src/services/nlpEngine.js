@@ -2938,6 +2938,11 @@ function isRecommendationRequest(rawText = '') {
   const s = String(rawText || '').trim();
   if (!s) return false;
   if (/\bikaw\s+na\s+bahala\b/i.test(s)) return false;
+  // If customer is explicitly ordering or adding an item ("pa-add", "add", "order ko", "pabili", "isama", "idagdag"), it is an ORDER, NOT an inquiry!
+  if (/\b(?:add|pa[- ]?add|i-?add|dagdag|idagdag|isama|pabili|order|kunin|kuha|bilhin)\b/i.test(s) &&
+      !/\b(?:ano|alin|anong|ano-?ano|patingin|meron\s+ba|pwede\s+patingin)\b/i.test(s)) {
+    return false;
+  }
   return /\b(?:recommend|mare-?recommend|irerecommend|i-?recommend|rekomenda|suggest|suggestion|ano\s*(?:ang\s*)?masarap|anong\s*masarap|best\s*seller|bestsellers|paborito|patok|pa-?reco)\b/i.test(s);
 }
 
@@ -3649,13 +3654,19 @@ async function handleTextInput(psid, session, rawText, options = {}) {
   const isBoundaryStateReply = ['AWAITING_BOUNDARY_PICKUP_SWITCH', 'AWAITING_ADDRESS_RETRY'].includes(session.state) &&
     (/\b(?:delivery\s*pa\s*(?:din|rin)|palitan|change|ibahin|switch|pick[\s-]*up|pickup|cancel|wag\s*na|ayoko)\b/i.test(norm) || isThirdPartyDeliveryInsistence(rawText));
 
+  const isAddonStateReply = ['AWAITING_DRINK_ADDON'].includes(session.state) &&
+    (/\b(?:wala|walaw|walaa|wla|wala\s*po|no|none|skip|ayaw|wag|huwag|wag\s*na|huwag\s*na|hindi|plain|only|no\s*thanks|pass|ayoko|ayaw\s*ko|wala\s*na|ayan\s*lang|pearls?|tapioca|sago|nata|cream\s*cheese|coffee\s*jelly|pudding|oreo)\b/i.test(norm) ||
+     /^ADDON_/i.test(rawText)) &&
+    !/\b(?:add|pa[- ]?add|i-?add|dagdag|idagdag|isama|pabili|order|kunin|kuha)\s+(?:ng|nang|ako|ng\s*isang|isang|\d+)\b/i.test(rawText);
+
   const isDirectDeterministicPayload = options?.payload ||
     /^CONFIRM_/i.test(rawText) ||
     /^DISCOUNT_/i.test(rawText) ||
     /^ORDER_TYPE_/i.test(rawText) ||
     isPureShortAnswer ||
     isDiscountStateReply ||
-    isBoundaryStateReply;
+    isBoundaryStateReply ||
+    isAddonStateReply;
 
   if (!isDirectDeterministicPayload && (process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured()) {
     try {
@@ -5474,6 +5485,9 @@ async function handleTextInput(psid, session, rawText, options = {}) {
   }
 
   if (intent === 'BROWSE_MENU') {
+    if (/\b(?:add|pa[- ]?add|i-?add|dagdag|idagdag|isama|pabili|order|kunin|kuha|bilhin)\b/i.test(rawText)) {
+      return handleOrderItemText(psid, session, rawText, nlu);
+    }
     await sendFullMenu(psid, session, { view: 'all' });
     return { intent: 'BROWSE_MENU', confidence: conf };
   }
@@ -5966,20 +5980,47 @@ Alin po rito ang nais ninyong idagdag? (O sabihin lamang ang 'Wala' kung ayaw ma
     session.pendingDrinkOrder = null;
 
     if (wantsCheckout) {
+      if (!session.dining_mode) {
+        session.state = 'AWAITING_DINING_MODE';
+        session.current_step = 'AWAITING_DINING_MODE';
+        session.checkout_step = 'AWAITING_DINING_MODE';
+        await saveSession(session);
+        const askDiningMsg = 'Sige po! Para sa ating checkout, ano po ang gagamitin nating dining mode: Delivery, Pick-up, o Dine-in po?';
+        await sendQuickReplies(psid, askDiningMsg, [
+          { title: 'Delivery', payload: 'DINING_DELIVERY' },
+          { title: 'Pick-up', payload: 'DINING_PICKUP' },
+          { title: 'Dine-in', payload: 'DINING_DINE_IN' }
+        ]);
+        return askDiningMsg;
+      }
       session.state = 'COLLECTING_CUSTOMER_INFO';
       session.current_step = 'COLLECTING_CUSTOMER_INFO';
       await saveSession(session);
       return await startCheckoutFlow(psid, session, input);
     }
 
-    session.state = 'COLLECTING_CUSTOMER_INFO';
-    session.current_step = 'COLLECTING_CUSTOMER_INFO';
-    await saveSession(session);
+    if (session.dining_mode) {
+      session.state = 'COLLECTING_CUSTOMER_INFO';
+      session.current_step = 'COLLECTING_CUSTOMER_INFO';
+      await saveSession(session);
 
-    await sendTextMessage(psid, "Sige po, walang add-ons.");
-    const prompt = getCheckoutInfoPrompt(session);
-    await sendTextMessage(psid, prompt);
-    return `Sige po, walang add-ons.\n\n${prompt}`;
+      await sendTextMessage(psid, "Sige po, walang add-ons.");
+      const prompt = getCheckoutInfoPrompt(session);
+      await sendTextMessage(psid, prompt);
+      return `Sige po, walang add-ons.\n\n${prompt}`;
+    }
+
+    session.state = 'AWAITING_DINING_MODE';
+    session.current_step = 'AWAITING_DINING_MODE';
+    session.checkout_step = 'AWAITING_DINING_MODE';
+    await saveSession(session);
+    const askDiningMsg = "Sige po, walang add-ons. Para sa ating checkout, ano po ang gagamitin nating dining mode: Delivery, Pick-up, o Dine-in po?";
+    await sendQuickReplies(psid, askDiningMsg, [
+      { title: 'Delivery', payload: 'DINING_DELIVERY' },
+      { title: 'Pick-up', payload: 'DINING_PICKUP' },
+      { title: 'Dine-in', payload: 'DINING_DINE_IN' }
+    ]);
+    return askDiningMsg;
   }
 
   // Scenario A: User Selects an Add-on (Click or Text input matching an add-on)
@@ -6007,8 +6048,8 @@ Alin po rito ang nais ninyong idagdag? (O sabihin lamang ang 'Wala' kung ayaw ma
 
     if (cartIdx >= 0) {
       session.cart[cartIdx].name = `${baseName} (w/ ${selectedAddon})`;
-      session.cart[cartIdx].price = Number(item.price || 0) + 20.0;
-      session.cart[cartIdx].unitPrice = Number(item.price || 0) + 20.0;
+      session.cart[cartIdx].price = Number(item.price || 0);
+      session.cart[cartIdx].unitPrice = Number(item.price || 0);
       session.cart[cartIdx].addons = [selectedAddon];
       session.cart[cartIdx].addOns = [{ name: selectedAddon, price: 20.0 }];
     } else {
@@ -6016,8 +6057,8 @@ Alin po rito ang nais ninyong idagdag? (O sabihin lamang ang 'Wala' kung ayaw ma
       const drinkToCart = {
         ...item,
         name: modifiedName,
-        price: Number(item.price || 0) + 20.0,
-        unitPrice: Number(item.price || 0) + 20.0,
+        price: Number(item.price || 0),
+        unitPrice: Number(item.price || 0),
         addons: [selectedAddon],
         addOns: [{ name: selectedAddon, price: 20.0 }]
       };
@@ -6026,14 +6067,29 @@ Alin po rito ang nais ninyong idagdag? (O sabihin lamang ang 'Wala' kung ayaw ma
 
     session.current_drink_item = null;
     session.pendingDrinkOrder = null;
-    session.state = 'COLLECTING_CUSTOMER_INFO';
-    session.current_step = 'COLLECTING_CUSTOMER_INFO';
-    await saveSession(session);
 
-    await sendTextMessage(psid, `Sige po, nailagay na ang ${selectedAddon} (+₱20)!`);
-    const prompt = getCheckoutInfoPrompt(session);
-    await sendTextMessage(psid, prompt);
-    return `Sige po, nailagay na ang ${selectedAddon} (+₱20)!\n\n${prompt}`;
+    if (session.dining_mode) {
+      session.state = 'COLLECTING_CUSTOMER_INFO';
+      session.current_step = 'COLLECTING_CUSTOMER_INFO';
+      await saveSession(session);
+
+      await sendTextMessage(psid, `Sige po, nailagay na ang ${selectedAddon} (+₱20)!`);
+      const prompt = getCheckoutInfoPrompt(session);
+      await sendTextMessage(psid, prompt);
+      return `Sige po, nailagay na ang ${selectedAddon} (+₱20)!\n\n${prompt}`;
+    }
+
+    session.state = 'AWAITING_DINING_MODE';
+    session.current_step = 'AWAITING_DINING_MODE';
+    session.checkout_step = 'AWAITING_DINING_MODE';
+    await saveSession(session);
+    const askDiningMsg = `Sige po, nailagay na ang ${selectedAddon} (+₱20)! Para sa ating checkout, ano po ang gagamitin nating dining mode: Delivery, Pick-up, o Dine-in po?`;
+    await sendQuickReplies(psid, askDiningMsg, [
+      { title: 'Delivery', payload: 'DINING_DELIVERY' },
+      { title: 'Pick-up', payload: 'DINING_PICKUP' },
+      { title: 'Dine-in', payload: 'DINING_DINE_IN' }
+    ]);
+    return askDiningMsg;
   }
 
   // Unrecognized input in add-ons state: politely re-prompt
@@ -6220,6 +6276,16 @@ async function handleOrderItemText(psid, session, rawText, nlu) {
     const aiBoundary = await executeAiAssistantTurn(psid, session, rawText);
     if (aiBoundary) return aiBoundary;
   }
+
+  const isBestsellerOrder =
+    /\b(?:add|pa[- ]?add|i-?add|dagdag|idagdag|isama|pabili|order|bigyan|kunin|kuha)\b.*?\b(?:best\s*seller|bestseller|patok|recom\w*|paborito)\b/i.test(rawText) ||
+    /\b(?:best\s*seller|bestseller|patok|recom\w*|paborito)\b.*?\b(?:add|pa[- ]?add|i-?add|dagdag|idagdag|isama|pabili|order|bigyan|kunin|kuha)\b/i.test(rawText);
+
+  if (isBestsellerOrder && (process.env.NODE_ENV !== 'test' || global.__ENABLE_AI_SERVICE_IN_TEST__) && aiService.isAiConfigured()) {
+    const aiTurn = await executeAiAssistantTurn(psid, session, rawText);
+    if (aiTurn) return aiTurn;
+  }
+
   // Extract candidate query string
   const [candidates] = await db.query(`
     SELECT m.id, m.name, m.price, m.synonyms, m.is_available,
@@ -6239,6 +6305,30 @@ async function handleOrderItemText(psid, session, rawText, nlu) {
     .replace(/\b(?:one|two|three|four|five|six|seven|eight|nine|ten|isa|isang|dalawa|dalawang|tatlo|tatlong|apat|apat na|lima|limang|anim|anim na|pito|pitong|walo|walong|siyam|siyam na|sampu|sampung)\b/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
+
+  if (isBestsellerOrder) {
+    let catFilter = '';
+    if (/\b(?:drinks?|inumin|milktea|milk\s*tea|coffee|kape)\b/i.test(rawText)) {
+      catFilter = "AND (LOWER(c.name) LIKE '%drink%' OR LOWER(c.name) LIKE '%milktea%' OR LOWER(c.name) LIKE '%coffee%' OR LOWER(m.category) LIKE '%drink%')";
+    } else if (/\b(?:food|pagkain|burger|meal|meals|ulam|steak|ribs)\b/i.test(rawText)) {
+      catFilter = "AND (LOWER(c.name) LIKE '%meal%' OR LOWER(c.name) LIKE '%burger%' OR LOWER(c.name) LIKE '%pizza%' OR LOWER(c.name) LIKE '%chicken%' OR LOWER(c.name) LIKE '%pasta%' OR LOWER(m.category) LIKE '%meal%')";
+    }
+    const [bsRows] = await db.query(`
+      SELECT m.id, m.name, m.price, m.category, m.is_available
+      FROM menu_items m
+      LEFT JOIN categories c ON c.id = m.category_id
+      LEFT JOIN inventory i ON i.menu_item_id = m.id
+      WHERE m.is_available = 1 AND COALESCE(i.stock_quantity, m.stock_quantity, 0) > 0 AND COALESCE(m.is_deleted, 0) = 0
+        AND COALESCE(LOWER(c.name), '') != 'add-ons'
+        ${catFilter}
+      ORDER BY m.is_bestseller DESC, m.id ASC
+      LIMIT 1
+    `);
+    if (bsRows && bsRows.length > 0) {
+      cleanQuery = bsRows[0].name;
+    }
+  }
+
   if (!cleanQuery || isReferentialOrComboOrder(cleanQuery)) {
     if (session.last_recommended_item) {
       const recQuery = typeof session.last_recommended_item === 'string'
@@ -7594,9 +7684,15 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
     }
 
     // Intercept recommendation acceptance (e.g. "pa add lahat ng recomedation mo", "sige lahat yan", "kunin ko yan")
-    const isRecommendationInquiry = isRecommendationRequest(rawText) ||
+    const isOrderBestseller =
+      /\b(?:add|pa[- ]?add|i-?add|dagdag|idagdag|isama|pabili|order|bigyan|kunin|kuha)\b.*?\b(?:best\s*seller|bestseller|patok|recom\w*|paborito)\b/i.test(rawText) ||
+      /\b(?:best\s*seller|bestseller|patok|recom\w*|paborito)\b.*?\b(?:add|pa[- ]?add|i-?add|dagdag|idagdag|isama|pabili|order|bigyan|kunin|kuha)\b/i.test(rawText);
+
+    const isRecommendationInquiry = !isOrderBestseller && (
+      isRecommendationRequest(rawText) ||
       /\b(?:ano|alin|anong|ano-?ano|patingin|meron|ano\s+ba|sabihin|give\s+me)\b.*?\brecom/i.test(rawText) ||
-      /\b(?:ano|anong)\s+.*?\b(?:bestseller|best\s*seller)\b/i.test(rawText);
+      /\b(?:ano|anong)\s+.*?\b(?:bestseller|best\s*seller)\b/i.test(rawText)
+    );
 
     const isAcceptingRecommendations = !isRecommendationInquiry &&
       /\b(?:pa[- ]?add(?:\s+lahat|\s+ung|\s+ang)?(?:\s+ng)?\s*recom\w*|sige\s+lahat\s*yan|sige\s*lahat|lahat\s*yan|kunin\s*ko\s*(?:lahat|yan|yung\s*recom\w*)|order\s*ko\s*na\s*yan|sige\s*yun\s*na\s*lang|sige\s*yan|idagdag\s*mo\s*lahat|idagdag\s*mo\s*(?:lahat\s*ng\s*)?recom\w*|lahat\s*ng\s*recom\w*|i-?order\s*lahat|kunin\s*ko\s*lahat\s*ng\s*recom\w*)\b/i.test(rawText);
@@ -7627,16 +7723,13 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
       action_payload.customer_name = null;
     }
 
-    const isOrderBestseller = !isRecommendationInquiry &&
-      /\b(?:add|pa[- ]?add|dagdag|idagdag|isama|pabili|order|bigyan)\b.*?\b(?:best\s*seller|bestseller|patok|recom\w*)\b/i.test(rawText);
-
     if (isOrderBestseller) {
       try {
         let catFilter = '';
         if (/\b(?:drinks?|inumin|milktea|milk\s*tea|coffee|kape)\b/i.test(rawText)) {
           catFilter = "AND (LOWER(c.name) LIKE '%drink%' OR LOWER(c.name) LIKE '%milktea%' OR LOWER(c.name) LIKE '%coffee%' OR LOWER(m.category) LIKE '%drink%')";
-        } else if (/\b(?:food|pagkain|burger|meal|ulam)\b/i.test(rawText)) {
-          catFilter = "AND (LOWER(c.name) LIKE '%burger%' OR LOWER(c.name) LIKE '%meal%' OR LOWER(c.name) LIKE '%pizza%')";
+        } else if (/\b(?:food|pagkain|burger|meal|meals|ulam|steak|ribs)\b/i.test(rawText)) {
+          catFilter = "AND (LOWER(c.name) LIKE '%meal%' OR LOWER(c.name) LIKE '%burger%' OR LOWER(c.name) LIKE '%pizza%' OR LOWER(c.name) LIKE '%chicken%' OR LOWER(c.name) LIKE '%pasta%' OR LOWER(m.category) LIKE '%meal%')";
         }
         const [bsRows] = await db.query(`
           SELECT m.id, m.name, m.price
@@ -7659,7 +7752,9 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
     }
 
     // Safety Net: If reply_message states an item was added to the cart, ensure it is in action_payload.items & detected_action = 'ADD_ITEM'
-    if (/(?:idinagdag|naidagdag|added|nilagay)\s+(?:ko\s+na\s+)?(?:po\s+)?(?:ang\s+|yung\s+|ung\s+)?.*?(?:sa\s+inyong\s+cart|sa\s+cart)/i.test(reply_message)) {
+    const isAddedMention = /(?:idinagdag|naidagdag|added|nilagay|isinama|naisama)\s+(?:ko\s+na\s+)?(?:po\s+)?.*?\b(?:cart|order)\b/i.test(reply_message) ||
+      /\b(?:cart|order)\b.*?(?:idinagdag|naidagdag|added|nilagay|isinama|naisama)/i.test(reply_message);
+    if (isAddedMention) {
       try {
         const [availMenu] = await db.query(`SELECT name FROM menu_items WHERE is_available = 1 AND COALESCE(is_deleted, 0) = 0`);
         const mentionedItems = (availMenu || []).filter(m => new RegExp(`\\b${m.name.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\b`, 'i').test(reply_message));
@@ -7675,8 +7770,8 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
       } catch (_) { }
     }
 
-    if (isRecommendationInquiry && detected_action === 'ADD_ITEM') {
-      detected_action = 'RECOMMEND_ITEMS';
+    if (isRecommendationInquiry && !isOrderBestseller && detected_action === 'ADD_ITEM') {
+      detected_action = 'RECOMMEND_ITEM';
       action_payload.items = [];
     }
 
@@ -7695,6 +7790,25 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
 
     switch (detected_action) {
       case 'CLEAR_CART': {
+        const isExplicitClear = isClearCartTrigger(rawText, norm);
+        if (!isExplicitClear) {
+          if (session.state === 'AWAITING_DRINK_ADDON' || session.current_step === 'AWAITING_DRINK_ADDON') {
+            const addonReply = await handleAddonSelection(psid, session, rawText);
+            return {
+              intent: 'SELECT_ADDON',
+              confidence: 1.0,
+              replyLog: addonReply,
+              aiAction: 'NONE'
+            };
+          }
+          await sendTextMessage(psid, reply_message);
+          return {
+            intent: 'AI_CONVERSATION',
+            confidence: 0.98,
+            replyLog: reply_message,
+            aiAction: 'NONE'
+          };
+        }
         const clearRes = await handleClearCartAction(psid, session);
         return {
           ...clearRes,
