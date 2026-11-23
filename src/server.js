@@ -13,6 +13,7 @@ const jwt = require('jsonwebtoken');
 const db = require('../database/db');
 const { initDatabase } = db;
 const { addSSEClient, broadcastSSE } = require('./services/notificationService');
+const orderService = require('./services/orderService');
 
 const webhookRoutes = require('./routes/webhook');
 const apiRoutes = require('./routes/api');
@@ -362,15 +363,53 @@ app.get('/pay/gcash', (req, res) => {
 });
 
 // Xendit Payment Return Screen
-app.get('/payment/xendit/return', (req, res) => {
+app.get('/payment/xendit/return', async (req, res) => {
   const isSuccess = String(req.query.status || '').toLowerCase() !== 'failed';
-  const rawOrder = String(req.query.order || '').replace(/[<>&"']/g, '');
+  const rawOrder = String(req.query.order || '').replace(/[<>&"']/g, '').trim();
+
+  // If customer completed payment, proactively verify and advance order immediately
+  if (isSuccess && rawOrder) {
+    try {
+      const [orderRows] = await db.query(
+        `SELECT o.id, o.order_number, o.payment_status, o.status, c.psid
+         FROM orders o
+         LEFT JOIN customers c ON o.customer_id = c.id
+         WHERE o.order_number = ?
+         LIMIT 1`,
+        [rawOrder]
+      );
+      if (orderRows && orderRows.length > 0) {
+        const order = orderRows[0];
+        if (String(order.payment_status || '').toLowerCase() !== 'paid') {
+          await db.query(
+            `UPDATE orders
+             SET payment_status = 'Paid', payment_ref_number = COALESCE(payment_ref_number, 'XENDIT_ONLINE'), updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?`,
+            [order.id]
+          );
+          await db.query(
+            `UPDATE payments
+             SET payment_method = 'xendit', status = 'verified', updated_at = CURRENT_TIMESTAMP
+             WHERE order_id = ?`,
+            [order.id]
+          ).catch(() => {});
+          await orderService.verifyOrderPayment(order.id, { username: 'Xendit Gateway Return' });
+        }
+      }
+    } catch (verErr) {
+      console.warn('[Xendit Return Auto-Verify Warning]', verErr.message);
+    }
+  }
+
   const title = isSuccess ? 'Payment Completed' : 'Payment Incomplete';
   const badgeColor = isSuccess ? '#22c55e' : '#ef4444';
   const icon = isSuccess ? '&#9989;' : '&#10060;';
   const message = isSuccess
     ? 'Matagumpay ang inyong online payment via Xendit! Paki-check ang Facebook Messenger para sa kumpirmasyon ng inyong order.'
     : 'Hindi nakumpleto ang inyong pagbabayad. Maaari kayong bumalik sa Facebook Messenger upang subukan muli.';
+
+  const pageId = process.env.FACEBOOK_PAGE_ID || config.facebook?.pageId || '';
+  const messengerUrl = pageId ? `https://m.me/${pageId}` : 'https://m.me';
 
   res.send(`<!DOCTYPE html>
 <html lang="en">
@@ -395,7 +434,7 @@ app.get('/payment/xendit/return', (req, res) => {
     <h2>${title}</h2>
     ${rawOrder ? `<div class="order-tag">Order #${rawOrder}</div>` : ''}
     <p>${message}</p>
-    <a href="https://m.me" class="btn">Bumalik sa Messenger</a>
+    <a href="${messengerUrl}" class="btn">Bumalik sa Messenger</a>
   </div>
 </body>
 </html>`);

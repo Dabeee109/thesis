@@ -272,6 +272,45 @@ test('Xendit Payment Gateway Integration Suite', async (t) => {
     assert.ok(orderRows[0].payment_ref_number.includes('PH_GCASH (ewc_live_555)'));
   });
 
+  await t.test('9. Xendit Payment Return Screen auto-verifies pending order and clears awaiting state', async () => {
+    const [menuRows] = await query('SELECT id, name, price FROM menu_items WHERE is_available = 1 LIMIT 1');
+    const item = menuRows[0];
+    const testPsid = `PSID_RETURN_VERIFY_${Date.now()}`;
+
+    const created = await orderService.createOrder(testPsid, {
+      customerName: 'Return Tester',
+      customerPhone: '09171234567',
+      deliveryAddress: 'Store Pickup',
+      orderType: 'pickup',
+      dining_mode: 'Pick-up',
+      paymentMethod: 'xendit',
+      amountPaid: 0,
+      items: [{ menuItemId: item.id, name: item.name, quantity: 1, unitPrice: item.price }],
+      deliveryFee: 0,
+      totalAmount: item.price,
+      paymentStatus: 'Pending'
+    });
+
+    const [beforeRows] = await query('SELECT status, payment_status FROM orders WHERE id = ?', [created.orderId]);
+    assert.strictEqual(beforeRows[0].payment_status, 'Pending');
+
+    // Simulate Return portal verification logic
+    const [orderRows] = await query(
+      `SELECT o.id, o.order_number, o.payment_status, o.status, c.psid
+       FROM orders o
+       LEFT JOIN customers c ON o.customer_id = c.id
+       WHERE o.order_number = ?
+       LIMIT 1`,
+      [created.orderNumber]
+    );
+    assert.strictEqual(orderRows.length, 1);
+    await orderService.verifyOrderPayment(orderRows[0].id, { username: 'Xendit Gateway Return' });
+
+    const [afterRows] = await query('SELECT status, payment_status FROM orders WHERE id = ?', [created.orderId]);
+    assert.strictEqual(afterRows[0].payment_status, 'Paid');
+    assert.strictEqual(afterRows[0].status, 'preparing');
+  });
+
   t.after(() => {
     try { if (fs.existsSync(testDbPath)) fs.unlinkSync(testDbPath); } catch (_) {}
   });

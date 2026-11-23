@@ -299,7 +299,9 @@ async function createOrder(orderDataOrPsid, maybeOrderData) {
   const initialOrderStatus = orderData.status || 'pending';
 
   for (let attempt = 0; attempt < 5; attempt++) {
-    orderNumber = generateOrderNumber();
+    orderNumber = (attempt === 0 && (orderData.orderNumber || orderData.order_number))
+      ? String(orderData.orderNumber || orderData.order_number).trim()
+      : generateOrderNumber();
     try {
       const [res] = await db.query(
         `INSERT INTO orders 
@@ -1156,9 +1158,27 @@ async function verifyOrderPayment(orderId, actor = null) {
   await sendNotification(order.psid, 'payment_verified', `Order #${order.order_number} Payment Verified`, notifMsg);
 
   if (order.psid && !order.psid.startsWith('POS_MANUAL_')) {
-    await sendTextMessage(order.psid, notifMsg).catch(err => {
+    await sendTextMessage(order.psid, notifMsg, {
+      messagingType: 'MESSAGE_TAG',
+      tag: 'POST_PURCHASE_UPDATE'
+    }).catch(err => {
       console.warn('[orderService] Failed to send payment verified notification:', err.message);
     });
+
+    try {
+      const { getSession, saveSession } = require('./sessionManager');
+      const sess = await getSession(order.psid);
+      if (sess) {
+        sess.pendingGCashOrder = null;
+        sess.is_bot_paused = false;
+        sess.handover_mode = false;
+        if (sess.state === 'AWAITING_PAYMENT_PROOF' || sess.state === 'AWAITING_PAYMENT') {
+          sess.state = 'AWAITING_DELIVERY';
+          sess.current_step = 'AWAITING_DELIVERY';
+        }
+        await saveSession(sess);
+      }
+    } catch (_) {}
   }
 
   // Look up assigned rider if any

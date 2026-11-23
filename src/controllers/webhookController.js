@@ -10,6 +10,7 @@ const db = require('../../database/db');
 const systemSettingsService = require('../services/systemSettingsService');
 const storeSettingsService = require('../services/storeSettingsService');
 const xenditService = require('../services/xenditService');
+const orderService = require('../services/orderService');
 const { handleMessageEvent, getSession, saveSession, generateSummaryReceipt } = require('../services/nlpEngine');
 const { verifyPaymentTransaction, resolveOrderTotal, formatAmount } = require('../services/paymentVerificationService');
 const { sendTextMessage } = require('../services/messengerService');
@@ -253,6 +254,63 @@ async function gcashRedirect(req, res) {
   } catch (xErr) {
     // Graceful fallback if Xendit live API is unreachable or development key
     console.warn('[gcashRedirect] Xendit live charge skipped/offline:', xErr.message);
+  }
+
+  // If Xendit checkout URL is active and order does not exist in DB yet, auto-provision DB order
+  if (xenditCheckoutUrl && psid) {
+    try {
+      const [existingOrder] = await db.query(
+        `SELECT id FROM orders WHERE order_number = ? LIMIT 1`,
+        [orderNumber]
+      );
+      if (!existingOrder || existingOrder.length === 0) {
+        const itemsToInsert = (pendingDraft?.items && pendingDraft.items.length > 0)
+          ? pendingDraft.items
+          : ((session?.cart && session.cart.length > 0) ? session.cart : []);
+
+        if (itemsToInsert.length > 0) {
+          const newOrder = await orderService.createOrder(psid, {
+            orderNumber,
+            customerName,
+            customerPhone: pendingDraft?.contactNumber || session?.contact_number || session?.phone_number || '',
+            deliveryAddress: pendingDraft?.address || session?.delivery_address || 'Store Pickup',
+            orderType: pendingDraft?.orderType || session?.orderType || 'delivery',
+            dining_mode: pendingDraft?.dining_mode || session?.dining_mode || 'Pick-up',
+            landmark: pendingDraft?.landmark || session?.landmark || null,
+            arriving_time: pendingDraft?.arriving_time || session?.arriving_time || null,
+            customerNotes: pendingDraft?.note || session?.customer_notes || null,
+            paymentMethod: 'xendit',
+            amountPaid: 0,
+            paymentStatus: 'Pending Verification',
+            items: itemsToInsert.map(c => ({
+              menuItemId: c.menuItemId || c.id,
+              name: c.name,
+              quantity: c.quantity || 1,
+              unitPrice: c.price || c.unitPrice || 0,
+              price: c.price || c.unitPrice || 0,
+              price_at_time: c.price || c.unitPrice || 0,
+              addOns: c.addOns || c.addons
+            })),
+            deliveryFee: pendingDraft?.deliveryFee || session?.delivery_fee || 0,
+            discountAmount: pendingDraft?.discountAmount || session?.discount_amount || 0,
+            totalAmount: orderTotal
+          });
+
+          if (session) {
+            session.activeOrderNumber = orderNumber;
+            session.active_order_id = newOrder.orderId || newOrder.id;
+            session.order_id = newOrder.orderId || newOrder.id;
+            if (pendingDraft) {
+              pendingDraft.orderNumber = orderNumber;
+              pendingDraft.orderId = session.active_order_id;
+            }
+            await saveSession(session);
+          }
+        }
+      }
+    } catch (orderInitErr) {
+      console.warn('[gcashRedirect] Order auto-provisioning warning:', orderInitErr.message);
+    }
   }
 
   const items = (pendingDraft?.items && pendingDraft.items.length > 0)
