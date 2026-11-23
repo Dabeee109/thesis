@@ -933,4 +933,245 @@ describe('Screenshot Bug Fixes & Multi-Key AI Pool Verification', () => {
     const hasDrink = updated.cart.some(c => /cheesecake|biscoff|milktea|tea|coffee/i.test(c.name));
     assert.strictEqual(hasDrink, true, 'Cart must contain the bestseller drink');
   });
+
+  it('49. Classic Milktea keeps genuine base price ₱99.00 and is never overwritten with add-on price ₱20.00', async () => {
+    const psid = `TEST_MILKTEA_PRICE_${Date.now()}`;
+    const session = await getSession(psid);
+    session.cart = [];
+    const [milkteaRows] = await db.query(`SELECT id, name, price, category FROM menu_items WHERE name = 'Classic Milktea' LIMIT 1`);
+    const milktea = milkteaRows[0] || { id: 10936, name: 'Classic Milktea', price: 99, category: 'Drinks & Milktea' };
+
+    await nlpEngine.promptDrinkAddons(psid, session, milktea, 1);
+    assert.strictEqual(session.cart.length, 1);
+    assert.strictEqual(session.cart[0].price, 99.0, 'Base drink price must be ₱99.00');
+
+    // Customer declines add-ons with "wag"
+    await nlpEngine.handleAddonSelection(psid, session, 'wag');
+    assert.strictEqual(session.cart.length, 1);
+    assert.strictEqual(session.cart[0].price, 99.0, 'Base drink price must remain ₱99.00 after declining add-ons');
+
+    // Check cart pricing
+    const { priceCart } = require('../src/services/cartService');
+    const priced = await priceCart(session.cart);
+    assert.strictEqual(priced.subtotal, 99.0, 'Priced subtotal must be ₱99.00, not ₱20.00');
+    assert.match(priced.lines[0].lineTotal, /99/);
+  });
+
+  it('50. "Pa tanggal na pla ung burger steak" removes Burger Steak from cart and does NOT reply with generic greeting', async () => {
+    const psid = `TEST_REMOVE_PLA_${Date.now()}`;
+    const session = await getSession(psid);
+    session.cart = [
+      { id: 10936, menuItemId: 10936, name: 'Classic Milktea', price: 99, quantity: 1 },
+      { id: 10937, menuItemId: 10937, name: 'Burger Steak (2 pcs)', price: 179, quantity: 1 }
+    ];
+    session.state = 'AWAITING_CHECKOUT_CONFIRM';
+    session.current_step = 'AWAITING_CHECKOUT_CONFIRM';
+    await saveSession(session);
+
+    sentMessages.length = 0;
+    const res = await nlpEngine.handleTextInput(psid, session, 'Pa tanggal na pla ung burger steak');
+    const updated = await getSession(psid);
+
+    assert.strictEqual(updated.cart.length, 1, 'Burger Steak must be removed, leaving only Classic Milktea');
+    assert.strictEqual(updated.cart[0].name, 'Classic Milktea');
+    assert.doesNotMatch(res?.replyLog || '', /Magandang araw po! Nandito po ako upang tulungan kayo/i, 'Must NOT reply with generic greeting');
+    assert.match(res?.replyLog || '', /Removed na po ang .*Burger Steak/i, 'Must acknowledge removal of Burger Steak');
+  });
+
+  it('51. "pa tanggal ako ng burger steak" and "Pa remove ako ng burger steak" remove item from cart cleanly', async () => {
+    const psid1 = `TEST_REMOVE_AKO_${Date.now()}`;
+    const session1 = await getSession(psid1);
+    session1.cart = [
+      { id: 10936, menuItemId: 10936, name: 'Classic Milktea', price: 99, quantity: 1 },
+      { id: 10937, menuItemId: 10937, name: 'Burger Steak (2 pcs)', price: 179, quantity: 1 }
+    ];
+    session1.state = 'AWAITING_CHECKOUT_CONFIRM';
+    await saveSession(session1);
+
+    sentMessages.length = 0;
+    const res1 = await nlpEngine.handleTextInput(psid1, session1, 'pa tanggal ako ng burger steak');
+    const updated1 = await getSession(psid1);
+    assert.strictEqual(updated1.cart.length, 1, 'Burger Steak must be removed');
+    assert.match(res1?.replyLog || '', /Removed na po ang .*Burger Steak/i);
+
+    const psid2 = `TEST_PA_REMOVE_${Date.now()}`;
+    const session2 = await getSession(psid2);
+    session2.cart = [
+      { id: 10936, menuItemId: 10936, name: 'Classic Milktea', price: 99, quantity: 1 },
+      { id: 10937, menuItemId: 10937, name: 'Burger Steak (2 pcs)', price: 179, quantity: 1 }
+    ];
+    session2.state = 'AWAITING_CHECKOUT_CONFIRM';
+    await saveSession(session2);
+
+    sentMessages.length = 0;
+    const res2 = await nlpEngine.handleTextInput(psid2, session2, 'Pa remove ako ng burger steak');
+    const updated2 = await getSession(psid2);
+    assert.strictEqual(updated2.cart.length, 1, 'Burger Steak must be removed via Pa remove');
+    assert.match(res2?.replyLog || '', /Removed na po ang .*Burger Steak/i);
+  });
+
+  it('52. Customer saying "Yes po" to checkout prompt when dining mode is not set MUST ask for Dining Mode first and NEVER ask for Address/Landmark prematurely', async () => {
+    const psid = `TEST_CHECKOUT_DINING_MODE_FIRST_${Date.now()}`;
+    const session = await getSession(psid);
+    session.cart = [
+      { id: 10936, menuItemId: 10936, name: 'Classic Milktea', price: 99, quantity: 1 },
+      { id: 10937, menuItemId: 10937, name: 'Bacon Burger', price: 149, quantity: 1 }
+    ];
+    session.dining_mode = null;
+    session.state = 'AWAITING_CHECKOUT_CONFIRM';
+    await saveSession(session);
+
+    sentMessages.length = 0;
+    // Simulate customer saying "Yes po" to proceeding to checkout
+    const res = await nlpEngine.executeAiAssistantTurn(psid, session, 'Yes po', {
+      aiResponse: {
+        reply_message: 'Sige po! Pwede na po nating i-process ang inyong checkout.',
+        detected_action: 'PROCEED_CHECKOUT',
+        extracted_data: {
+          dining_mode: 'Delivery' // Hallucinated by model even though user only said "Yes po"
+        }
+      }
+    });
+
+    const updated = await getSession(psid);
+    assert.strictEqual(updated.state, 'AWAITING_DINING_MODE', 'State must be AWAITING_DINING_MODE');
+    assert.match(res?.replyLog || '', /ano po ang gagamitin nating dining mode: Delivery, Pick-up, o Dine-in po\?/i, 'Must ask for Dining Mode');
+    assert.doesNotMatch(res?.replyLog || '', /Address:/i, 'Must NOT ask for Address yet');
+    assert.doesNotMatch(res?.replyLog || '', /Landmark:/i, 'Must NOT ask for Landmark yet');
+  });
+
+  it('53. Customer saying "Ayaw po" to Add-ons prompt declines add-ons cleanly, retains drink in cart, and asks for Dining Mode', async () => {
+    const psid = `TEST_AYAW_PO_ADDON_${Date.now()}`;
+    const session = await getSession(psid);
+    const [milkteaRows] = await db.query("SELECT id, name, price FROM menu_items WHERE name LIKE '%Classic Milktea%' LIMIT 1");
+    const milktea = milkteaRows && milkteaRows[0] ? milkteaRows[0] : { id: 10837, name: 'Classic Milktea', price: 99 };
+
+    session.cart = [{ id: milktea.id, menuItemId: milktea.id, name: milktea.name, price: Number(milktea.price), quantity: 1 }];
+    session.current_drink_item = { item: milktea, quantity: 1 };
+    session.state = 'AWAITING_DRINK_ADDON';
+    session.current_step = 'AWAITING_DRINK_ADDON';
+    session.dining_mode = null;
+    await saveSession(session);
+
+    sentMessages.length = 0;
+    const res = await nlpEngine.handleTextInput(psid, session, 'Ayaw po');
+    const updated = await getSession(psid);
+
+    assert.strictEqual(updated.cart.length, 1, 'Milktea must remain in cart');
+    assert.strictEqual(updated.cart[0].name, milktea.name);
+    assert.strictEqual(updated.state, 'AWAITING_DINING_MODE', 'Must transition to AWAITING_DINING_MODE');
+    assert.doesNotMatch(res?.replyLog || '', /Paki-pili po kung nais ninyo ng Add-ons/i, 'Must NOT re-prompt for add-ons');
+    assert.match(res?.replyLog || '', /Sige po, walang add-ons.*ano po ang gagamitin nating dining mode/i, 'Must acknowledge no add-ons and ask dining mode');
+  });
+
+  it('54. Order Summary strictly matches the standardized template for Dine-in/Pick-up and Delivery', async () => {
+    const psid = `TEST_SUMMARY_TEMPLATE_${Date.now()}`;
+    const session = await getSession(psid);
+    session.cart = [{ id: 10837, menuItemId: 10837, name: 'Classic Milktea', price: 99, quantity: 1 }];
+    session.customer_name = 'Francis Dave';
+    session.phone_number = '09281762895';
+    session.contact_number = '09281762895';
+    session.dining_mode = 'Pick-up';
+    session.payment_mode = 'GCash';
+    session.note = 'less ice po';
+    session.discount = { applied: false, type: 'None', amount: 0 };
+    session.state = 'COLLECTING_CUSTOMER_INFO';
+    await saveSession(session);
+
+    sentMessages.length = 0;
+    const res = await nlpEngine.finalizeOrderSummaryAndPayment(psid, session);
+    const sentSummary = sentMessages.map(m => m.messagePayload.text).join('\n');
+
+    // Verify Dine In / Pick-up format
+    assert.match(sentSummary, /--- ORDER SUMMARY ---/);
+    assert.match(sentSummary, /Name:\s*Francis Dave/);
+    assert.match(sentSummary, /Phone number:\s*09281762895/);
+    assert.match(sentSummary, /Dining-mode:\s*Pick-up/);
+    assert.match(sentSummary, /Address:\s*Diner's Cafe, Tondo, Manila/);
+    assert.match(sentSummary, /Discount:\s*None/);
+    assert.match(sentSummary, /Payment Mode:\s*GCash/);
+    assert.match(sentSummary, /Orders:\n- 1x Classic Milktea \(₱99\.00\)/);
+    assert.match(sentSummary, /Note:\s*less ice po/);
+    assert.match(sentSummary, /Subtotal:\s*₱99\.00/);
+    assert.match(sentSummary, /Discount:\s*₱0\.00/);
+    assert.match(sentSummary, /Delivery Fee:\s*₱0\.00/);
+    assert.match(sentSummary, /TOTAL AMOUNT DUE:\s*₱99\.00/);
+    assert.match(sentSummary, /Tama po ba\?/);
+
+    // Verify Delivery format
+    const deliverySummary = nlpEngine.formatPlaintextOrderSummary({
+      name: 'Francis Dave',
+      phone: '09281762895',
+      diningMode: 'Delivery',
+      address: '123 Tayuman St, Tondo',
+      landmark: 'Near Barangay Hall',
+      discountType: 'None',
+      paymentMode: 'GCash',
+      cart: [{ id: 10837, name: 'Classic Milktea', price: 99, quantity: 1 }],
+      subtotal: 99,
+      discountAmount: 0,
+      deliveryFee: 40,
+      total: 139
+    });
+
+    assert.match(deliverySummary, /--- ORDER SUMMARY ---/);
+    assert.match(deliverySummary, /Dining-mode:\s*Delivery/);
+    assert.match(deliverySummary, /Address:\s*123 Tayuman St, Tondo/);
+    assert.match(deliverySummary, /Landmark:\s*Near Barangay Hall/);
+    assert.match(deliverySummary, /Delivery Fee:\s*₱40\.00/);
+    assert.match(deliverySummary, /TOTAL AMOUNT DUE:\s*₱139\.00/);
+    assert.match(deliverySummary, /Tama po ba\?/);
+  });
+
+  it('55. Customer with existing name saying "Check out na" MUST ask for Dining Mode first with Quick Replies', async () => {
+    const psid = `PSID_CHECKOUT_DINING_${Date.now()}`;
+    const session = await nlpEngine.getSession(psid);
+    session.customer_name = 'Dos';
+    session.dining_mode = null;
+    session.orderType = null;
+    session.cart = [{ id: 10837, name: 'Bacon & Mushroom Pizza', price: 310, quantity: 1 }];
+    session.state = 'AWAITING_CHECKOUT_CONFIRM';
+    await saveSession(session);
+
+    sentMessages.length = 0;
+    const res = await nlpEngine.handleMessageEvent(psid, 'Check out na');
+    const sentTexts = sentMessages.map(m => m.messagePayload?.text || '').join('\n');
+
+    assert.match(sentTexts, /dining mode: Delivery, Pick-up, o Dine-in/i);
+    assert.doesNotMatch(sentTexts, /Address:/i);
+    assert.doesNotMatch(sentTexts, /Landmark:/i);
+
+    const updated = await nlpEngine.getSession(psid);
+    assert.strictEqual(updated.state, 'AWAITING_DINING_MODE');
+  });
+
+  it('56. Continuous 11-digit customer phone numbers in AI replies are formatted as 09XX-XXX-XXXX', () => {
+    const sampleRaw = 'Name: Dos\nPhone Number: 09123456789\nPayment Mode: GCash';
+    const formatted = sampleRaw.replace(/\b(09\d{2})(\d{3})(\d{4})\b/g, '$1-$2-$3');
+    assert.strictEqual(formatted.includes('0912-345-6789'), true);
+    assert.strictEqual(formatted.includes('09123456789'), false);
+  });
+
+  it('57. Order placement clears dining_mode and payment_mode so subsequent orders prompt dining mode fresh', async () => {
+    const psid = `PSID_CYCLE_CLEAR_${Date.now()}`;
+    const [rows] = await db.query('SELECT id, name, price FROM menu_items WHERE is_available = 1 LIMIT 1');
+    const item = rows[0];
+
+    const session = await nlpEngine.getSession(psid);
+    session.customer_name = 'Dos';
+    session.contact_number = '09123456789';
+    session.dining_mode = 'Delivery';
+    session.payment_mode = 'Cash';
+    session.address = 'Tondo Manila';
+    session.cart = [{ id: item.id, menuItemId: item.id, name: item.name, price: item.price, quantity: 1 }];
+    await saveSession(session);
+
+    sentMessages.length = 0;
+    await nlpEngine.executeFinalOrderPlacement(psid, session);
+
+    const afterOrder = await nlpEngine.getSession(psid);
+    assert.strictEqual(afterOrder.dining_mode, null, 'dining_mode must be cleared after order placement');
+    assert.strictEqual(afterOrder.payment_mode, null, 'payment_mode must be cleared after order placement');
+    assert.strictEqual(afterOrder.cart.length, 0, 'cart must be empty after order placement');
+  });
 });

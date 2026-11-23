@@ -6,7 +6,7 @@
 const { peso } = require('./textMatch');
 
 // Comprehensive regex for removal keywords, affixes, slang, and typo variations
-const REMOVAL_REGEX = /\b(?:pa\s*tanggal|patanggal|pa\s*tangal|patangal|tanggal(?:in)?|tangal(?:in)?|tatanggalin|tnggal|pa\s*alis|paalis|alis(?:in|en)?|pa\s*bawas|pabawas|bawas(?:an)?|remove|remov|delete|del|drop|minus|wag\s*na(?:\s*yung)?|huwag\s*na(?:\s*yung)?|ayaw\s*ko\s*na\s*ng)\b/i;
+const REMOVAL_REGEX = /\b(?:pa\s*tanggal|patanggal|paki\s*tanggal|pakitanggal|pa\s*tangal|patangal|tanggal(?:in)?|tangal(?:in)?|tatanggalin|tnggal|pa\s*alis|paalis|paki\s*alis|pakialis|alis(?:in|en)?|pa\s*bawas|pabawas|bawas(?:an)?|pa\s*remove|paremove|paki\s*remove|pakiremove|remove|remov|delete|del|drop|minus|wag\s*na\s*(?:pala|pla|yung|ung)|huwag\s*na\s*(?:pala|pla|yung|ung)|ayaw\s*ko\s*na\s*ng)\b/i;
 
 const NUMBER_WORDS = {
   'isa': 1, 'isang': 1, 'one': 1, '1': 1,
@@ -122,8 +122,8 @@ function parseRemovalRequests(text, cart = []) {
 
   // Strip leading polite markers and removal keywords
   clean = clean.replace(REMOVAL_REGEX, ' ');
-  clean = clean.replace(/\b(?:po|paki|pakisuyo|pakitanggal|pwede(?:\s+po)?(?:\s+pa)?)\b/gi, ' ');
-  clean = clean.replace(/^\s*(?:ng|yung|mga)\s+/gi, ' ').trim();
+  clean = clean.replace(/\b(?:po|paki|pakisuyo|pakitanggal|pakiremove|pwede(?:\s+po)?(?:\s+pa)?)\b/gi, ' ');
+  clean = clean.replace(/^\s*(?:ng|yung|ung|mga)\s+/gi, ' ').trim();
 
   // Split into multi-item segments using conjunctions, commas, OR numbers followed by item words
   const splitRegex = /(?:,\s*|\s+(?:and|tsaka|saka|tapos|pati|\bat\b|\+)\s*|(?<=\S)\s+(?=(?:\d+|isang?|dalawang?|tatlong?|apat(?: na)?|limang?|anim(?: na)?|pitong?|walong?|siyam(?: na)?|sampung?|one|two|three|four|five|six|seven|eight|nine|ten|lahat|all)\b))/i;
@@ -151,7 +151,7 @@ function parseRemovalRequests(text, cart = []) {
     }
 
     // Clean up filler words from itemQuery
-    itemQuery = itemQuery.replace(/\b(?:po|ng|yung|ung|mga|ko|mo|na|kanina|muna|pala|ulit)\b/gi, ' ').replace(/\s+/g, ' ').trim();
+    itemQuery = itemQuery.replace(/\b(?:po|ng|yung|ung|mga|ko|mo|na|kanina|muna|pala|pla|ulit|ako|sa|akin|naman)\b/gi, ' ').replace(/\s+/g, ' ').trim();
 
     if (!itemQuery && cart.length === 1) {
       results.push({ name: cart[0].name, item: cart[0], qty });

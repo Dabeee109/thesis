@@ -9,6 +9,7 @@ const config = require('../config/config');
 const db = require('../../database/db');
 const systemSettingsService = require('../services/systemSettingsService');
 const storeSettingsService = require('../services/storeSettingsService');
+const xenditService = require('../services/xenditService');
 const { handleMessageEvent, getSession, saveSession, generateSummaryReceipt } = require('../services/nlpEngine');
 const { verifyPaymentTransaction, resolveOrderTotal, formatAmount } = require('../services/paymentVerificationService');
 const { sendTextMessage } = require('../services/messengerService');
@@ -225,6 +226,23 @@ async function gcashRedirect(req, res) {
   const formattedTotal = formatAmount(orderTotal);
   const customerName = pendingDraft?.customerName || session?.customer_name || session?.details?.name || 'Customer';
   const deliveryAddress = pendingDraft?.address || session?.delivery_address || session?.details?.address || 'Metro Manila';
+  const orderNumber = query.order || pendingDraft?.orderNumber || session?.activeOrderNumber || `DNR-${Date.now().toString().slice(-6)}`;
+
+  let xenditCheckoutUrl = null;
+  try {
+    const charge = await xenditService.createGcashCharge({
+      orderNumber,
+      amount: orderTotal,
+      customerName,
+      customerPhone: pendingDraft?.contactNumber || session?.contact_number || '',
+      description: `Diner's Cafe Order #${orderNumber}`
+    });
+    xenditCheckoutUrl = charge?.checkout_url || charge?.invoice_url || null;
+  } catch (xErr) {
+    // Graceful fallback if Xendit live API is unreachable or development key
+    console.warn('[gcashRedirect] Xendit live charge skipped/offline:', xErr.message);
+  }
+
   const items = (pendingDraft?.items && pendingDraft.items.length > 0)
     ? pendingDraft.items
     : ((session?.cart && session?.cart.length > 0) ? session.cart : (session?.ordered_items || []));
@@ -245,7 +263,7 @@ async function gcashRedirect(req, res) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Redirecting to GCash...</title>
+  <title>Xendit Payment Gateway - GCash</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -263,7 +281,7 @@ async function gcashRedirect(req, res) {
       overflow: hidden;
     }
     .header {
-      background: linear-gradient(135deg, #007dfe 0%, #0056b3 100%);
+      background: linear-gradient(135deg, #153f74 0%, #007dfe 100%);
       padding: 24px 20px;
       text-align: center;
       color: #ffffff;
@@ -347,14 +365,16 @@ async function gcashRedirect(req, res) {
       display: block;
       width: 100%;
       box-sizing: border-box;
-      padding: 12px 24px;
-      background: #007dfe;
+      padding: 14px 24px;
+      background: linear-gradient(135deg, #007dfe 0%, #0056b3 100%);
       color: #ffffff;
       text-decoration: none;
-      border-radius: 8px;
+      border-radius: 10px;
+      font-size: 16px;
       font-weight: bold;
       text-align: center;
       margin-top: 14px;
+      box-shadow: 0 4px 14px rgba(0, 125, 254, 0.3);
     }
     .status-alert {
       display: none;
@@ -366,55 +386,18 @@ async function gcashRedirect(req, res) {
   </style>
   <script>
     window.onload = function() {
-      // Subukang buksan agad ang Android app via intent kung direktang binuksan
-      const urlParams = new URLSearchParams(window.location.search);
-      if (urlParams.get('auto') === '1') {
-        openGcashApp();
+      var xenditUrl = '${xenditCheckoutUrl || ''}';
+      if (xenditUrl && xenditUrl.startsWith('http')) {
+        window.location.href = xenditUrl;
       }
     };
 
     function openGcashApp(event) {
-      if (event) event.preventDefault();
-      var ua = navigator.userAgent || '';
-      var isAndroid = /android/i.test(ua);
-      var isIOS = /iphone|ipad|ipod/i.test(ua);
-      var fallbackBox = document.getElementById('gcashFallbackHelp');
-      var launched = false;
-
-      var onVisChange = function() {
-        if (document.hidden) launched = true;
-      };
-      document.addEventListener('visibilitychange', onVisChange, { once: true });
-
-      // 1. Subukan ang direct universal scheme (gumagana sa Android Chrome/Brave at iOS Safari)
-      try {
-        window.location.href = 'gcash://';
-      } catch (e) {}
-
-      // 2. Sa Android, subukan din ang standard BROWSABLE Intent pagkatapos ng maikling delay
-      if (isAndroid) {
-        setTimeout(function() {
-          if (!launched && !document.hidden) {
-            try {
-              window.location.href = 'intent://open#Intent;scheme=gcash;action=android.intent.action.VIEW;category=android.intent.category.BROWSABLE;package=com.globe.gcash.android;S.browser_fallback_url=' + encodeURIComponent('https://play.google.com/store/apps/details?id=com.globe.gcash.android') + ';end';
-            } catch (e) {
-              window.location.href = 'intent://#Intent;scheme=gcash;package=com.globe.gcash.android;end';
-            }
-          }
-        }, 350);
-      } else if (!isIOS) {
-        // Desktop browser fallback
-        setTimeout(function() {
-          if (fallbackBox) fallbackBox.style.display = 'block';
-        }, 400);
+      var xenditUrl = '${xenditCheckoutUrl || ''}';
+      if (xenditUrl && xenditUrl.startsWith('http')) {
+        window.location.href = xenditUrl;
+        return;
       }
-
-      // 3. Kung naka-block sa Messenger In-App Browser pagkalipas ng 1.6s, magpakita ng clear guide
-      setTimeout(function() {
-        if (!launched && !document.hidden && fallbackBox) {
-          fallbackBox.style.display = 'block';
-        }
-      }, 1600);
     }
 
     ${isPersonalMode ? '' : `
@@ -478,8 +461,13 @@ async function gcashRedirect(req, res) {
 <body>
   <div class="container">
     <div class="header">
-      <h1>GCash</h1>
-      <p>Diner's Cafe • Online Payment Portal</p>
+      <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:1px; opacity:0.85; margin-bottom:4px;">Secure Checkout Powered by</div>
+      <h1 style="display:flex; align-items:center; justify-content:center; gap:8px; margin:0;">
+        <span style="font-weight:900; letter-spacing:-0.5px;">xendit</span>
+        <span style="font-size:18px; opacity:0.75; font-weight:normal;">|</span>
+        <span style="font-size:22px; font-weight:bold;">GCash</span>
+      </h1>
+      <p style="margin:6px 0 0; font-size:13px; opacity:0.9;">Diner's Cafe • Official Payment Gateway</p>
     </div>
 
     <div class="card-body">
@@ -487,13 +475,18 @@ async function gcashRedirect(req, res) {
 
       <div id="contentSection">
         <div class="amount-box">
-          <div class="amount-label">Kabuuang Babayaran</div>
+          <div class="amount-label">Kabuuang Babayaran (via Xendit)</div>
           <div class="amount-val">PHP ${formattedTotal}</div>
         </div>
 
         <div class="detail-row">
-          <span class="detail-label">Tindahan / Recipient</span>
-          <span class="detail-val">${gcashAccountName}<br><small style="color:#007dfe;">${gcashAccountNumber}</small>${isPersonalMode ? ` <button type="button" onclick="navigator.clipboard && navigator.clipboard.writeText('${gcashAccountNumber}'); this.innerText='Copied!';" style="margin-left:6px; font-size:11px; padding:2px 8px; border:1px solid #007dfe; background:#eef6ff; color:#007dfe; border-radius:4px; cursor:pointer;">Copy</button>` : ''}</span>
+          <span class="detail-label">Payment Gateway</span>
+          <span class="detail-val" style="color:#007dfe; font-weight:bold;">Xendit (PH_GCASH)</span>
+        </div>
+
+        <div class="detail-row">
+          <span class="detail-label">Order Ref</span>
+          <span class="detail-val">#${orderNumber}</span>
         </div>
 
         <div class="detail-row">
@@ -524,29 +517,27 @@ async function gcashRedirect(req, res) {
         </div>
 
         ${isPersonalMode ? `
-        <div style="background:#fff8e1; border:1px solid #ffe082; border-radius:10px; padding:12px; margin-bottom:16px; font-size:13px; color:#5d4037; line-height:1.45;">
-          <strong>Paalala:</strong> Pagkatapos magpadala ng <strong>PHP ${formattedTotal}</strong> sa GCash App, bumalik sa <strong>Facebook Messenger</strong> at i-send ang <strong>screenshot ng GCash receipt</strong> (o 13-digit Ref No.) upang masimulan ang paghahanda ng iyong order.
+        <div style="background:#eef6ff; border:1px solid #c7e1ff; border-radius:10px; padding:12px; margin-bottom:16px; font-size:13px; color:#1e3a5f; line-height:1.45;">
+          <strong>Xendit Payment:</strong> Pindutin ang button sa ibaba upang magpatuloy sa <strong>Xendit</strong> gamit ang inyong GCash. Pagkatapos magbayad, awtomatikong makukumpirma ang inyong order sa Facebook Messenger.
         </div>
         ` : `
         <button id="payBtn" class="btn-pay" onclick="submitGcashPayment()">
-          Bayaran ang PHP ${formattedTotal} sa GCash
+          Bayaran ang PHP ${formattedTotal} sa GCash via Xendit
         </button>
         `}
 
         <div style="margin-top:20px; text-align:center;">
-          ${isPersonalMode ? '' : '<p style="font-size:12px; color:#888; margin:0 0 8px;">O magbayad gamit ang GCash App:</p>'}
-          <a href="intent://#Intent;scheme=gcash;package=com.globe.gcash.android;end" 
+          <a href="${isPersonalMode ? 'intent://#Intent;scheme=gcash;package=com.globe.gcash.android;end' : (xenditCheckoutUrl || '#xendit-checkout')}" 
              id="gcashAppBtn"
              class="btn-app"
              onclick="openGcashApp(event)"
-             style="display:inline-block; padding:12px 24px; background:#007dfe; color:#fff; text-decoration:none; border-radius:8px; font-weight:bold;">
-             Buksan ang GCash
+             style="display:block; padding:14px 24px; background:linear-gradient(135deg, #007dfe 0%, #0056b3 100%); color:#fff; text-decoration:none; border-radius:10px; font-weight:bold; font-size:16px; box-shadow:0 4px 14px rgba(0, 125, 254, 0.3);">
+             ${isPersonalMode ? '📱 Buksan ang GCash' : '💳 Magbayad sa Xendit (GCash)'}
           </a>
           <div id="gcashFallbackHelp" style="display:none; margin-top:12px; padding:12px; background:#eef6ff; border:1px solid #b6d8ff; border-radius:10px; font-size:12px; color:#1e3a5f; text-align:left; line-height:1.5;">
-            <strong>Hindi nagbukas ang GCash App?</strong><br>
-            Madalas bina-block ng Facebook Messenger In-App Browser ang auto-launch ng apps:<br>
-            1. Pindutin ang <strong>⋮ (3 dots)</strong> sa itaas at piliin ang <strong>Open in Browser / Chrome / Safari</strong>, O<br>
-            2. I-tap ang <strong>Copy</strong> sa GCash number (<strong>${gcashAccountNumber}</strong>) o i-save ang QR code sa itaas, at buksan nang mano-mano ang GCash app sa cellphone mo.
+            <strong>Paalala sa Payment:</strong><br>
+            Ligtas na ipinoproseso ang inyong bayad ng <strong>Xendit Payment Gateway</strong> para sa Diner's Cafe.<br>
+            Maaari ring i-scan ang QR code sa itaas o gamitin ang Reference Number.
           </div>
         </div>
       </div>

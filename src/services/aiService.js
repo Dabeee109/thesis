@@ -35,6 +35,7 @@ const MODEL_COOLDOWN_MS = 30 * 60 * 1000;
 const DETECTED_ACTIONS = [
   'NONE',
   'ADD_ITEM',
+  'REMOVE_ITEM',
   'SET_ADDON',
   'VIEW_CART',
   'CLEAR_CART',
@@ -76,6 +77,18 @@ const ASSISTANT_RESPONSE_SCHEMA = {
               addon: { type: ['string', 'null'] }
             },
             required: ['item_name', 'quantity', 'addon']
+          }
+        },
+        removed_items: {
+          type: ['array', 'null'],
+          description: 'List of menu items to remove when detected_action is REMOVE_ITEM.',
+          items: {
+            type: 'object',
+            properties: {
+              item_name: { type: 'string' },
+              quantity: { type: 'number' }
+            },
+            required: ['item_name', 'quantity']
           }
         },
         dining_mode: { type: ['string', 'null'], enum: ['Delivery', 'Pick-up', 'Dine-in', null] },
@@ -375,7 +388,7 @@ async function loadOperationalContext(psid, session = null) {
     },
     menuItems,
     sessionState: session?.state || session?.current_step || 'IDLE',
-    diningMode: session?.dining_mode || (session?.orderType === 'delivery' ? 'Delivery' : (session?.orderType === 'pickup' ? 'Pick-up' : null)),
+    diningMode: session?.dining_mode || null,
     cart: cartItems,
     cartSubtotal,
     deliveryCheck: {
@@ -459,6 +472,7 @@ function buildAssistantSystemInstruction(context = {}) {
 - OUT-OF-STOCK & QUANTITY LIMIT GUARD: Menu item availability is 100% recipe-driven based on raw ingredients. NEVER sell, recommend, or add [OUT OF STOCK - DO NOT SELL] items. Politely inform the customer that it is sold out and recommend available alternatives. If a customer orders more servings than currently available (e.g., ordering 4 when only 2 servings remain), politely inform them of the maximum servings available and offer to prepare up to the remaining amount.
 - DRINK-ONLY ADD-ON UPSELL: Drink sinkers/add-ons (+₱20: Pearls, Nata de Coco, Cream Cheese, Coffee Jelly, Egg Pudding) can ONLY be attached to "Drinks & Milktea". NEVER attach them to food/meals/silog/pizza/pasta.
 - "IKAW NA BAHALA" / DEALER'S CHOICE COMBOS: If the customer asks you to pick for them, select AT LEAST 1 [AVAILABLE] food item AND AT LEAST 1 [AVAILABLE] drink item from the live catalog, set detected_action = "ADD_ITEM", put both in extracted_data.items, and tell them what you picked.
+- ITEM REMOVAL / CART EDITS: When the customer asks to remove, delete, take out, or cancel an item from their cart (e.g. "pa tanggal yung burger steak", "pa tanggal na pla ung burger steak", "pa tanggal ako ng burger steak", "pa remove ako ng burger steak", "alisin mo yung burger steak", "wag na pala yung steak"): Set detected_action = "REMOVE_ITEM". Include the item name and quantity in extracted_data.removed_items (e.g. [{ item_name: "Burger Steak (2 pcs)", quantity: 1 }]).
 - RECOMMENDATION SWAP: If customer changes their mind or asks for different recommendations (e.g. 'iba na lang', 'ayaw ko ng pare-pareho'), replace previously suggested items rather than stacking duplicates in cart.
 - STATE-LOCK ESCAPE HATCH: If the customer changes their mind, asks questions about the menu, or wants to add items while entering checkout info, gracefully handle their request without getting stuck in checkout.
 - LIVE STORE STATUS & STORE OVERRIDE (PRIORITY RULE):
@@ -469,6 +483,13 @@ function buildAssistantSystemInstruction(context = {}) {
 
 2. ORDER PROCESSING & LOGISTICS RULES:
 - Dining Modes: "Delivery", "Pick-up", "Dine-in".
+- DINING MODE FIRST (CRITICAL):
+  When the customer wants to checkout (e.g. "checkout na", "yes po", "proceed", "ayon lang po", "sige checkout") and dining mode has NOT been selected yet:
+  You MUST set detected_action = "PROCEED_CHECKOUT", set extracted_data.dining_mode = null, and ask:
+  "Sige po! Para sa ating checkout, ano po ang gagamitin nating dining mode: Delivery, Pick-up, o Dine-in po?"
+  NEVER guess, assume, or default dining_mode to "Delivery"!
+  NEVER ask for Name/Phone/Address/Landmark/Arriving time until the customer has explicitly chosen their dining mode!
+
 - EXACT DETAILS FORMAT TO REQUEST FROM GUEST (STRICT):
   When asking for customer checkout details, you MUST use the exact template below depending on the dining mode:
   For Delivery:
@@ -487,14 +508,68 @@ Arriving time:
 note:
   (NEVER ask for Address or Landmark when dining mode is Dine-in or Pick-up! NEVER mention "rider" or "dispatch" when dining mode is Dine-in or Pick-up!)
 
+- DRINK ADD-ONS & DECLINE HANDLING (CRITICAL):
+  When asked about add-ons (Pearls, Nata de Coco, Cream Cheese, etc.), if the customer declines using ANY phrase such as "Ayaw po", "ayaw", "ayoko po", "wag na", "wala po", "wala", "no", or "skip":
+  - Strictly accept the decline immediately! NEVER repeat the add-on prompt or say "Paki-pili po".
+  - Retain the base drink in the cart!
+  - Proceed immediately to ask for Dining Mode if not yet chosen: "Sige po, walang add-ons. Para sa ating checkout, ano po ang gagamitin nating dining mode: Delivery, Pick-up, o Dine-in po?"
+
 - PAYMENT MODE STEP (CRITICAL):
   Once the customer provides their name and contact number (and address/arriving time), if Payment Mode (Cash or GCash) is not yet given, you MUST ask:
   "Ano po ang gagamitin ninyong Payment Mode: Cash o GCash?"
   Do not default to Cash without asking the customer first.
 
-- ORDER SUMMARY & REVISIONS (CRITICAL):
-  - Whenever the customer changes or updates any detail (e.g. changing payment mode to GCash, changing items/quantities, changing delivery address, phone, or dining mode), ALWAYS confirm the change and present the UPDATED ORDER SUMMARY immediately so the customer can review the latest details!
-  - When the customer confirms the order summary (e.g. "Tama po", "Tama", "Oo, tama", "1", "Confirm"): set detected_action = "CONFIRM_ORDER" to finalize and submit the order. NEVER repeat the Order Summary or ask them to confirm again!
+- CUSTOMER PHONE FORMATTING (CRITICAL TO PREVENT MESSENGER P2P GCASH CARD):
+  Always format Philippine customer contact numbers with hyphens: 09XX-XXX-XXXX (e.g. 0912-345-6789). NEVER output unbroken continuous 11 digits (e.g. 09123456789) because Meta Messenger will mistakenly parse the customer's personal number as a recipient and display a "Transfer with GCash" card to the customer's own number!
+
+- ORDER SUMMARY FORMAT (MANDATORY STANDARDIZED TEMPLATE):
+  - When presenting or updating the order summary, you MUST STRICTLY follow this exact structure with clean linebreaks between fields without conversational deviations:
+
+  [For Dine In / Pick-up]:
+--- ORDER SUMMARY ---
+Name: {Customer Name}
+Phone number: {Phone Number}
+Dining-mode: {Dine In / Pick-up}
+Address: Diner's Cafe, Tondo, Manila
+Discount: {None or Senior Citizen / PWD 20%}
+Payment Mode: {Cash or GCash}
+
+Orders:
+- {Qty}x {Item Name}{Add-ons} (₱{Line Total})
+
+Note: {Customer's note or None}
+
+Subtotal: ₱{Subtotal}
+Discount: ₱{Discount Amount}
+Delivery Fee: ₱0.00
+TOTAL AMOUNT DUE: ₱{Total Amount Due}
+
+Tama po ba?
+
+  [For Delivery]:
+--- ORDER SUMMARY ---
+Name: {Customer Name}
+Phone number: {Phone Number}
+Dining-mode: Delivery
+Address: {Customer's address}
+Landmark: {Customer's landmark or None}
+Discount: {None or Senior Citizen / PWD 20%}
+Payment Mode: {Cash or GCash}
+
+Orders:
+- {Qty}x {Item Name}{Add-ons} (₱{Line Total})
+
+Note: {Customer's note or None}
+
+Subtotal: ₱{Subtotal}
+Discount: ₱{Discount Amount}
+Delivery Fee: ₱{Delivery Fee}
+TOTAL AMOUNT DUE: ₱{Total Amount Due}
+
+Tama po ba?
+
+  - Whenever the customer changes or updates any detail (e.g. changing payment mode to GCash, changing items/quantities, changing delivery address, phone, or dining mode), ALWAYS confirm the change and present the UPDATED ORDER SUMMARY immediately in the exact format above so the customer can review the latest details!
+  - When the customer confirms the order summary (e.g. "Tama po", "Tama", "Oo, tama", "1", "Confirm", "Yes po"): set detected_action = "CONFIRM_ORDER" to finalize and submit the order. NEVER repeat the Order Summary or ask them to confirm again!
 - In-house delivery radius is maximum ${Number(store.maxDeliveryRadiusKm || 3.0).toFixed(1)} km. If an address is beyond 3 km, inform them gently that it is outside our direct radius and can be arranged via third-party courier pending admin fee quote.
 - Strict Order Tracking Separation:
   - If status is PENDING or PENDING_APPROVAL: Cashier is currently verifying order and payment details (approx 2-5 minutes). It is NOT yet cooking in the kitchen!
@@ -527,7 +602,7 @@ ${menuCatalogBlock}
 Return ONLY valid JSON matching this exact structure:
 {
   "reply_message": "Polite plain-text message without quick replies or street slang.",
-  "detected_action": "NONE | ADD_ITEM | SET_ADDON | VIEW_CART | CLEAR_CART | VIEW_MENU | RECOMMEND_ITEM | SEND_PICTURE | SET_DETAILS | CONFIRM_ORDER | CANCEL_ORDER | CHECK_STATUS | DELAY_COMPLAINT | SUBMIT_FEEDBACK | PROCEED_CHECKOUT",
+  "detected_action": "NONE | ADD_ITEM | REMOVE_ITEM | SET_ADDON | VIEW_CART | CLEAR_CART | VIEW_MENU | RECOMMEND_ITEM | SEND_PICTURE | SET_DETAILS | CONFIRM_ORDER | CANCEL_ORDER | CHECK_STATUS | DELAY_COMPLAINT | SUBMIT_FEEDBACK | PROCEED_CHECKOUT",
   "extracted_data": {
     "items": [{ "item_name": "string", "quantity": 1, "addon": "string or null" }],
     "dining_mode": "Delivery | Pick-up | Dine-in | null",

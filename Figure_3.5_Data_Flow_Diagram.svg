@@ -1,0 +1,259 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 860" width="100%" height="100%" style="background-color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;">
+  <defs>
+    <!-- Soft Modern Card Shadow matching dbdiagram -->
+    <filter id="cardShadow" x="-10%" y="-10%" width="120%" height="125%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#000000" flood-opacity="0.08"/>
+    </filter>
+
+    <!-- Arrow Marker in matching dbdiagram Blue -->
+    <marker id="dfdArrow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#2B6CB0" />
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="640" y="38" text-anchor="middle" font-size="20" font-weight="800" fill="#0f172a" letter-spacing="-0.5">Figure 3.5: System Data Flow Diagram (DFD Level 1)</text>
+
+  <!-- ==================== EXTERNAL ENTITIES ==================== -->
+  
+  <!-- 1. Customer -->
+  <g transform="translate(60, 240)">
+    <g filter="url(#cardShadow)">
+      <rect width="170" height="96" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+      <path d="M 0 6 C 0 2.68 2.68 0 6 0 L 164 0 C 167.32 0 170 2.68 170 6 L 170 28 L 0 28 Z" fill="#2B6CB0"/>
+      <text x="85" y="19" text-anchor="middle" font-size="12" font-weight="bold" fill="#ffffff" letter-spacing="0.5">CUSTOMER</text>
+      <text x="85" y="54" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#1e293b">Customer Client</text>
+      <text x="85" y="74" text-anchor="middle" font-size="11" fill="#64748b">(Mobile Messenger)</text>
+    </g>
+  </g>
+
+  <!-- 2. Administrator & Staff -->
+  <g transform="translate(1050, 240)">
+    <g filter="url(#cardShadow)">
+      <rect width="170" height="96" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+      <path d="M 0 6 C 0 2.68 2.68 0 6 0 L 164 0 C 167.32 0 170 2.68 170 6 L 170 28 L 0 28 Z" fill="#2B6CB0"/>
+      <text x="85" y="19" text-anchor="middle" font-size="12" font-weight="bold" fill="#ffffff" letter-spacing="0.5">ADMINISTRATOR</text>
+      <text x="85" y="54" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#1e293b">Admin &amp; Staff</text>
+      <text x="85" y="74" text-anchor="middle" font-size="11" fill="#64748b">(Web Dashboard)</text>
+    </g>
+  </g>
+
+  <!-- 3. Delivery Rider -->
+  <g transform="translate(1050, 590)">
+    <g filter="url(#cardShadow)">
+      <rect width="170" height="96" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+      <path d="M 0 6 C 0 2.68 2.68 0 6 0 L 164 0 C 167.32 0 170 2.68 170 6 L 170 28 L 0 28 Z" fill="#2B6CB0"/>
+      <text x="85" y="19" text-anchor="middle" font-size="12" font-weight="bold" fill="#ffffff" letter-spacing="0.5">DELIVERY RIDER</text>
+      <text x="85" y="54" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#1e293b">Courier Rider</text>
+      <text x="85" y="74" text-anchor="middle" font-size="11" fill="#64748b">(Rider Web Portal)</text>
+    </g>
+  </g>
+
+
+  <!-- ==================== PROCESSES ==================== -->
+
+  <!-- Process 1.0: AI Chatbot Module -->
+  <g transform="translate(340, 110)">
+    <g filter="url(#cardShadow)">
+      <rect width="260" height="88" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+      <path d="M 0 8 C 0 3.58 3.58 0 8 0 L 252 0 C 256.42 0 260 3.58 260 8 L 260 28 L 0 28 Z" fill="#2B6CB0"/>
+      <text x="12" y="19" font-size="12" font-weight="bold" fill="#ffffff">1.0</text>
+      <text x="130" y="19" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#ffffff">AI Chatbot Module</text>
+      <text x="130" y="52" text-anchor="middle" font-size="13" font-weight="bold" fill="#0f172a">Communication &amp; NLP</text>
+      <text x="130" y="71" text-anchor="middle" font-size="11" fill="#64748b">(Menu Browsing &amp; Inquiries)</text>
+    </g>
+  </g>
+
+  <!-- Process 2.0: Order Processing Module -->
+  <g transform="translate(340, 310)">
+    <g filter="url(#cardShadow)">
+      <rect width="260" height="88" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+      <path d="M 0 8 C 0 3.58 3.58 0 8 0 L 252 0 C 256.42 0 260 3.58 260 8 L 260 28 L 0 28 Z" fill="#2B6CB0"/>
+      <text x="12" y="19" font-size="12" font-weight="bold" fill="#ffffff">2.0</text>
+      <text x="130" y="19" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#ffffff">Order Processing Module</text>
+      <text x="130" y="52" text-anchor="middle" font-size="13" font-weight="bold" fill="#0f172a">Transaction Capture</text>
+      <text x="130" y="71" text-anchor="middle" font-size="11" fill="#64748b">(Checkout, Fare &amp; Payment)</text>
+    </g>
+  </g>
+
+  <!-- Process 3.0: Order Management & Inventory Process -->
+  <g transform="translate(710, 310)">
+    <g filter="url(#cardShadow)">
+      <rect width="260" height="88" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+      <path d="M 0 8 C 0 3.58 3.58 0 8 0 L 252 0 C 256.42 0 260 3.58 260 8 L 260 28 L 0 28 Z" fill="#2B6CB0"/>
+      <text x="12" y="19" font-size="12" font-weight="bold" fill="#ffffff">3.0</text>
+      <text x="130" y="19" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#ffffff">Order Management Process</text>
+      <text x="130" y="52" text-anchor="middle" font-size="13" font-weight="bold" fill="#0f172a">Kitchen &amp; Inventory Control</text>
+      <text x="130" y="71" text-anchor="middle" font-size="11" fill="#64748b">(Recipe Deductions &amp; Status)</text>
+    </g>
+  </g>
+
+  <!-- Process 4.0: Smart Delivery Management Module -->
+  <g transform="translate(710, 520)">
+    <g filter="url(#cardShadow)">
+      <rect width="260" height="88" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+      <path d="M 0 8 C 0 3.58 3.58 0 8 0 L 252 0 C 256.42 0 260 3.58 260 8 L 260 28 L 0 28 Z" fill="#2B6CB0"/>
+      <text x="12" y="19" font-size="12" font-weight="bold" fill="#ffffff">4.0</text>
+      <text x="130" y="19" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#ffffff">Smart Delivery Module</text>
+      <text x="130" y="52" text-anchor="middle" font-size="13" font-weight="bold" fill="#0f172a">Dispatch &amp; Logistics</text>
+      <text x="130" y="71" text-anchor="middle" font-size="11" fill="#64748b">(Scheduling &amp; Rider Tracking)</text>
+    </g>
+  </g>
+
+  <!-- Process 5.0: Notification & Reporting Process -->
+  <g transform="translate(340, 520)">
+    <g filter="url(#cardShadow)">
+      <rect width="260" height="88" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+      <path d="M 0 8 C 0 3.58 3.58 0 8 0 L 252 0 C 256.42 0 260 3.58 260 8 L 260 28 L 0 28 Z" fill="#2B6CB0"/>
+      <text x="12" y="19" font-size="12" font-weight="bold" fill="#ffffff">5.0</text>
+      <text x="130" y="19" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#ffffff">Notification &amp; Reporting</text>
+      <text x="130" y="52" text-anchor="middle" font-size="13" font-weight="bold" fill="#0f172a">Alerts &amp; Analytics</text>
+      <text x="130" y="71" text-anchor="middle" font-size="11" fill="#64748b">(SSE Broadcast &amp; Reports)</text>
+    </g>
+  </g>
+
+
+  <!-- ==================== DATA STORES ==================== -->
+
+  <!-- D1: Customers -->
+  <g transform="translate(60, 480)" filter="url(#cardShadow)">
+    <rect width="170" height="42" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+    <path d="M 0 4 C 0 1.79 1.79 0 4 0 L 36 0 L 36 42 L 4 42 C 1.79 42 0 40.21 0 38 Z" fill="#2B6CB0"/>
+    <text x="18" y="26" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#ffffff">D1</text>
+    <text x="103" y="26" text-anchor="middle" font-size="12" font-weight="bold" fill="#0f172a">Customers</text>
+  </g>
+
+  <!-- D2: Chatbot Logs -->
+  <g transform="translate(60, 110)" filter="url(#cardShadow)">
+    <rect width="170" height="42" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+    <path d="M 0 4 C 0 1.79 1.79 0 4 0 L 36 0 L 36 42 L 4 42 C 1.79 42 0 40.21 0 38 Z" fill="#2B6CB0"/>
+    <text x="18" y="26" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#ffffff">D2</text>
+    <text x="103" y="26" text-anchor="middle" font-size="12" font-weight="bold" fill="#0f172a">Chatbot Logs</text>
+  </g>
+
+  <!-- D3: Menu Items -->
+  <g transform="translate(680, 110)" filter="url(#cardShadow)">
+    <rect width="170" height="42" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+    <path d="M 0 4 C 0 1.79 1.79 0 4 0 L 36 0 L 36 42 L 4 42 C 1.79 42 0 40.21 0 38 Z" fill="#2B6CB0"/>
+    <text x="18" y="26" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#ffffff">D3</text>
+    <text x="103" y="26" text-anchor="middle" font-size="12" font-weight="bold" fill="#0f172a">Menu Items</text>
+  </g>
+
+  <!-- D4: Inventory & Recipes -->
+  <g transform="translate(900, 110)" filter="url(#cardShadow)">
+    <rect width="190" height="42" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+    <path d="M 0 4 C 0 1.79 1.79 0 4 0 L 36 0 L 36 42 L 4 42 C 1.79 42 0 40.21 0 38 Z" fill="#2B6CB0"/>
+    <text x="18" y="26" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#ffffff">D4</text>
+    <text x="113" y="26" text-anchor="middle" font-size="12" font-weight="bold" fill="#0f172a">Inventory &amp; Recipes</text>
+  </g>
+
+  <!-- D5: Orders & Order Details -->
+  <g transform="translate(470, 435)" filter="url(#cardShadow)">
+    <rect width="230" height="42" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+    <path d="M 0 4 C 0 1.79 1.79 0 4 0 L 36 0 L 36 42 L 4 42 C 1.79 42 0 40.21 0 38 Z" fill="#2B6CB0"/>
+    <text x="18" y="26" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#ffffff">D5</text>
+    <text x="133" y="26" text-anchor="middle" font-size="12" font-weight="bold" fill="#0f172a">Orders &amp; Order Details</text>
+  </g>
+
+  <!-- D6: Deliveries -->
+  <g transform="translate(750, 690)" filter="url(#cardShadow)">
+    <rect width="180" height="42" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+    <path d="M 0 4 C 0 1.79 1.79 0 4 0 L 36 0 L 36 42 L 4 42 C 1.79 42 0 40.21 0 38 Z" fill="#2B6CB0"/>
+    <text x="18" y="26" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#ffffff">D6</text>
+    <text x="108" y="26" text-anchor="middle" font-size="12" font-weight="bold" fill="#0f172a">Deliveries</text>
+  </g>
+
+
+  <!-- ==================== DATA FLOW ARROWS & LABELS ==================== -->
+
+  <!-- Customer -> Process 1.0 (Inquiries & Chat) -->
+  <path d="M 145 240 L 145 152 L 332 152" stroke="#2B6CB0" stroke-width="1.8" fill="none" marker-end="url(#dfdArrow)"/>
+  <rect x="160" y="142" width="160" height="18" rx="3" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="240" y="155" text-anchor="middle" font-size="10.5" font-weight="600" fill="#2B6CB0">Chat Messages &amp; Queries</text>
+
+  <!-- Process 1.0 -> Customer (AI Responses & Menu) -->
+  <path d="M 340 170 L 185 170 L 185 240" stroke="#2B6CB0" stroke-width="1.8" fill="none" marker-end="url(#dfdArrow)"/>
+  <rect x="200" y="185" width="125" height="18" rx="3" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="262" y="198" text-anchor="middle" font-size="10.5" font-weight="600" fill="#2B6CB0">AI Replies &amp; Menu</text>
+
+  <!-- Process 1.0 <-> D2 Chatbot Logs -->
+  <path d="M 340 130 L 238 130" stroke="#2B6CB0" stroke-width="1.8" fill="none" marker-end="url(#dfdArrow)"/>
+  <text x="289" y="124" text-anchor="middle" font-size="10" font-weight="bold" fill="#475569">Store Logs</text>
+
+  <!-- Process 1.0 <-> D3 Menu Items -->
+  <path d="M 600 130 L 672 130" stroke="#2B6CB0" stroke-width="1.8" fill="none" marker-end="url(#dfdArrow)"/>
+  <text x="636" y="124" text-anchor="middle" font-size="10" font-weight="bold" fill="#475569">Get Menu</text>
+
+  <!-- Process 1.0 -> Process 2.0 (Order Intent & Cart Items) -->
+  <path d="M 470 198 L 470 302" stroke="#2B6CB0" stroke-width="2" fill="none" marker-end="url(#dfdArrow)"/>
+  <rect x="420" y="240" width="115" height="18" rx="3" fill="#ffffff" stroke="#2B6CB0"/>
+  <text x="477" y="253" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#2B6CB0">Order Data &amp; Items</text>
+
+  <!-- Customer -> Process 2.0 (Checkout Details: Name, Address, Payment) -->
+  <path d="M 230 288 L 332 338" stroke="#2B6CB0" stroke-width="1.8" fill="none" marker-end="url(#dfdArrow)"/>
+  <rect x="230" y="300" width="100" height="18" rx="3" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="280" y="313" text-anchor="middle" font-size="10" font-weight="600" fill="#2B6CB0">Checkout Details</text>
+
+  <!-- Process 2.0 -> D1 Customers (Save Profile) -->
+  <path d="M 340 370 L 150 370 L 150 472" stroke="#2B6CB0" stroke-width="1.8" fill="none" marker-end="url(#dfdArrow)"/>
+  <rect x="160" y="385" width="115" height="18" rx="3" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="217" y="398" text-anchor="middle" font-size="10" font-weight="600" fill="#475569">Customer Profile</text>
+
+  <!-- Process 2.0 -> Process 3.0 (Confirmed Order) -->
+  <line x1="600" y1="352" x2="702" y2="352" stroke="#2B6CB0" stroke-width="2" marker-end="url(#dfdArrow)"/>
+  <rect x="615" y="338" width="85" height="18" rx="3" fill="#ffffff" stroke="#2B6CB0"/>
+  <text x="657" y="351" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#2B6CB0">Order Bill</text>
+
+  <!-- Process 3.0 -> D5 Orders & Order Details (Save Order) -->
+  <path d="M 730 398 L 730 455 L 708 455" stroke="#2B6CB0" stroke-width="1.8" fill="none" marker-end="url(#dfdArrow)"/>
+  <rect x="715" y="420" width="85" height="18" rx="3" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="757" y="433" text-anchor="middle" font-size="10" font-weight="600" fill="#475569">Store Order</text>
+
+  <!-- Process 3.0 <-> D4 Inventory (Recipe Stock Deduction) -->
+  <path d="M 840 310 L 840 170 L 930 170 L 930 158" stroke="#2B6CB0" stroke-width="1.8" fill="none" marker-end="url(#dfdArrow)"/>
+  <rect x="850" y="210" width="95" height="18" rx="3" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="897" y="223" text-anchor="middle" font-size="10" font-weight="600" fill="#475569">Deduct Stock</text>
+
+  <!-- Process 3.0 <-> Admin & Staff (Live Kanban & Inventory Control) -->
+  <line x1="970" y1="340" x2="1042" y2="300" stroke="#2B6CB0" stroke-width="1.8" marker-end="url(#dfdArrow)"/>
+  <rect x="980" y="305" width="60" height="16" rx="3" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="1010" y="317" text-anchor="middle" font-size="9.5" font-weight="600" fill="#2B6CB0">Cook Status</text>
+
+  <line x1="1050" y1="270" x2="978" y2="325" stroke="#2B6CB0" stroke-width="1.8" marker-end="url(#dfdArrow)"/>
+  <rect x="985" y="260" width="60" height="16" rx="3" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="1015" y="272" text-anchor="middle" font-size="9.5" font-weight="600" fill="#2B6CB0">Menu Mgt</text>
+
+  <!-- Process 3.0 -> Process 4.0 (Order Ready for Delivery) -->
+  <path d="M 840 398 L 840 512" stroke="#2B6CB0" stroke-width="2" fill="none" marker-end="url(#dfdArrow)"/>
+  <rect x="790" y="445" width="105" height="18" rx="3" fill="#ffffff" stroke="#2B6CB0"/>
+  <text x="842" y="458" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#2B6CB0">Dispatch Order</text>
+
+  <!-- Process 4.0 <-> D6 Deliveries (Store Delivery Schedule) -->
+  <path d="M 840 608 L 840 682" stroke="#2B6CB0" stroke-width="1.8" fill="none" marker-end="url(#dfdArrow)"/>
+  <text x="875" y="650" font-size="10" font-weight="600" fill="#475569">Schedule</text>
+
+  <!-- Process 4.0 <-> Delivery Rider (Dispatch & Confirmation) -->
+  <line x1="970" y1="562" x2="1042" y2="605" stroke="#2B6CB0" stroke-width="1.8" marker-end="url(#dfdArrow)"/>
+  <rect x="975" y="565" width="85" height="16" rx="3" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="1017" y="577" text-anchor="middle" font-size="9.5" font-weight="600" fill="#2B6CB0">Assign Delivery</text>
+
+  <line x1="1050" y1="650" x2="978" y2="585" stroke="#2B6CB0" stroke-width="1.8" marker-end="url(#dfdArrow)"/>
+  <rect x="980" y="630" width="85" height="16" rx="3" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="1022" y="642" text-anchor="middle" font-size="9.5" font-weight="600" fill="#2B6CB0">Confirm Drop</text>
+
+  <!-- Process 4.0 -> Process 5.0 (Status Updates for Notifications) -->
+  <line x1="710" y1="562" x2="608" y2="562" stroke="#2B6CB0" stroke-width="2" marker-end="url(#dfdArrow)"/>
+  <rect x="625" y="550" width="70" height="18" rx="3" fill="#ffffff" stroke="#2B6CB0"/>
+  <text x="660" y="563" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#2B6CB0">Live Status</text>
+
+  <!-- Process 5.0 -> Customer (Push Notifications & Tracking Alerts) -->
+  <path d="M 340 562 L 145 562 L 145 344" stroke="#2B6CB0" stroke-width="1.8" fill="none" marker-end="url(#dfdArrow)"/>
+  <rect x="160" y="500" width="140" height="18" rx="3" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="230" y="513" text-anchor="middle" font-size="10" font-weight="bold" fill="#2B6CB0">Real-Time Notifications</text>
+
+  <!-- Process 5.0 -> Administrator (Reports & Analytics) -->
+  <path d="M 470 608 L 470 780 L 1135 780 L 1135 344" stroke="#2B6CB0" stroke-width="1.8" fill="none" marker-end="url(#dfdArrow)"/>
+  <rect x="670" y="770" width="150" height="18" rx="3" fill="#ffffff" stroke="#2B6CB0"/>
+  <text x="745" y="783" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#2B6CB0">Sales Reports &amp; Analytics</text>
+
+</svg>

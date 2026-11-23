@@ -1,0 +1,261 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1260 760" width="100%" height="100%" style="background-color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;">
+  <defs>
+    <!-- Arrow Marker -->
+    <marker id="arrow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#000000" />
+    </marker>
+    <!-- Bidirectional Arrow Marker -->
+    <marker id="arrowStart" viewBox="0 0 10 10" refX="3" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 8 1.5 L 0 5 L 8 8.5 z" fill="#000000" />
+    </marker>
+    
+    <!-- Messenger Gradient -->
+    <linearGradient id="msgGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0084ff"/>
+      <stop offset="50%" stop-color="#a824fb"/>
+      <stop offset="100%" stop-color="#ff5c87"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ==================== TOP ROW: CUSTOMER FLOW TO CLOUD ==================== -->
+
+  <!-- 1. CUSTOMER -->
+  <g transform="translate(110, 130)">
+    <!-- Person Icon -->
+    <circle cx="0" cy="-28" r="18" fill="none" stroke="#000000" stroke-width="3"/>
+    <path d="M -28 16 C -28 -10, 28 -10, 28 16 Z" fill="none" stroke="#000000" stroke-width="3"/>
+    <!-- Small Messenger Badge -->
+    <circle cx="18" cy="8" r="11" fill="url(#msgGrad)"/>
+    <path d="M 14 8 L 18 3 L 17 6 L 22 8 L 18 13 L 19 10 Z" fill="#ffffff" transform="scale(0.8) translate(5, 1)"/>
+    
+    <text x="0" y="44" text-anchor="middle" font-size="14" font-weight="bold" fill="#000000" letter-spacing="0.5">CUSTOMER</text>
+    <text x="0" y="62" text-anchor="middle" font-size="11" fill="#475569">Uses Facebook</text>
+    <text x="0" y="76" text-anchor="middle" font-size="11" fill="#475569">Messenger</text>
+  </g>
+
+  <!-- Arrow: Customer -> Device -->
+  <line x1="165" y1="120" x2="255" y2="120" stroke="#000000" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- 2. DEVICE -->
+  <g transform="translate(310, 130)">
+    <!-- Smartphone -->
+    <rect x="-18" y="-38" width="36" height="66" rx="6" fill="#ffffff" stroke="#000000" stroke-width="3"/>
+    <line x1="-6" y1="-32" x2="6" y2="-32" stroke="#000000" stroke-width="2" stroke-linecap="round"/>
+    <circle cx="0" cy="22" r="3" fill="#000000"/>
+    <!-- Screen logo -->
+    <circle cx="0" cy="-6" r="10" fill="url(#msgGrad)"/>
+    <path d="M -3 -1 L 0 -5 L -1 -2 L 3 1 L 0 5 L 1 2 Z" fill="#ffffff" transform="scale(0.7) translate(-1, -1)"/>
+    
+    <text x="0" y="44" text-anchor="middle" font-size="14" font-weight="bold" fill="#000000" letter-spacing="0.5">DEVICE</text>
+    <text x="0" y="62" text-anchor="middle" font-size="11" fill="#475569">Smartphone /</text>
+    <text x="0" y="76" text-anchor="middle" font-size="11" fill="#475569">Mobile Device</text>
+  </g>
+
+  <!-- Arrow: Device -> Internet -->
+  <line x1="365" y1="120" x2="455" y2="120" stroke="#000000" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- 3. INTERNET -->
+  <g transform="translate(515, 130)">
+    <!-- Globe Wireframe -->
+    <circle cx="0" cy="-6" r="32" fill="#ffffff" stroke="#000000" stroke-width="2.8"/>
+    <line x1="-32" y1="-6" x2="32" y2="-6" stroke="#000000" stroke-width="2.2"/>
+    <ellipse cx="0" cy="-6" rx="16" ry="32" fill="none" stroke="#000000" stroke-width="2.2"/>
+    <line x1="0" y1="-38" x2="0" y2="26" stroke="#000000" stroke-width="2.2"/>
+    <path d="M -26 -18 C -14 -10, 14 -10, 26 -18" fill="none" stroke="#000000" stroke-width="1.8"/>
+    <path d="M -26 6 C -14 14, 14 14, 26 6" fill="none" stroke="#000000" stroke-width="1.8"/>
+    
+    <text x="0" y="44" text-anchor="middle" font-size="14" font-weight="bold" fill="#000000" letter-spacing="0.5">INTERNET</text>
+    <text x="0" y="62" text-anchor="middle" font-size="11" fill="#475569">Public HTTPS Network</text>
+  </g>
+
+  <!-- Arrow: Internet -> Facebook Messenger API -->
+  <line x1="575" y1="120" x2="685" y2="120" stroke="#000000" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- 4. FACEBOOK MESSENGER API -->
+  <g transform="translate(745, 130)">
+    <!-- Messenger Official Icon -->
+    <circle cx="0" cy="-6" r="32" fill="url(#msgGrad)"/>
+    <!-- Lightning Bolt -->
+    <path d="M -10 -2 L 3 -16 L -1 -5 L 11 2 L -2 16 L 2 5 Z" fill="#ffffff"/>
+    
+    <text x="0" y="44" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#000000" letter-spacing="0.5">FACEBOOK</text>
+    <text x="0" y="58" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#000000" letter-spacing="0.5">MESSENGER API</text>
+    <text x="0" y="74" text-anchor="middle" font-size="11" fill="#475569">Receives and Sends</text>
+    <text x="0" y="88" text-anchor="middle" font-size="11" fill="#475569">Messages</text>
+  </g>
+
+  <!-- Arrow: Messenger API -> Central Application / AI Chatbot -->
+  <line x1="810" y1="120" x2="915" y2="120" stroke="#000000" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- 5. CENTRAL APPLICATION & AI CHATBOT SYSTEM -->
+  <g transform="translate(995, 130)">
+    <!-- AI Speech Bubbles Icon -->
+    <path d="M -24 -24 C -24 -36, 12 -36, 12 -24 C 12 -12, -8 -12, -14 -6 L -16 0 L -16 -6 C -24 -6, -24 -14, -24 -24 Z" fill="none" stroke="#000000" stroke-width="2.5"/>
+    <text x="-6" y="-20" text-anchor="middle" font-size="12" font-weight="bold" fill="#000000">AI</text>
+    <!-- Second Bubble -->
+    <path d="M 6 -12 C 6 -24, 38 -24, 38 -12 C 38 0, 20 0, 14 6 L 12 11 L 12 6 C 6 6, 6 -2, 6 -12 Z" fill="none" stroke="#000000" stroke-width="2.2"/>
+    <line x1="16" y1="-14" x2="30" y2="-14" stroke="#000000" stroke-width="2"/>
+    <line x1="16" y1="-8" x2="26" y2="-8" stroke="#000000" stroke-width="2"/>
+
+    <text x="5" y="44" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#000000" letter-spacing="0.5">AI CHATBOT SYSTEM &amp;</text>
+    <text x="5" y="58" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#000000" letter-spacing="0.5">APPLICATION SERVER</text>
+    <text x="5" y="74" text-anchor="middle" font-size="11" fill="#475569">Node.js / Express Engine</text>
+    <text x="5" y="88" text-anchor="middle" font-size="10.5" fill="#64748b">Processes inquiries, orders,</text>
+    <text x="5" y="100" text-anchor="middle" font-size="10.5" fill="#64748b">fares, and auto-replies</text>
+  </g>
+
+
+  <!-- ==================== FLOW TO DATABASE & NOTIFICATIONS ==================== -->
+  
+  <!-- Arrow: Server -> Database -->
+  <path d="M 1000 240 L 1000 310 L 675 310" stroke="#000000" stroke-width="2.2" fill="none" marker-end="url(#arrow)"/>
+  <rect x="790" y="298" width="135" height="18" fill="#ffffff"/>
+  <text x="857" y="311" text-anchor="middle" font-size="10" font-weight="bold" fill="#000000">SQL Queries / Pool</text>
+
+  <!-- ==================== CENTER: DATABASE (CENTRALIZED) ==================== -->
+  <g transform="translate(600, 310)">
+    <!-- Database Cylinder 3-Tier -->
+    <path d="M -35 -30 C -35 -40, 35 -40, 35 -30 C 35 -20, -35 -20, -35 -30 Z" fill="#2d3748" stroke="#000000" stroke-width="2.5"/>
+    <ellipse cx="0" cy="-30" rx="35" ry="10" fill="#4a5568" stroke="#000000" stroke-width="2"/>
+    
+    <!-- Tier 2 -->
+    <path d="M -35 -30 L -35 -10 C -35 0, 35 0, 35 -10 L 35 -30" fill="#2d3748" stroke="#000000" stroke-width="2"/>
+    <path d="M -35 -10 C -35 0, 35 0, 35 -10" fill="none" stroke="#ffffff" stroke-width="1.5"/>
+
+    <!-- Tier 3 -->
+    <path d="M -35 -10 L -35 10 C -35 20, 35 20, 35 10 L 35 -10" fill="#2d3748" stroke="#000000" stroke-width="2"/>
+    <path d="M -35 10 C -35 20, 35 20, 35 10" fill="none" stroke="#ffffff" stroke-width="1.5"/>
+
+    <!-- Tier 4 Base -->
+    <path d="M -35 10 L -35 30 C -35 40, 35 40, 35 30 L 35 10" fill="#1a202c" stroke="#000000" stroke-width="2.5"/>
+    
+    <text x="0" y="58" text-anchor="middle" font-size="14" font-weight="bold" fill="#000000" letter-spacing="0.5">DATABASE</text>
+    <text x="0" y="74" text-anchor="middle" font-size="13" font-weight="bold" fill="#000000">(CENTRALIZED)</text>
+    
+    <!-- Bullets -->
+    <g transform="translate(-48, 92)" font-size="11.5" fill="#334155">
+      <text x="0" y="0">• Customers</text>
+      <text x="0" y="16">• Orders</text>
+      <text x="0" y="32">• Inventory (Recipe)</text>
+      <text x="0" y="48">• Delivery</text>
+      <text x="0" y="64">• Transactions</text>
+      <text x="0" y="80">• Reports</text>
+    </g>
+  </g>
+
+
+  <!-- ==================== BOTTOM ROW: CLIENT ROLES & NOTIFICATIONS ==================== -->
+
+  <!-- Connectors from Server/Database Level to Bottom Stakeholders -->
+  <!-- Main Horizontal Distribution Trunk Line -->
+  <line x1="120" y1="360" x2="1140" y2="360" stroke="#000000" stroke-width="2"/>
+  
+  <!-- Vertical Drop into Trunk from Server (via Web REST / SSE) -->
+  <line x1="1000" y1="310" x2="1000" y2="360" stroke="#000000" stroke-width="2"/>
+  <!-- Branch to Database -->
+  <line x1="600" y1="290" x2="600" y2="360" stroke="#000000" stroke-width="2"/>
+
+  <!-- Drops to each bottom box -->
+  <line x1="120" y1="360" x2="120" y2="445" stroke="#000000" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="370" y1="360" x2="370" y2="445" stroke="#000000" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="850" y1="360" x2="850" y2="445" stroke="#000000" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="1120" y1="360" x2="1120" y2="445" stroke="#000000" stroke-width="2" marker-end="url(#arrow)"/>
+
+
+  <!-- 1. CAFE STAFF -->
+  <g transform="translate(120, 490)">
+    <!-- Staff with Laptop Icon -->
+    <circle cx="0" cy="-28" r="16" fill="none" stroke="#000000" stroke-width="2.5"/>
+    <path d="M -22 6 C -22 -14, 22 -14, 22 6 Z" fill="none" stroke="#000000" stroke-width="2.5"/>
+    <!-- Laptop screen & keyboard -->
+    <rect x="-18" y="2" width="36" height="22" rx="2" fill="#ffffff" stroke="#000000" stroke-width="2"/>
+    <line x1="-24" y1="24" x2="24" y2="24" stroke="#000000" stroke-width="2.5" stroke-linecap="round"/>
+    
+    <text x="0" y="44" text-anchor="middle" font-size="14" font-weight="bold" fill="#000000" letter-spacing="0.5">CAFE STAFF</text>
+    <text x="0" y="60" text-anchor="middle" font-size="11" font-weight="600" fill="#0284c7">Web Browser (/dashboard)</text>
+    
+    <!-- Bullets -->
+    <g transform="translate(-60, 78)" font-size="11.5" fill="#334155">
+      <text x="0" y="0">• Manage Orders (Kanban)</text>
+      <text x="0" y="16">• Update Inventory (BOM)</text>
+      <text x="0" y="32">• Monitor Live Transactions</text>
+    </g>
+  </g>
+
+  <!-- 2. DELIVERY RIDER -->
+  <g transform="translate(370, 490)">
+    <!-- Motorcycle Rider Icon -->
+    <!-- Rear Cargo Box -->
+    <rect x="-34" y="-18" width="18" height="18" rx="2" fill="#ffffff" stroke="#000000" stroke-width="2"/>
+    <!-- Rider Body & Helmet -->
+    <circle cx="-6" cy="-22" r="8" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>
+    <path d="M -12 -12 L 2 -12 L 10 2" fill="none" stroke="#000000" stroke-width="2.5"/>
+    <!-- Wheels -->
+    <circle cx="-24" cy="14" r="12" fill="#ffffff" stroke="#000000" stroke-width="3"/>
+    <circle cx="24" cy="14" r="12" fill="#ffffff" stroke="#000000" stroke-width="3"/>
+    <!-- Motorcycle Frame -->
+    <path d="M -24 14 L -6 4 L 14 4 L 24 14 L 12 -4 L 0 4 Z" fill="none" stroke="#000000" stroke-width="2"/>
+    <line x1="8" y1="-8" x2="16" y2="-4" stroke="#000000" stroke-width="2.5"/> <!-- Handlebar -->
+    <!-- Motion lines -->
+    <line x1="-42" y1="-4" x2="-36" y2="-4" stroke="#000000" stroke-width="2"/>
+    <line x1="-44" y1="4" x2="-36" y2="4" stroke="#000000" stroke-width="2"/>
+    
+    <text x="0" y="44" text-anchor="middle" font-size="14" font-weight="bold" fill="#000000" letter-spacing="0.5">DELIVERY RIDER</text>
+    <text x="0" y="60" text-anchor="middle" font-size="11" font-weight="600" fill="#16a34a">Mobile Portal (/rider.html)</text>
+
+    <!-- Bullets -->
+    <g transform="translate(-70, 78)" font-size="11.5" fill="#334155">
+      <text x="0" y="0">• Receive Delivery Assignments</text>
+      <text x="0" y="16">• Update Delivery Status (GPS)</text>
+      <text x="0" y="32">• Confirm Order Drop-off</text>
+    </g>
+  </g>
+
+  <!-- 3. ADMINISTRATOR -->
+  <g transform="translate(850, 490)">
+    <!-- Admin Desk & Monitor Icon -->
+    <circle cx="0" cy="-28" r="16" fill="none" stroke="#000000" stroke-width="2.5"/>
+    <path d="M -22 6 C -22 -14, 22 -14, 22 6 Z" fill="none" stroke="#000000" stroke-width="2.5"/>
+    <!-- Desktop Monitor & Stand -->
+    <rect x="-18" y="0" width="36" height="24" rx="2" fill="#ffffff" stroke="#000000" stroke-width="2"/>
+    <line x1="0" y1="24" x2="0" y2="28" stroke="#000000" stroke-width="2.5"/>
+    <line x1="-10" y1="28" x2="10" y2="28" stroke="#000000" stroke-width="2.5"/>
+    <!-- Badge / Gear element -->
+    <circle cx="18" cy="-8" r="8" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+    <path d="M 15 -8 L 17 -6 L 21 -10" fill="none" stroke="#000000" stroke-width="1.8"/>
+
+    <text x="0" y="44" text-anchor="middle" font-size="14" font-weight="bold" fill="#000000" letter-spacing="0.5">ADMINISTRATOR</text>
+    <text x="0" y="60" text-anchor="middle" font-size="11" font-weight="600" fill="#0f172a">Management Console</text>
+
+    <!-- Bullets -->
+    <g transform="translate(-60, 78)" font-size="11.5" fill="#334155">
+      <text x="0" y="0">• Manage Menu &amp; Recipes</text>
+      <text x="0" y="16">• Manage Users &amp; Inventory</text>
+      <text x="0" y="32">• Generate CSV/PDF Reports</text>
+      <text x="0" y="48">• System &amp; Store Monitoring</text>
+    </g>
+  </g>
+
+  <!-- 4. NOTIFICATION SERVICE -->
+  <g transform="translate(1120, 490)">
+    <!-- Bell Icon -->
+    <path d="M -16 6 C -16 -16, 16 -16, 16 6 L 20 14 L -20 14 Z" fill="none" stroke="#000000" stroke-width="2.8"/>
+    <circle cx="0" cy="-18" r="4" fill="none" stroke="#000000" stroke-width="2.5"/>
+    <path d="M -6 16 C -6 20, 6 20, 6 16" fill="none" stroke="#000000" stroke-width="2.5"/>
+    <!-- Sound Waves -->
+    <path d="M -24 -2 C -28 4, -28 10, -24 16" fill="none" stroke="#000000" stroke-width="2"/>
+    <path d="M 24 -2 C 28 4, 28 10, 24 16" fill="none" stroke="#000000" stroke-width="2"/>
+
+    <text x="0" y="44" text-anchor="middle" font-size="14" font-weight="bold" fill="#000000" letter-spacing="0.5">NOTIFICATION</text>
+    <text x="0" y="58" text-anchor="middle" font-size="14" font-weight="bold" fill="#000000" letter-spacing="0.5">SERVICE</text>
+    <text x="0" y="72" text-anchor="middle" font-size="11" font-weight="600" fill="#0284c7">SSE &amp; Messenger API</text>
+
+    <!-- Bullets -->
+    <g transform="translate(-66, 88)" font-size="11.5" fill="#334155">
+      <text x="0" y="0">• Send Order Confirmations</text>
+      <text x="0" y="16">• Send Status Alerts (SSE)</text>
+      <text x="0" y="32">• Send Delivery Updates</text>
+    </g>
+  </g>
+
+</svg>

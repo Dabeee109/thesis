@@ -1,0 +1,145 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 860" width="100%" height="100%" style="background-color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <defs>
+    <!-- Shadow Filter -->
+    <filter id="cardShadow" x="-10%" y="-10%" width="120%" height="125%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.06"/>
+    </filter>
+    
+    <!-- Arrow Markers -->
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="#0284c7" />
+    </marker>
+    <marker id="arrowDark" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="#1e293b" />
+    </marker>
+  </defs>
+
+  <!-- Title & Figure Label -->
+  <text x="550" y="38" text-anchor="middle" font-size="20" font-weight="800" fill="#0f172a" letter-spacing="-0.5">Figure 3.2: Multi-Platform System Architecture Diagram</text>
+
+  <!-- ==================== 1. CLIENTS LAYER (3 ACCESS POINTS) ==================== -->
+  <!-- Customer -->
+  <g transform="translate(40, 70)">
+    <rect width="300" height="72" rx="8" fill="#ffffff" stroke="#1e293b" stroke-width="2" filter="url(#cardShadow)"/>
+    <text x="150" y="32" text-anchor="middle" font-size="15" font-weight="700" fill="#0f172a">Customer (Mobile Device)</text>
+    <text x="150" y="52" text-anchor="middle" font-size="12.5" fill="#475569">Facebook Messenger Client</text>
+  </g>
+
+  <!-- Delivery Personnel (Rider) -->
+  <g transform="translate(400, 70)">
+    <rect width="300" height="72" rx="8" fill="#ffffff" stroke="#1e293b" stroke-width="2" filter="url(#cardShadow)"/>
+    <text x="150" y="32" text-anchor="middle" font-size="15" font-weight="700" fill="#0f172a">Delivery Personnel (Rider)</text>
+    <text x="150" y="52" text-anchor="middle" font-size="12.5" fill="#475569">Mobile Rider Portal (/rider.html)</text>
+  </g>
+
+  <!-- Staff / Administrator -->
+  <g transform="translate(760, 70)">
+    <rect width="300" height="72" rx="8" fill="#ffffff" stroke="#1e293b" stroke-width="2" filter="url(#cardShadow)"/>
+    <text x="150" y="32" text-anchor="middle" font-size="15" font-weight="700" fill="#0f172a">Staff / Administrator</text>
+    <text x="150" y="52" text-anchor="middle" font-size="12.5" fill="#475569">Web Admin Dashboard (/dashboard.html)</text>
+  </g>
+
+  <!-- ==================== CONNECTORS: CLIENTS -> GATEWAYS ==================== -->
+  <!-- Line 1: Customer -> Messenger API Webhook -->
+  <path d="M 190 142 L 190 200" stroke="#0284c7" stroke-width="2" fill="none" marker-end="url(#arrowBlue)" />
+  <rect x="198" y="160" width="90" height="18" rx="4" fill="#f0f9ff"/>
+  <text x="243" y="173" text-anchor="middle" font-size="11" font-weight="700" fill="#0284c7">HTTPS / JSON</text>
+
+  <!-- Line 2: Rider -> Web UI Controller -->
+  <path d="M 550 142 L 550 170 L 800 170 L 800 200" stroke="#0284c7" stroke-width="2" fill="none" marker-end="url(#arrowBlue)" />
+
+  <!-- Line 3: Staff -> Web UI Controller -->
+  <path d="M 910 142 L 910 200" stroke="#0284c7" stroke-width="2" fill="none" marker-end="url(#arrowBlue)" />
+  <rect x="918" y="160" width="86" height="18" rx="4" fill="#f0f9ff"/>
+  <text x="961" y="173" text-anchor="middle" font-size="11" font-weight="700" fill="#0284c7">REST / HTTPS</text>
+
+
+  <!-- ==================== 2. GATEWAY CONTROLLERS LAYER ==================== -->
+  <!-- Messenger Webhook -->
+  <g transform="translate(40, 204)">
+    <rect width="460" height="68" rx="8" fill="#f0f9ff" stroke="#0284c7" stroke-width="2" filter="url(#cardShadow)"/>
+    <text x="230" y="30" text-anchor="middle" font-size="15" font-weight="700" fill="#0369a1">Messenger API Webhook</text>
+    <text x="230" y="50" text-anchor="middle" font-size="12.5" fill="#334155">Endpoint Event Listener (/webhook &amp; /simulator.html)</text>
+  </g>
+
+  <!-- Web UI Controller -->
+  <g transform="translate(600, 204)">
+    <rect width="460" height="68" rx="8" fill="#f0f9ff" stroke="#0284c7" stroke-width="2" filter="url(#cardShadow)"/>
+    <text x="230" y="30" text-anchor="middle" font-size="15" font-weight="700" fill="#0369a1">Web UI Controller</text>
+    <text x="230" y="50" text-anchor="middle" font-size="12.5" fill="#334155">Admin &amp; Rider REST API / Session Router</text>
+  </g>
+
+
+  <!-- ==================== CONNECTORS: GATEWAYS -> CENTRAL ENGINE ==================== -->
+  <path d="M 270 272 L 270 306 L 550 306 L 550 336" stroke="#1e293b" stroke-width="2" fill="none" marker-end="url(#arrowDark)" />
+  <path d="M 830 272 L 830 306 L 550 306" stroke="#1e293b" stroke-width="2" fill="none" />
+
+
+  <!-- ==================== 3. CENTRAL APPLICATION ENGINE ==================== -->
+  <g transform="translate(180, 340)">
+    <rect width="740" height="76" rx="8" fill="#f8fafc" stroke="#0f172a" stroke-width="2.5" filter="url(#cardShadow)"/>
+    <text x="370" y="32" text-anchor="middle" font-size="17" font-weight="800" fill="#0f172a">Central Application Engine</text>
+    <text x="370" y="55" text-anchor="middle" font-size="13.5" font-weight="700" fill="#2563eb">Node.js &amp; Express Backend Core &amp; Application Request Router</text>
+  </g>
+
+
+  <!-- ==================== CONNECTORS: CENTRAL ENGINE -> SUBSYSTEMS ==================== -->
+  <!-- Center line -->
+  <path d="M 550 416 L 550 476" stroke="#1e293b" stroke-width="2" fill="none" marker-end="url(#arrowDark)" />
+  <!-- Left branch -->
+  <path d="M 550 446 L 190 446 L 190 476" stroke="#1e293b" stroke-width="2" fill="none" marker-end="url(#arrowDark)" />
+  <!-- Right branch -->
+  <path d="M 550 446 L 910 446 L 910 476" stroke="#1e293b" stroke-width="2" fill="none" marker-end="url(#arrowDark)" />
+
+
+  <!-- ==================== 4. CORE ENGINE SUBSYSTEMS LAYER ==================== -->
+  <!-- NLP & Intent Matching -->
+  <g transform="translate(40, 480)">
+    <rect width="300" height="92" rx="8" fill="#ffffff" stroke="#334155" stroke-width="2" filter="url(#cardShadow)"/>
+    <text x="150" y="28" text-anchor="middle" font-size="14.5" font-weight="700" fill="#0f172a">NLP &amp; Intent Matching</text>
+    <text x="150" y="50" text-anchor="middle" font-size="12" font-weight="600" fill="#475569">Google Gemini AI &amp; Wit.ai</text>
+    <text x="150" y="70" text-anchor="middle" font-size="11.5" fill="#64748b">(16-State Conversational Flow)</text>
+  </g>
+
+  <!-- Dynamic Fare & Payment -->
+  <g transform="translate(400, 480)">
+    <rect width="300" height="92" rx="8" fill="#ffffff" stroke="#334155" stroke-width="2" filter="url(#cardShadow)"/>
+    <text x="150" y="28" text-anchor="middle" font-size="14.5" font-weight="700" fill="#0f172a">Dynamic Fare &amp; Payment</text>
+    <text x="150" y="50" text-anchor="middle" font-size="12" font-weight="600" fill="#475569">Validation Engine</text>
+    <text x="150" y="70" text-anchor="middle" font-size="11.5" fill="#64748b">(Routes v2, Weather, Xendit &amp; OCR)</text>
+  </g>
+
+  <!-- Smart Delivery & Inventory -->
+  <g transform="translate(760, 480)">
+    <rect width="300" height="92" rx="8" fill="#ffffff" stroke="#334155" stroke-width="2" filter="url(#cardShadow)"/>
+    <text x="150" y="28" text-anchor="middle" font-size="14.5" font-weight="700" fill="#0f172a">Smart Delivery &amp; Inventory</text>
+    <text x="150" y="50" text-anchor="middle" font-size="12" font-weight="600" fill="#475569">Recipe Stock Sync (g, ml, pcs)</text>
+    <text x="150" y="70" text-anchor="middle" font-size="11.5" fill="#64748b">&amp; Dispatch Routing</text>
+  </g>
+
+
+  <!-- ==================== CONNECTORS: SUBSYSTEMS -> DATA LAYER ==================== -->
+  <path d="M 190 572 L 190 622 L 550 622 L 550 648" stroke="#1e293b" stroke-width="2" fill="none" marker-end="url(#arrowDark)" />
+  <path d="M 550 572 L 550 648" stroke="#1e293b" stroke-width="2" fill="none" />
+  <path d="M 910 572 L 910 622 L 550 622" stroke="#1e293b" stroke-width="2" fill="none" />
+
+
+  <!-- ==================== 5. CENTRALIZED DATA LAYER ==================== -->
+  <g transform="translate(140, 652)">
+    <rect width="820" height="150" rx="10" fill="#fffdfa" stroke="#d97706" stroke-width="2.5" filter="url(#cardShadow)"/>
+    
+    <!-- Title -->
+    <text x="410" y="32" text-anchor="middle" font-size="17" font-weight="800" fill="#b45309" letter-spacing="-0.3">Centralized Data Layer</text>
+    
+    <!-- MySQL Section -->
+    <text x="410" y="58" text-anchor="middle" font-size="14.5" font-weight="700" fill="#1e293b">MySQL 8.0 Database</text>
+    <text x="410" y="77" text-anchor="middle" font-size="12.5" fill="#475569">(Orders, Menu Items, Customers, Chatbot Logs, Feedback, Recipe Stock)</text>
+    
+    <!-- Divider -->
+    <line x1="160" y1="92" x2="660" y2="92" stroke="#fed7aa" stroke-width="1.5" stroke-dasharray="6,4" />
+
+    <!-- SSE Section -->
+    <text x="410" y="114" text-anchor="middle" font-size="13.5" font-weight="700" fill="#0284c7">Server-Sent Events (SSE) Event Broker (/api/events)</text>
+    <text x="410" y="133" text-anchor="middle" font-size="12" fill="#64748b">(Real-Time Dispatch &amp; Dashboard Live Synchronization without polling)</text>
+  </g>
+</svg>

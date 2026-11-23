@@ -1,0 +1,227 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900" width="100%" height="100%" style="background-color: #ffffff; font-family: Arial, Helvetica, sans-serif;">
+  <defs>
+    <!-- UML Dashed Arrow Marker -->
+    <marker id="umlArrow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9" fill="none" stroke="#000000" stroke-width="1.5" stroke-linecap="round" />
+    </marker>
+  </defs>
+
+  <!-- ==================== SYSTEM BOUNDARY ==================== -->
+  <rect x="220" y="45" width="760" height="820" fill="#ffffff" stroke="#000000" stroke-width="2" />
+  <text x="600" y="75" text-anchor="middle" font-size="16" font-weight="bold" fill="#000000">System</text>
+
+  <!-- ==================== ACTOR 1: CUSTOMER (LEFT) ==================== -->
+  <g transform="translate(100, 410)">
+    <!-- Head -->
+    <circle cx="0" cy="-35" r="16" fill="#ffffff" stroke="#000000" stroke-width="2"/>
+    <!-- Body -->
+    <line x1="0" y1="-19" x2="0" y2="25" stroke="#000000" stroke-width="2"/>
+    <!-- Arms -->
+    <line x1="-28" y1="-5" x2="28" y2="-5" stroke="#000000" stroke-width="2"/>
+    <!-- Legs -->
+    <line x1="0" y1="25" x2="-22" y2="65" stroke="#000000" stroke-width="2"/>
+    <line x1="0" y1="25" x2="22" y2="65" stroke="#000000" stroke-width="2"/>
+    <!-- Label -->
+    <text x="0" y="90" text-anchor="middle" font-size="15" font-weight="bold" fill="#000000">Customer</text>
+  </g>
+
+  <!-- ==================== ACTOR 2: ADMIN (RIGHT TOP) ==================== -->
+  <g transform="translate(1100, 260)">
+    <!-- Head -->
+    <circle cx="0" cy="-35" r="16" fill="#ffffff" stroke="#000000" stroke-width="2"/>
+    <!-- Body -->
+    <line x1="0" y1="-19" x2="0" y2="25" stroke="#000000" stroke-width="2"/>
+    <!-- Arms -->
+    <line x1="-28" y1="-5" x2="28" y2="-5" stroke="#000000" stroke-width="2"/>
+    <!-- Legs -->
+    <line x1="0" y1="25" x2="-22" y2="65" stroke="#000000" stroke-width="2"/>
+    <line x1="0" y1="25" x2="22" y2="65" stroke="#000000" stroke-width="2"/>
+    <!-- Label -->
+    <text x="0" y="90" text-anchor="middle" font-size="15" font-weight="bold" fill="#000000">Admin</text>
+  </g>
+
+  <!-- ==================== ACTOR 3: DELIVERY RIDER (RIGHT BOTTOM) ==================== -->
+  <g transform="translate(1100, 710)">
+    <!-- Head -->
+    <circle cx="0" cy="-35" r="16" fill="#ffffff" stroke="#000000" stroke-width="2"/>
+    <!-- Body -->
+    <line x1="0" y1="-19" x2="0" y2="25" stroke="#000000" stroke-width="2"/>
+    <!-- Arms -->
+    <line x1="-28" y1="-5" x2="28" y2="-5" stroke="#000000" stroke-width="2"/>
+    <!-- Legs -->
+    <line x1="0" y1="25" x2="-22" y2="65" stroke="#000000" stroke-width="2"/>
+    <line x1="0" y1="25" x2="22" y2="65" stroke="#000000" stroke-width="2"/>
+    <!-- Label -->
+    <text x="0" y="90" text-anchor="middle" font-size="15" font-weight="bold" fill="#000000">Delivery Rider</text>
+  </g>
+
+
+  <!-- ==================== USE CASE OVALS ==================== -->
+  
+  <!-- CUSTOMER USE CASES -->
+  <!-- UC: Browse Menu -->
+  <g transform="translate(370, 130)">
+    <ellipse cx="0" cy="0" rx="90" ry="24" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+    <text x="0" y="5" text-anchor="middle" font-size="13" fill="#000000">Browse Menu</text>
+  </g>
+
+  <!-- UC: Ask Inquiry via AI Chatbot -->
+  <g transform="translate(370, 215)">
+    <ellipse cx="0" cy="0" rx="100" ry="25" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+    <text x="0" y="0" text-anchor="middle" font-size="12" fill="#000000">Ask Inquiry via</text>
+    <text x="0" y="14" text-anchor="middle" font-size="12" fill="#000000">AI Chatbot</text>
+  </g>
+
+  <!-- UC: Place Order -->
+  <g transform="translate(370, 310)">
+    <ellipse cx="0" cy="0" rx="90" ry="25" fill="#ffffff" stroke="#000000" stroke-width="2"/>
+    <text x="0" y="5" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#000000">Place Order</text>
+  </g>
+
+  <!-- UC: Track Order Status -->
+  <g transform="translate(370, 410)">
+    <ellipse cx="0" cy="0" rx="95" ry="24" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+    <text x="0" y="5" text-anchor="middle" font-size="13" fill="#000000">Track Order Status</text>
+  </g>
+
+  <!-- UC: Receive Notifications -->
+  <g transform="translate(370, 500)">
+    <ellipse cx="0" cy="0" rx="100" ry="24" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+    <text x="0" y="5" text-anchor="middle" font-size="12.5" fill="#000000">Receive Notifications</text>
+  </g>
+
+  <!-- UC: View Transaction History -->
+  <g transform="translate(370, 590)">
+    <ellipse cx="0" cy="0" rx="100" ry="24" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+    <text x="0" y="5" text-anchor="middle" font-size="12.5" fill="#000000">View Transaction History</text>
+  </g>
+
+  <!-- UC: Submit Feedback -->
+  <g transform="translate(370, 680)">
+    <ellipse cx="0" cy="0" rx="95" ry="24" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+    <text x="0" y="5" text-anchor="middle" font-size="13" fill="#000000">Submit Feedback</text>
+  </g>
+
+
+  <!-- INCLUDED SUB-USE CASES (MIDDLE) -->
+  <!-- Sub-UC: Calculate Dynamic Fare -->
+  <g transform="translate(600, 260)">
+    <ellipse cx="0" cy="0" rx="100" ry="24" fill="#ffffff" stroke="#000000" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <text x="0" y="5" text-anchor="middle" font-size="12" fill="#000000">Calculate Dynamic Fare</text>
+  </g>
+
+  <!-- Sub-UC: Select Payment Method -->
+  <g transform="translate(600, 335)">
+    <ellipse cx="0" cy="0" rx="100" ry="24" fill="#ffffff" stroke="#000000" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <text x="0" y="5" text-anchor="middle" font-size="12" fill="#000000">Select Payment Method</text>
+  </g>
+
+  <!-- Sub-UC: Deduct Recipe Stock -->
+  <g transform="translate(600, 420)">
+    <ellipse cx="0" cy="0" rx="100" ry="24" fill="#ffffff" stroke="#000000" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <text x="0" y="5" text-anchor="middle" font-size="12" fill="#000000">Deduct Recipe Stock</text>
+  </g>
+
+
+  <!-- ADMIN USE CASES -->
+  <!-- UC: Login -->
+  <g transform="translate(830, 130)">
+    <ellipse cx="0" cy="0" rx="90" ry="24" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+    <text x="0" y="5" text-anchor="middle" font-size="13" fill="#000000">Login</text>
+  </g>
+
+  <!-- UC: Manage Menu Items -->
+  <g transform="translate(830, 210)">
+    <ellipse cx="0" cy="0" rx="105" ry="24" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+    <text x="0" y="5" text-anchor="middle" font-size="12.5" fill="#000000">Manage Menu Items</text>
+  </g>
+
+  <!-- UC: Manage Orders -->
+  <g transform="translate(830, 290)">
+    <ellipse cx="0" cy="0" rx="95" ry="25" fill="#ffffff" stroke="#000000" stroke-width="2"/>
+    <text x="0" y="5" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#000000">Manage Orders</text>
+  </g>
+
+  <!-- UC: Manage Inventory -->
+  <g transform="translate(830, 370)">
+    <ellipse cx="0" cy="0" rx="100" ry="24" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+    <text x="0" y="5" text-anchor="middle" font-size="12.5" fill="#000000">Manage Inventory</text>
+  </g>
+
+  <!-- UC: Assign Delivery Rider -->
+  <g transform="translate(830, 450)">
+    <ellipse cx="0" cy="0" rx="105" ry="24" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+    <text x="0" y="5" text-anchor="middle" font-size="12.5" fill="#000000">Assign Delivery Rider</text>
+  </g>
+
+  <!-- UC: View Customer Records -->
+  <g transform="translate(830, 530)">
+    <ellipse cx="0" cy="0" rx="105" ry="24" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+    <text x="0" y="5" text-anchor="middle" font-size="12.5" fill="#000000">View Customer Records</text>
+  </g>
+
+  <!-- UC: Generate Reports -->
+  <g transform="translate(830, 610)">
+    <ellipse cx="0" cy="0" rx="95" ry="24" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+    <text x="0" y="5" text-anchor="middle" font-size="13" fill="#000000">Generate Reports</text>
+  </g>
+
+
+  <!-- RIDER USE CASES -->
+  <!-- UC: View Assigned Deliveries -->
+  <g transform="translate(830, 715)">
+    <ellipse cx="0" cy="0" rx="110" ry="24" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+    <text x="0" y="5" text-anchor="middle" font-size="12.5" fill="#000000">View Assigned Deliveries</text>
+  </g>
+
+  <!-- UC: Confirm Order Drop-off -->
+  <g transform="translate(830, 795)">
+    <ellipse cx="0" cy="0" rx="110" ry="24" fill="#ffffff" stroke="#000000" stroke-width="2"/>
+    <text x="0" y="5" text-anchor="middle" font-size="13" font-weight="bold" fill="#000000">Confirm Order Drop-off</text>
+  </g>
+
+
+  <!-- ==================== ASSOCIATIONS (SOLID LINES) ==================== -->
+  
+  <!-- Customer Lines -->
+  <line x1="130" y1="410" x2="280" y2="130" stroke="#000000" stroke-width="1.5" />
+  <line x1="130" y1="410" x2="270" y2="215" stroke="#000000" stroke-width="1.5" />
+  <line x1="130" y1="410" x2="280" y2="310" stroke="#000000" stroke-width="1.8" />
+  <line x1="130" y1="410" x2="275" y2="410" stroke="#000000" stroke-width="1.5" />
+  <line x1="130" y1="410" x2="270" y2="500" stroke="#000000" stroke-width="1.5" />
+  <line x1="130" y1="410" x2="270" y2="590" stroke="#000000" stroke-width="1.5" />
+  <line x1="130" y1="410" x2="275" y2="680" stroke="#000000" stroke-width="1.5" />
+
+  <!-- Admin Lines -->
+  <line x1="1070" y1="260" x2="920" y2="130" stroke="#000000" stroke-width="1.5" />
+  <line x1="1070" y1="260" x2="935" y2="210" stroke="#000000" stroke-width="1.5" />
+  <line x1="1070" y1="260" x2="925" y2="290" stroke="#000000" stroke-width="1.8" />
+  <line x1="1070" y1="260" x2="930" y2="370" stroke="#000000" stroke-width="1.5" />
+  <line x1="1070" y1="260" x2="935" y2="450" stroke="#000000" stroke-width="1.5" />
+  <line x1="1070" y1="260" x2="935" y2="530" stroke="#000000" stroke-width="1.5" />
+  <line x1="1070" y1="260" x2="925" y2="610" stroke="#000000" stroke-width="1.5" />
+
+  <!-- Rider Lines -->
+  <line x1="1070" y1="710" x2="920" y2="135" stroke="#000000" stroke-width="1.5" stroke-dasharray="6,4" /> <!-- Rider Login -->
+  <line x1="1070" y1="710" x2="940" y2="715" stroke="#000000" stroke-width="1.5" />
+  <line x1="1070" y1="710" x2="940" y2="795" stroke="#000000" stroke-width="1.8" />
+
+
+  <!-- ==================== UML <<include>> DEPENDENCIES ==================== -->
+  
+  <!-- Place Order -> Calculate Dynamic Fare -->
+  <path d="M 450 300 L 490 280 L 510 270" stroke="#000000" stroke-width="1.2" stroke-dasharray="4,3" fill="none" marker-end="url(#umlArrow)" />
+  <rect x="445" y="270" width="60" height="15" fill="#ffffff"/>
+  <text x="475" y="282" text-anchor="middle" font-size="9" font-weight="bold" fill="#000000">&lt;&lt;include&gt;&gt;</text>
+
+  <!-- Place Order -> Select Payment Method -->
+  <path d="M 460 315 L 500 325" stroke="#000000" stroke-width="1.2" stroke-dasharray="4,3" fill="none" marker-end="url(#umlArrow)" />
+  <rect x="455" y="325" width="60" height="15" fill="#ffffff"/>
+  <text x="485" y="337" text-anchor="middle" font-size="9" font-weight="bold" fill="#000000">&lt;&lt;include&gt;&gt;</text>
+
+  <!-- Manage Orders -> Deduct Recipe Stock -->
+  <path d="M 735 295 L 685 380 L 670 398" stroke="#000000" stroke-width="1.2" stroke-dasharray="4,3" fill="none" marker-end="url(#umlArrow)" />
+  <rect x="670" y="340" width="60" height="15" fill="#ffffff"/>
+  <text x="700" y="352" text-anchor="middle" font-size="9" font-weight="bold" fill="#000000">&lt;&lt;include&gt;&gt;</text>
+
+</svg>

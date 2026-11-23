@@ -22,13 +22,16 @@ const MAX_FAILED_RECEIPT_ATTEMPTS = 3;
 
 /**
  * Determine whether checkout should dispatch to Xendit API or Personal GCash Pay-First.
- * Defaults to Personal GCash unless GCASH_CHECKOUT_MODE=xendit or a live Xendit production key is configured.
+ * Defaults to Xendit unless GCASH_CHECKOUT_MODE=personal.
  * @returns {boolean}
  */
 function shouldUseXenditCheckout() {
-  const mode = String(process.env.GCASH_CHECKOUT_MODE || '').trim().toLowerCase();
-  if (mode === 'xendit') return true;
-  if (mode === 'personal' || mode === 'gcash' || mode === 'manual') return false;
+  const rawMode = process.env.GCASH_CHECKOUT_MODE;
+  if (rawMode !== undefined) {
+    const mode = String(rawMode).trim().toLowerCase();
+    if (mode === 'xendit') return true;
+    if (mode === 'personal' || mode === 'gcash' || mode === 'manual') return false;
+  }
 
   const secretKey = String(process.env.XENDIT_SECRET_KEY || '').trim();
   return secretKey.startsWith('xnd_production_');

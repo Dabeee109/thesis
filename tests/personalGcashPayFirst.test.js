@@ -88,49 +88,56 @@ test('Personal GCash Pay-First & Anti-Flood Suite', async (t) => {
   });
 
   await t.test('2. Pay-First checkout stores session.pendingGCashOrder WITHOUT inserting into orders DB', async () => {
-    const psid = `PSID_PAY_FIRST_${Date.now()}`;
-    clearSent(psid);
+    const origMode = process.env.GCASH_CHECKOUT_MODE;
+    process.env.GCASH_CHECKOUT_MODE = 'personal';
+    try {
+      const psid = `PSID_PAY_FIRST_${Date.now()}`;
+      clearSent(psid);
 
-    const session = await nlpEngine.getSession(psid);
-    session.customer_name = 'Juan Dela Cruz';
-    session.contact_number = '09171234567';
-    session.dining_mode = 'Pick-up';
-    session.payment_mode = 'Xendit';
-    session.order_subtotal = Number(sampleItem.price);
-    session.cart = [{ menuItemId: sampleItem.id, name: sampleItem.name, price: Number(sampleItem.price), quantity: 1 }];
-    await nlpEngine.saveSession(session);
+      const session = await nlpEngine.getSession(psid);
+      session.customer_name = 'Juan Dela Cruz';
+      session.contact_number = '09171234567';
+      session.dining_mode = 'Pick-up';
+      session.payment_mode = 'Xendit';
+      session.order_subtotal = Number(sampleItem.price);
+      session.cart = [{ menuItemId: sampleItem.id, name: sampleItem.name, price: Number(sampleItem.price), quantity: 1 }];
+      await nlpEngine.saveSession(session);
 
-    const [beforeOrders] = await db.query(
-      `SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id WHERE c.psid = ?`,
-      [psid]
-    );
-    assert.strictEqual(beforeOrders.length, 0);
+      const [beforeOrders] = await db.query(
+        `SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id WHERE c.psid = ?`,
+        [psid]
+      );
+      assert.strictEqual(beforeOrders.length, 0);
 
-    const result = await nlpEngine.finalizeOrderSummaryAndPayment(psid, session, { skipConfirmation: true });
-    assert.strictEqual(result.intent, 'AWAITING_PAYMENT_PROOF');
+      const result = await nlpEngine.finalizeOrderSummaryAndPayment(psid, session, { skipConfirmation: true });
+      assert.strictEqual(result.intent, 'AWAITING_PAYMENT_PROOF');
 
-    // Critical anti-flood verification: zero DB orders inserted yet!
-    const [afterOrders] = await db.query(
-      `SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id WHERE c.psid = ?`,
-      [psid]
-    );
-    assert.strictEqual(afterOrders.length, 0, 'Must NOT insert order into DB until valid proof is uploaded');
+      // Critical anti-flood verification: zero DB orders inserted yet!
+      const [afterOrders] = await db.query(
+        `SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id WHERE c.psid = ?`,
+        [psid]
+      );
+      assert.strictEqual(afterOrders.length, 0, 'Must NOT insert order into DB until valid proof is uploaded');
 
-    const updated = await nlpEngine.getSession(psid);
-    assert.strictEqual(updated.state, 'AWAITING_PAYMENT_PROOF');
-    assert.ok(updated.pendingGCashOrder, 'pendingGCashOrder draft must be saved in session');
-    assert.strictEqual(Number(updated.pendingGCashOrder.grandTotal), Number(sampleItem.price));
+      const updated = await nlpEngine.getSession(psid);
+      assert.strictEqual(updated.state, 'AWAITING_PAYMENT_PROOF');
+      assert.ok(updated.pendingGCashOrder, 'pendingGCashOrder draft must be saved in session');
+      assert.strictEqual(Number(updated.pendingGCashOrder.grandTotal), Number(sampleItem.price));
 
-    const sent = getSent(psid);
-    const plainGcashIdx = sent.findIndex(m => typeof m.messagePayload?.text === 'string' && /GCash Number:\s*09\d{9}/i.test(m.messagePayload.text));
-    const btnIdx = sent.findIndex(m => m.messagePayload?.attachment?.payload?.template_type === 'button');
-    assert.ok(plainGcashIdx !== -1, 'Must send plain-text GCash trigger message with continuous 11-digit number');
-    assert.ok(btnIdx !== -1, 'Must send Button Template with GCash payment portal URL');
-    assert.ok(plainGcashIdx < btnIdx, 'Plain-text GCash trigger message must be sent BEFORE Button Template');
-    const btnMsg = sent[btnIdx];
-    const url = btnMsg.messagePayload.attachment.payload.buttons[0].url;
-    assert.ok(url.includes('/pay/gcash?'), 'Button URL must point to /pay/gcash');
-    assert.ok(url.includes('mode=personal'), 'Button URL must include mode=personal');
+      const sent = getSent(psid);
+      const plainGcashIdx = sent.findIndex(m => typeof m.messagePayload?.text === 'string' && /GCash Number:\s*09\d{9}/i.test(m.messagePayload.text));
+      const btnIdx = sent.findIndex(m => m.messagePayload?.attachment?.payload?.template_type === 'button');
+      assert.ok(plainGcashIdx !== -1, 'Must send plain-text GCash trigger message with continuous 11-digit number');
+      assert.ok(btnIdx !== -1, 'Must send Button Template with GCash payment portal URL');
+      assert.ok(plainGcashIdx < btnIdx, 'Plain-text GCash trigger message must be sent BEFORE Button Template');
+      const btnMsg = sent[btnIdx];
+      const url = btnMsg.messagePayload.attachment.payload.buttons[0].url;
+      assert.ok(url.includes('/pay/gcash?'), 'Button URL must point to /pay/gcash');
+      assert.ok(url.includes('mode=personal'), 'Button URL must include mode=personal');
+    } finally {
+      if (origMode === undefined) delete process.env.GCASH_CHECKOUT_MODE;
+      else process.env.GCASH_CHECKOUT_MODE = origMode;
+    }
   });
 
   await t.test('3. /pay/gcash?mode=personal hides mock payBtn and confirmGcashPayment blocks personal self-confirm', async () => {

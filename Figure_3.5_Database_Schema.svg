@@ -1,0 +1,347 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1300 1020" width="100%" height="100%" style="background-color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+  <defs>
+    <!-- Soft card shadow matching dbdiagram -->
+    <filter id="schemaShadow" x="-10%" y="-10%" width="120%" height="125%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#000000" flood-opacity="0.08"/>
+    </filter>
+
+    <!-- Circle marker for 1 side of relationship -->
+    <marker id="circleOne" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6">
+      <circle cx="5" cy="5" r="3" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5" />
+    </marker>
+    <!-- Crow's foot marker for Many side of relationship -->
+    <marker id="crowsFoot" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 M 8 1.5 L 8 8.5" fill="none" stroke="#94a3b8" stroke-width="1.3" />
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="650" y="32" text-anchor="middle" font-size="20" font-weight="800" fill="#0f172a" letter-spacing="-0.5">Figure 3.5: Database Schema (Entity Relationship Diagram)</text>
+
+  <!-- ==================== RELATIONSHIP CONNECTOR LINES ==================== -->
+  
+  <!-- admins.admin_id -> reports.admin_id -->
+  <path d="M 230 92 L 335 92 L 335 115 L 438 115" stroke="#94a3b8" stroke-width="1.4" fill="none" marker-start="url(#circleOne)" marker-end="url(#crowsFoot)"/>
+
+  <!-- customers.customer_id -> orders.customer_id -->
+  <path d="M 240 348 L 355 348 L 355 442 L 448 442" stroke="#94a3b8" stroke-width="1.4" fill="none" marker-start="url(#circleOne)" marker-end="url(#crowsFoot)"/>
+
+  <!-- customers.customer_id -> chatbot_logs.customer_id -->
+  <path d="M 240 358 L 380 358 L 380 818 L 508 818" stroke="#94a3b8" stroke-width="1.4" fill="none" marker-start="url(#circleOne)" marker-end="url(#crowsFoot)"/>
+
+  <!-- customers.customer_id -> notifications.customer_id -->
+  <path d="M 240 338 L 415 338 L 415 332 L 818 332" stroke="#94a3b8" stroke-width="1.4" fill="none" marker-start="url(#circleOne)" marker-end="url(#crowsFoot)"/>
+
+  <!-- orders.order_id -> deliveries.order_id -->
+  <path d="M 660 412 L 720 412 L 720 102 L 818 102" stroke="#94a3b8" stroke-width="1.4" fill="none" marker-start="url(#circleOne)" marker-end="url(#crowsFoot)"/>
+
+  <!-- orders.order_id -> notifications.order_id -->
+  <path d="M 660 422 L 735 422 L 735 352 L 818 352" stroke="#94a3b8" stroke-width="1.4" fill="none" marker-start="url(#circleOne)" marker-end="url(#crowsFoot)"/>
+
+  <!-- orders.order_id -> order_details.order_id -->
+  <path d="M 660 432 L 750 432 L 750 582 L 838 582" stroke="#94a3b8" stroke-width="1.4" fill="none" marker-start="url(#circleOne)" marker-end="url(#crowsFoot)"/>
+
+  <!-- menu_items.menu_id -> order_details.menu_id -->
+  <path d="M 220 605 L 530 605 L 530 605 L 838 605" stroke="#94a3b8" stroke-width="1.4" fill="none" marker-start="url(#circleOne)" marker-end="url(#crowsFoot)"/>
+
+  <!-- menu_items.menu_id -> inventory.menu_id -->
+  <path d="M 220 615 L 245 615 L 245 862 L 258 862" stroke="#94a3b8" stroke-width="1.4" fill="none" marker-start="url(#circleOne)" marker-end="url(#crowsFoot)"/>
+
+
+  <!-- ==================== TABLE CARDS ==================== -->
+
+  <!-- 1. ADMINS (Top Left) -->
+  <g transform="translate(45, 55)" filter="url(#schemaShadow)">
+    <rect width="185" height="175" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+    <path d="M 0 6 C 0 2.68 2.68 0 6 0 L 179 0 C 182.32 0 185 2.68 185 6 L 185 30 L 0 30 Z" fill="#2B6CB0"/>
+    <text x="14" y="21" font-size="13" font-weight="bold" fill="#ffffff">admins</text>
+    
+    <!-- Fields -->
+    <text x="14" y="52" font-size="11.5" font-weight="bold" fill="#1e293b">admin_id</text>
+    <text x="170" y="52" text-anchor="end" font-size="11" fill="#64748b">int</text>
+    <line x1="10" y1="62" x2="175" y2="62" stroke="#f1f5f9"/>
+
+    <text x="14" y="80" font-size="11.5" fill="#334155">full_name</text>
+    <text x="170" y="80" text-anchor="end" font-size="11" fill="#64748b">varchar</text>
+    <line x1="10" y1="90" x2="175" y2="90" stroke="#f1f5f9"/>
+
+    <text x="14" y="108" font-size="11.5" fill="#334155">username</text>
+    <text x="170" y="108" text-anchor="end" font-size="11" fill="#64748b">varchar</text>
+    <line x1="10" y1="118" x2="175" y2="118" stroke="#f1f5f9"/>
+
+    <text x="14" y="136" font-size="11.5" fill="#334155">password</text>
+    <text x="170" y="136" text-anchor="end" font-size="11" fill="#64748b">varchar</text>
+    <line x1="10" y1="146" x2="175" y2="146" stroke="#f1f5f9"/>
+
+    <text x="14" y="164" font-size="11.5" fill="#334155">role</text>
+    <text x="170" y="164" text-anchor="end" font-size="11" fill="#64748b">varchar</text>
+  </g>
+
+  <!-- 2. REPORTS (Top Center) -->
+  <g transform="translate(440, 55)" filter="url(#schemaShadow)">
+    <rect width="195" height="150" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+    <path d="M 0 6 C 0 2.68 2.68 0 6 0 L 189 0 C 192.32 0 195 2.68 195 6 L 195 30 L 0 30 Z" fill="#2B6CB0"/>
+    <text x="14" y="21" font-size="13" font-weight="bold" fill="#ffffff">reports</text>
+
+    <!-- Fields -->
+    <text x="14" y="52" font-size="11.5" font-weight="bold" fill="#1e293b">report_id</text>
+    <text x="180" y="52" text-anchor="end" font-size="11" fill="#64748b">int</text>
+    <line x1="10" y1="62" x2="185" y2="62" stroke="#f1f5f9"/>
+
+    <text x="14" y="80" font-size="11.5" fill="#334155">admin_id</text>
+    <text x="180" y="80" text-anchor="end" font-size="11" fill="#64748b">int</text>
+    <line x1="10" y1="90" x2="185" y2="90" stroke="#f1f5f9"/>
+
+    <text x="14" y="108" font-size="11.5" fill="#334155">report_type</text>
+    <text x="180" y="108" text-anchor="end" font-size="11" fill="#64748b">varchar</text>
+    <line x1="10" y1="118" x2="185" y2="118" stroke="#f1f5f9"/>
+
+    <text x="14" y="136" font-size="11.5" fill="#334155">generated_at</text>
+    <text x="180" y="136" text-anchor="end" font-size="11" fill="#64748b">datetime</text>
+  </g>
+
+  <!-- 3. DELIVERIES (Top Right) -->
+  <g transform="translate(820, 45)" filter="url(#schemaShadow)">
+    <rect width="205" height="200" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+    <path d="M 0 6 C 0 2.68 2.68 0 6 0 L 199 0 C 202.32 0 205 2.68 205 6 L 205 30 L 0 30 Z" fill="#2B6CB0"/>
+    <text x="14" y="21" font-size="13" font-weight="bold" fill="#ffffff">deliveries</text>
+
+    <!-- Fields -->
+    <text x="14" y="52" font-size="11.5" font-weight="bold" fill="#1e293b">delivery_id</text>
+    <text x="190" y="52" text-anchor="end" font-size="11" fill="#64748b">int</text>
+    <line x1="10" y1="62" x2="195" y2="62" stroke="#f1f5f9"/>
+
+    <text x="14" y="80" font-size="11.5" fill="#334155">order_id</text>
+    <text x="190" y="80" text-anchor="end" font-size="11" fill="#64748b">int</text>
+    <line x1="10" y1="90" x2="195" y2="90" stroke="#f1f5f9"/>
+
+    <text x="14" y="108" font-size="11.5" fill="#334155">delivery_address</text>
+    <text x="190" y="108" text-anchor="end" font-size="11" fill="#64748b">text</text>
+    <line x1="10" y1="118" x2="195" y2="118" stroke="#f1f5f9"/>
+
+    <text x="14" y="136" font-size="11.5" fill="#334155">delivery_status</text>
+    <text x="190" y="136" text-anchor="end" font-size="11" fill="#64748b">varchar</text>
+    <line x1="10" y1="146" x2="195" y2="146" stroke="#f1f5f9"/>
+
+    <text x="14" y="164" font-size="11.5" fill="#334155">estimated_time</text>
+    <text x="190" y="164" text-anchor="end" font-size="11" fill="#64748b">datetime</text>
+    <line x1="10" y1="174" x2="195" y2="174" stroke="#f1f5f9"/>
+
+    <text x="14" y="192" font-size="11.5" fill="#334155">delivered_at</text>
+    <text x="190" y="192" text-anchor="end" font-size="11" fill="#64748b">datetime</text>
+  </g>
+
+  <!-- 4. CUSTOMERS (Middle Left) -->
+  <g transform="translate(45, 310)" filter="url(#schemaShadow)">
+    <rect width="195" height="200" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+    <path d="M 0 6 C 0 2.68 2.68 0 6 0 L 189 0 C 192.32 0 195 2.68 195 6 L 195 30 L 0 30 Z" fill="#2B6CB0"/>
+    <text x="14" y="21" font-size="13" font-weight="bold" fill="#ffffff">customers</text>
+
+    <!-- Fields -->
+    <text x="14" y="52" font-size="11.5" font-weight="bold" fill="#1e293b">customer_id</text>
+    <text x="180" y="52" text-anchor="end" font-size="11" fill="#64748b">int</text>
+    <line x1="10" y1="62" x2="185" y2="62" stroke="#f1f5f9"/>
+
+    <text x="14" y="80" font-size="11.5" fill="#334155">full_name</text>
+    <text x="180" y="80" text-anchor="end" font-size="11" fill="#64748b">varchar</text>
+    <line x1="10" y1="90" x2="185" y2="90" stroke="#f1f5f9"/>
+
+    <text x="14" y="108" font-size="11.5" fill="#334155">contact_number</text>
+    <text x="180" y="108" text-anchor="end" font-size="11" fill="#64748b">varchar</text>
+    <line x1="10" y1="118" x2="185" y2="118" stroke="#f1f5f9"/>
+
+    <text x="14" y="136" font-size="11.5" fill="#334155">email</text>
+    <text x="180" y="136" text-anchor="end" font-size="11" fill="#64748b">varchar</text>
+    <line x1="10" y1="146" x2="185" y2="146" stroke="#f1f5f9"/>
+
+    <text x="14" y="164" font-size="11.5" fill="#334155">messenger_id</text>
+    <text x="180" y="164" text-anchor="end" font-size="11" fill="#64748b">varchar</text>
+    <line x1="10" y1="174" x2="185" y2="174" stroke="#f1f5f9"/>
+
+    <text x="14" y="192" font-size="11.5" fill="#334155">created_at</text>
+    <text x="180" y="192" text-anchor="end" font-size="11" fill="#64748b">datetime</text>
+  </g>
+
+  <!-- 5. ORDERS (Center) -->
+  <g transform="translate(450, 370)" filter="url(#schemaShadow)">
+    <rect width="210" height="200" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+    <path d="M 0 6 C 0 2.68 2.68 0 6 0 L 204 0 C 207.32 0 210 2.68 210 6 L 210 30 L 0 30 Z" fill="#2B6CB0"/>
+    <text x="14" y="21" font-size="13" font-weight="bold" fill="#ffffff">orders</text>
+
+    <!-- Fields -->
+    <text x="14" y="52" font-size="11.5" font-weight="bold" fill="#1e293b">order_id</text>
+    <text x="195" y="52" text-anchor="end" font-size="11" fill="#64748b">int</text>
+    <line x1="10" y1="62" x2="200" y2="62" stroke="#f1f5f9"/>
+
+    <text x="14" y="80" font-size="11.5" fill="#334155">customer_id</text>
+    <text x="195" y="80" text-anchor="end" font-size="11" fill="#64748b">int</text>
+    <line x1="10" y1="90" x2="200" y2="90" stroke="#f1f5f9"/>
+
+    <text x="14" y="108" font-size="11.5" fill="#334155">order_date</text>
+    <text x="195" y="108" text-anchor="end" font-size="11" fill="#64748b">datetime</text>
+    <line x1="10" y1="118" x2="200" y2="118" stroke="#f1f5f9"/>
+
+    <text x="14" y="136" font-size="11.5" fill="#334155">total_amount</text>
+    <text x="195" y="136" text-anchor="end" font-size="11" fill="#64748b">decimal</text>
+    <line x1="10" y1="146" x2="200" y2="146" stroke="#f1f5f9"/>
+
+    <text x="14" y="164" font-size="11.5" fill="#334155">order_status</text>
+    <text x="195" y="164" text-anchor="end" font-size="11" fill="#64748b">varchar</text>
+    <line x1="10" y1="174" x2="200" y2="174" stroke="#f1f5f9"/>
+
+    <text x="14" y="192" font-size="11.5" fill="#334155">payment_status</text>
+    <text x="195" y="192" text-anchor="end" font-size="11" fill="#64748b">varchar</text>
+  </g>
+
+  <!-- 6. NOTIFICATIONS (Middle Right Upper) -->
+  <g transform="translate(820, 275)" filter="url(#schemaShadow)">
+    <rect width="205" height="200" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+    <path d="M 0 6 C 0 2.68 2.68 0 6 0 L 199 0 C 202.32 0 205 2.68 205 6 L 205 30 L 0 30 Z" fill="#2B6CB0"/>
+    <text x="14" y="21" font-size="13" font-weight="bold" fill="#ffffff">notifications</text>
+
+    <!-- Fields -->
+    <text x="14" y="52" font-size="11.5" font-weight="bold" fill="#1e293b">notification_id</text>
+    <text x="190" y="52" text-anchor="end" font-size="11" fill="#64748b">int</text>
+    <line x1="10" y1="62" x2="195" y2="62" stroke="#f1f5f9"/>
+
+    <text x="14" y="80" font-size="11.5" fill="#334155">customer_id</text>
+    <text x="190" y="80" text-anchor="end" font-size="11" fill="#64748b">int</text>
+    <line x1="10" y1="90" x2="195" y2="90" stroke="#f1f5f9"/>
+
+    <text x="14" y="108" font-size="11.5" fill="#334155">order_id</text>
+    <text x="190" y="108" text-anchor="end" font-size="11" fill="#64748b">int</text>
+    <line x1="10" y1="118" x2="195" y2="118" stroke="#f1f5f9"/>
+
+    <text x="14" y="136" font-size="11.5" fill="#334155">notification_type</text>
+    <text x="190" y="136" text-anchor="end" font-size="11" fill="#64748b">varchar</text>
+    <line x1="10" y1="146" x2="195" y2="146" stroke="#f1f5f9"/>
+
+    <text x="14" y="164" font-size="11.5" fill="#334155">message</text>
+    <text x="190" y="164" text-anchor="end" font-size="11" fill="#64748b">text</text>
+    <line x1="10" y1="174" x2="195" y2="174" stroke="#f1f5f9"/>
+
+    <text x="14" y="192" font-size="11.5" fill="#334155">sent_at</text>
+    <text x="190" y="192" text-anchor="end" font-size="11" fill="#64748b">datetime</text>
+  </g>
+
+  <!-- 7. ORDER_DETAILS (Middle Right Lower) -->
+  <g transform="translate(840, 520)" filter="url(#schemaShadow)">
+    <rect width="195" height="200" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+    <path d="M 0 6 C 0 2.68 2.68 0 6 0 L 189 0 C 192.32 0 195 2.68 195 6 L 195 30 L 0 30 Z" fill="#2B6CB0"/>
+    <text x="14" y="21" font-size="13" font-weight="bold" fill="#ffffff">order_details</text>
+
+    <!-- Fields -->
+    <text x="14" y="52" font-size="11.5" font-weight="bold" fill="#1e293b">detail_id</text>
+    <text x="180" y="52" text-anchor="end" font-size="11" fill="#64748b">int</text>
+    <line x1="10" y1="62" x2="185" y2="62" stroke="#f1f5f9"/>
+
+    <text x="14" y="80" font-size="11.5" fill="#334155">order_id</text>
+    <text x="180" y="80" text-anchor="end" font-size="11" fill="#64748b">int</text>
+    <line x1="10" y1="90" x2="185" y2="90" stroke="#f1f5f9"/>
+
+    <text x="14" y="108" font-size="11.5" fill="#334155">menu_id</text>
+    <text x="180" y="108" text-anchor="end" font-size="11" fill="#64748b">int</text>
+    <line x1="10" y1="118" x2="185" y2="118" stroke="#f1f5f9"/>
+
+    <text x="14" y="136" font-size="11.5" fill="#334155">quantity</text>
+    <text x="180" y="136" text-anchor="end" font-size="11" fill="#64748b">int</text>
+    <line x1="10" y1="146" x2="185" y2="146" stroke="#f1f5f9"/>
+
+    <text x="14" y="164" font-size="11.5" fill="#334155">unit_price</text>
+    <text x="180" y="164" text-anchor="end" font-size="11" fill="#64748b">decimal</text>
+    <line x1="10" y1="174" x2="185" y2="174" stroke="#f1f5f9"/>
+
+    <text x="14" y="192" font-size="11.5" fill="#334155">subtotal</text>
+    <text x="180" y="192" text-anchor="end" font-size="11" fill="#64748b">decimal</text>
+  </g>
+
+  <!-- 8. MENU_ITEMS (Lower Left) -->
+  <g transform="translate(45, 570)" filter="url(#schemaShadow)">
+    <rect width="175" height="225" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+    <path d="M 0 6 C 0 2.68 2.68 0 6 0 L 169 0 C 172.32 0 175 2.68 175 6 L 175 30 L 0 30 Z" fill="#2B6CB0"/>
+    <text x="14" y="21" font-size="13" font-weight="bold" fill="#ffffff">menu_items</text>
+
+    <!-- Fields -->
+    <text x="14" y="52" font-size="11.5" font-weight="bold" fill="#1e293b">menu_id</text>
+    <text x="160" y="52" text-anchor="end" font-size="11" fill="#64748b">int</text>
+    <line x1="10" y1="62" x2="165" y2="62" stroke="#f1f5f9"/>
+
+    <text x="14" y="80" font-size="11.5" fill="#334155">item_name</text>
+    <text x="160" y="80" text-anchor="end" font-size="11" fill="#64748b">varchar</text>
+    <line x1="10" y1="90" x2="165" y2="90" stroke="#f1f5f9"/>
+
+    <text x="14" y="108" font-size="11.5" fill="#334155">category</text>
+    <text x="160" y="108" text-anchor="end" font-size="11" fill="#64748b">varchar</text>
+    <line x1="10" y1="118" x2="165" y2="118" stroke="#f1f5f9"/>
+
+    <text x="14" y="136" font-size="11.5" fill="#334155">description</text>
+    <text x="160" y="136" text-anchor="end" font-size="11" fill="#64748b">text</text>
+    <line x1="10" y1="146" x2="165" y2="146" stroke="#f1f5f9"/>
+
+    <text x="14" y="164" font-size="11.5" fill="#334155">price</text>
+    <text x="160" y="164" text-anchor="end" font-size="11" fill="#64748b">decimal</text>
+    <line x1="10" y1="174" x2="165" y2="174" stroke="#f1f5f9"/>
+
+    <text x="14" y="192" font-size="11.5" fill="#334155">stock</text>
+    <text x="160" y="192" text-anchor="end" font-size="11" fill="#64748b">int</text>
+    <line x1="10" y1="202" x2="165" y2="202" stroke="#f1f5f9"/>
+
+    <text x="14" y="218" font-size="11.5" fill="#334155">status</text>
+    <text x="160" y="218" text-anchor="end" font-size="11" fill="#64748b">varchar</text>
+  </g>
+
+  <!-- 9. INVENTORY (Bottom Center-Left - Resized & Repositioned for Total Clarity) -->
+  <g transform="translate(260, 780)" filter="url(#schemaShadow)">
+    <rect width="210" height="190" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+    <path d="M 0 6 C 0 2.68 2.68 0 6 0 L 204 0 C 207.32 0 210 2.68 210 6 L 210 30 L 0 30 Z" fill="#2B6CB0"/>
+    <text x="14" y="21" font-size="13" font-weight="bold" fill="#ffffff">inventory</text>
+
+    <!-- Fields -->
+    <text x="14" y="54" font-size="12" font-weight="bold" fill="#1e293b">inventory_id</text>
+    <text x="196" y="54" text-anchor="end" font-size="11.5" fill="#64748b">int</text>
+    <line x1="10" y1="65" x2="200" y2="65" stroke="#f1f5f9"/>
+
+    <text x="14" y="85" font-size="12" fill="#334155">menu_id</text>
+    <text x="196" y="85" text-anchor="end" font-size="11.5" fill="#64748b">int</text>
+    <line x1="10" y1="96" x2="200" y2="96" stroke="#f1f5f9"/>
+
+    <text x="14" y="116" font-size="11.5" fill="#334155">quantity_available</text>
+    <text x="196" y="116" text-anchor="end" font-size="11.5" fill="#64748b">int</text>
+    <line x1="10" y1="127" x2="200" y2="127" stroke="#f1f5f9"/>
+
+    <text x="14" y="147" font-size="12" fill="#334155">reorder_level</text>
+    <text x="196" y="147" text-anchor="end" font-size="11.5" fill="#64748b">int</text>
+    <line x1="10" y1="158" x2="200" y2="158" stroke="#f1f5f9"/>
+
+    <text x="14" y="177" font-size="12" fill="#334155">last_updated</text>
+    <text x="196" y="177" text-anchor="end" font-size="11.5" fill="#64748b">datetime</text>
+  </g>
+
+  <!-- 10. CHATBOT_LOGS (Bottom Center-Right) -->
+  <g transform="translate(510, 735)" filter="url(#schemaShadow)">
+    <rect width="205" height="185" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+    <path d="M 0 6 C 0 2.68 2.68 0 6 0 L 199 0 C 202.32 0 205 2.68 205 6 L 205 30 L 0 30 Z" fill="#2B6CB0"/>
+    <text x="14" y="21" font-size="13" font-weight="bold" fill="#ffffff">chatbot_logs</text>
+
+    <!-- Fields -->
+    <text x="14" y="52" font-size="11.5" font-weight="bold" fill="#1e293b">log_id</text>
+    <text x="190" y="52" text-anchor="end" font-size="11" fill="#64748b">int</text>
+    <line x1="10" y1="62" x2="195" y2="62" stroke="#f1f5f9"/>
+
+    <text x="14" y="80" font-size="11.5" fill="#334155">customer_id</text>
+    <text x="190" y="80" text-anchor="end" font-size="11" fill="#64748b">int</text>
+    <line x1="10" y1="90" x2="195" y2="90" stroke="#f1f5f9"/>
+
+    <text x="14" y="108" font-size="11.5" fill="#334155">inquiry</text>
+    <text x="190" y="108" text-anchor="end" font-size="11" fill="#64748b">text</text>
+    <line x1="10" y1="118" x2="195" y2="118" stroke="#f1f5f9"/>
+
+    <text x="14" y="136" font-size="11.5" fill="#334155">chatbot_response</text>
+    <text x="190" y="136" text-anchor="end" font-size="11" fill="#64748b">text</text>
+    <line x1="10" y1="146" x2="195" y2="146" stroke="#f1f5f9"/>
+
+    <text x="14" y="164" font-size="11.5" fill="#334155">timestamp</text>
+    <text x="190" y="164" text-anchor="end" font-size="11" fill="#64748b">datetime</text>
+  </g>
+
+</svg>

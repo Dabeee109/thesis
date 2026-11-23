@@ -8,7 +8,7 @@ const { peso, matchItems } = require('./textMatch');
 const { parseRemovalRequests, executeMultiItemRemoval, isRemovalIntent } = require('./removalService');
 
 const BATCH_ADD_REGEX = /\b(?:pa[- ]?order|order|pa[- ]?dagdag|dagdag|padagdag|pabili|add|pa[- ]?add|gusto\s*ko\s*ng|paki[- ]?add|palitan|palit|kapalit|gawing|gawin)\b/i;
-const BATCH_REMOVE_REGEX = /\b(?:pa\s*tanggal|patanggal|pa\s*tangal|patangal|tanggal(?:in)?|tangal(?:in)?|tatanggalin|tnggal|pa\s*alis|paalis|alis(?:in|en)?|pa\s*bawas|pabawas|bawas(?:an)?|remove|remov|delete|del|drop|minus|wag\s*na(?:\s*yung)?|huwag\s*na(?:\s*yung)?|ayaw\s*ko\s*na\s*ng)\b/i;
+const BATCH_REMOVE_REGEX = /\b(?:pa\s*tanggal|patanggal|paki\s*tanggal|pakitanggal|pa\s*tangal|patangal|tanggal(?:in)?|tangal(?:in)?|tatanggalin|tnggal|pa\s*alis|paalis|paki\s*alis|pakialis|alis(?:in|en)?|pa\s*bawas|pabawas|bawas(?:an)?|pa\s*remove|paremove|paki\s*remove|pakiremove|remove|remov|delete|del|drop|minus|wag\s*na\s*(?:pala|pla|yung|ung)|huwag\s*na\s*(?:pala|pla|yung|ung)|ayaw\s*ko\s*na\s*ng)\b/i;
 
 const NUMBER_WORDS = {
   'isa': 1, 'isang': 1, 'one': 1, '1': 1,

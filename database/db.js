@@ -589,6 +589,15 @@ function initSqliteFallback() {
     } catch (e) { }
 
     try {
+      sqliteDb.exec(`
+        UPDATE menu_items
+        SET price = 99.00
+        WHERE (LOWER(name) = 'classic milktea' OR LOWER(name) = 'classic milk tea' OR LOWER(name) = 'matcha milktea' OR LOWER(name) = 'matcha milk tea')
+          AND price < 50;
+      `);
+    } catch (e) { }
+
+    try {
       const fareCount = sqliteDb.prepare(`SELECT COUNT(*) as count FROM delivery_fare_config`).get();
       if (fareCount && fareCount.count === 0) {
         sqliteDb.prepare(`
@@ -1099,6 +1108,13 @@ async function initDatabase() {
       } catch (payEnumErr) {
         console.warn('[Database] payments.payment_method ENUM update notice:', payEnumErr.message);
       }
+
+      await conn.query(`
+        UPDATE menu_items
+        SET price = 99.00
+        WHERE (LOWER(name) = 'classic milktea' OR LOWER(name) = 'classic milk tea' OR LOWER(name) = 'matcha milktea' OR LOWER(name) = 'matcha milk tea')
+          AND price < 50
+      `).catch(() => {});
 
       await conn.query(`
         CREATE TABLE IF NOT EXISTS admin_gcash_transactions (

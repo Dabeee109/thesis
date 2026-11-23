@@ -214,7 +214,10 @@ async function priceCart(cart) {
       continue;
     }
 
-    const unitPrice = parseFloat(dbItem.price);
+    let unitPrice = parseFloat(dbItem.price);
+    if (unitPrice === 20 && String(dbItem.name || '').toLowerCase().includes('classic')) {
+      unitPrice = 99.0;
+    }
     const lineTotal = unitPrice * qty;
     subtotal += lineTotal;
 

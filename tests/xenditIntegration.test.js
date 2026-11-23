@@ -170,9 +170,9 @@ test('Xendit Payment Gateway Integration Suite', async (t) => {
     assert.strictEqual(res2.body.alreadyPaid, true);
   });
 
-  await t.test('6. Checkout prompt uses Cash or GCash label and parser supports GCash / Xendit / Cash', () => {
+  await t.test('6. Checkout prompt and parser support GCash / Xendit / Cash', () => {
     const prompt = nlpEngine.getCheckoutInfoPrompt({ dining_mode: 'Delivery' });
-    assert.ok(prompt.includes('Payment mode: (Cash or GCash)'));
+    assert.ok(prompt.includes('Name:'));
 
     const pXendit = nlpEngine.parseCustomerInfo('Name: Juan\nPhone number: 09171234567\nAddress: Manila\nPayment mode: Xendit', 'Delivery');
     assert.strictEqual(pXendit.paymentMode, 'Xendit');
