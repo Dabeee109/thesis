@@ -123,6 +123,29 @@ async function callSendAPI(recipientPsid, messagePayload, options = {}) {
 
       const data = await response.json();
       if (data.error) {
+        // Smart fallback: If a tagged or non-RESPONSE message was rejected by Meta, retry as standard RESPONSE
+        if (tag || messagingType !== 'RESPONSE') {
+          try {
+            console.warn(`[Facebook Send API] Outbound error (${data.error.code}: ${data.error.message}). Retrying as standard RESPONSE...`);
+            const fallbackRes = await fetch(
+              `https://graph.facebook.com/v19.0/me/messages?access_token=${encodeURIComponent(pageToken)}`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  recipient: { id: psidStr },
+                  message: sanitizedMessage,
+                  messaging_type: 'RESPONSE'
+                })
+              }
+            );
+            const fallbackData = await fallbackRes.json();
+            if (!fallbackData.error) {
+              return fallbackData;
+            }
+          } catch (_) {}
+        }
+
         if (data.error.code === 10) {
           console.warn(`[Facebook Send API] Recipient ${psidStr} is outside the standard 24-hour messaging window.`);
         } else {

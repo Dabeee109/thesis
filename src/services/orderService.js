@@ -1158,10 +1158,7 @@ async function verifyOrderPayment(orderId, actor = null) {
   await sendNotification(order.psid, 'payment_verified', `Order #${order.order_number} Payment Verified`, notifMsg);
 
   if (order.psid && !order.psid.startsWith('POS_MANUAL_')) {
-    await sendTextMessage(order.psid, notifMsg, {
-      messagingType: 'MESSAGE_TAG',
-      tag: 'POST_PURCHASE_UPDATE'
-    }).catch(err => {
+    await sendTextMessage(order.psid, notifMsg).catch(err => {
       console.warn('[orderService] Failed to send payment verified notification:', err.message);
     });
 
