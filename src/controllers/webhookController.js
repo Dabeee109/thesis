@@ -230,14 +230,26 @@ async function gcashRedirect(req, res) {
 
   let xenditCheckoutUrl = null;
   try {
-    const charge = await xenditService.createGcashCharge({
+    const inv = await xenditService.createInvoice({
       orderNumber,
       amount: orderTotal,
       customerName,
       customerPhone: pendingDraft?.contactNumber || session?.contact_number || '',
       description: `Diner's Cafe Order #${orderNumber}`
-    });
-    xenditCheckoutUrl = charge?.checkout_url || charge?.invoice_url || null;
+    }).catch(() => null);
+
+    if (inv?.invoice_url) {
+      xenditCheckoutUrl = inv.invoice_url;
+    } else {
+      const charge = await xenditService.createGcashCharge({
+        orderNumber,
+        amount: orderTotal,
+        customerName,
+        customerPhone: pendingDraft?.contactNumber || session?.contact_number || '',
+        description: `Diner's Cafe Order #${orderNumber}`
+      });
+      xenditCheckoutUrl = charge?.checkout_url || charge?.invoice_url || null;
+    }
   } catch (xErr) {
     // Graceful fallback if Xendit live API is unreachable or development key
     console.warn('[gcashRedirect] Xendit live charge skipped/offline:', xErr.message);
@@ -465,7 +477,7 @@ async function gcashRedirect(req, res) {
       <h1 style="display:flex; align-items:center; justify-content:center; gap:8px; margin:0;">
         <span style="font-weight:900; letter-spacing:-0.5px;">xendit</span>
         <span style="font-size:18px; opacity:0.75; font-weight:normal;">|</span>
-        <span style="font-size:22px; font-weight:bold;">GCash</span>
+        <span style="font-size:20px; font-weight:bold;">Online Payment</span>
       </h1>
       <p style="margin:6px 0 0; font-size:13px; opacity:0.9;">Diner's Cafe • Official Payment Gateway</p>
     </div>
@@ -481,7 +493,7 @@ async function gcashRedirect(req, res) {
 
         <div class="detail-row">
           <span class="detail-label">Payment Gateway</span>
-          <span class="detail-val" style="color:#007dfe; font-weight:bold;">Xendit (PH_GCASH)</span>
+          <span class="detail-val" style="color:#007dfe; font-weight:bold;">Xendit (GCash, Maya, Cards, Banks)</span>
         </div>
 
         <div class="detail-row">
@@ -518,7 +530,7 @@ async function gcashRedirect(req, res) {
 
         ${isPersonalMode ? `
         <div style="background:#eef6ff; border:1px solid #c7e1ff; border-radius:10px; padding:12px; margin-bottom:16px; font-size:13px; color:#1e3a5f; line-height:1.45;">
-          <strong>Xendit Payment:</strong> Pindutin ang button sa ibaba upang magpatuloy sa <strong>Xendit</strong> gamit ang inyong GCash. Pagkatapos magbayad, awtomatikong makukumpirma ang inyong order sa Facebook Messenger.
+          <strong>Xendit Payment:</strong> Pindutin ang button sa ibaba upang makapili ng paraan ng pagbabayad (GCash, Maya, Card, o Bank) sa <strong>Xendit</strong>. Pagkatapos magbayad, awtomatikong makukumpirma ang inyong order sa Facebook Messenger.
         </div>
         ` : `
         <button id="payBtn" class="btn-pay" onclick="submitGcashPayment()">
@@ -532,7 +544,7 @@ async function gcashRedirect(req, res) {
              class="btn-app"
              onclick="openGcashApp(event)"
              style="display:block; padding:14px 24px; background:linear-gradient(135deg, #007dfe 0%, #0056b3 100%); color:#fff; text-decoration:none; border-radius:10px; font-weight:bold; font-size:16px; box-shadow:0 4px 14px rgba(0, 125, 254, 0.3);">
-             ${isPersonalMode ? '📱 Buksan ang GCash' : '💳 Magbayad sa Xendit (GCash)'}
+             ${isPersonalMode ? '📱 Buksan ang GCash' : '💳 Magpatuloy sa Xendit (Pumili ng Payment)'}
           </a>
           <div id="gcashFallbackHelp" style="display:none; margin-top:12px; padding:12px; background:#eef6ff; border:1px solid #b6d8ff; border-radius:10px; font-size:12px; color:#1e3a5f; text-align:left; line-height:1.5;">
             <strong>Paalala sa Payment:</strong><br>
