@@ -297,7 +297,7 @@ function switchTab(tabId) {
     overview: 'Operational Overview',
     orders: 'Order Operations',
     menu: 'Menu Management',
-    'bom-inventory': 'Inventory & Recipes (BOM)',
+    'bom-inventory': 'Inventory & Recipes',
     promotions: 'Promotions, Events & Seasonal Deals',
     inventory: 'Promotions, Events & Seasonal Deals',
     delivery: 'Smart Delivery Management (FR6)',
@@ -4925,7 +4925,7 @@ function populateBomMenuSelector() {
   if (!select) return;
 
   const prevVal = select.value;
-  select.innerHTML = `<option value="">-- All Menu Items (${bomMenuItemsCache.length} Assigned BOMs) --</option>` +
+  select.innerHTML = `<option value="">-- All Menu Items (${bomMenuItemsCache.length} Assigned Recipes) --</option>` +
     bomMenuItemsCache.map(m => `<option value="${Number(m.id)}">${escapeHtml(m.name)} (${escapeHtml(m.categoryName || 'Cafe')})</option>`).join('');
 
   if (prevVal && bomMenuItemsCache.some(m => String(m.id) === String(prevVal))) {
@@ -5184,7 +5184,7 @@ async function loadSelectedMenuRecipe() {
     }
 
     if (items.length === 0) {
-      body.innerHTML = `<div style="padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; color: var(--text-muted);">No BOM recipe mapped yet for <strong>${escapeHtml(res.menuItem?.name || '')}</strong>. Click <strong>Edit Recipe</strong> to assign raw ingredients.</div>`;
+      body.innerHTML = `<div style="padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; color: var(--text-muted);">No recipe mapped yet for <strong>${escapeHtml(res.menuItem?.name || '')}</strong>. Click <strong>Edit Recipe</strong> to assign raw ingredients.</div>`;
       return;
     }
 

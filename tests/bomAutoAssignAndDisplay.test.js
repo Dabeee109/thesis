@@ -68,7 +68,7 @@ describe('Automated Bill of Materials (BOM) Recipe Assignment & UI Display', () 
 
     assert.ok(html.includes('id="bom-recipe-search-input"'));
     assert.ok(html.includes('id="bom-recipe-menu-select"'));
-    assert.ok(html.includes('-- All Menu Items (Show All BOMs) --'));
+    assert.ok(html.includes('-- All Menu Items (Show All Recipes) --') || html.includes('-- All Menu Items (Show All BOMs) --'));
     assert.ok(js.includes('function selectAndEditMenuRecipe'));
     assert.ok(js.includes('Mapped ('));
   });
