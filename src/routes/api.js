@@ -39,6 +39,7 @@ router.post('/auth/forgot-password/send-otp', authController.requestPasswordRese
 router.post('/auth/forgot-password/reset', authController.resetPasswordWithOtp);
 router.get('/auth/me', authController.authMiddleware, authController.getProfile);
 router.get('/auth/users', authController.authMiddleware, authController.requireAdmin, authController.getAllUsers);
+router.get('/auth/directory', authController.authMiddleware, authController.getStaffDirectory);
 router.post('/auth/users', authController.authMiddleware, authController.requireAdmin, authController.register);
 router.put('/auth/users/:id', authController.authMiddleware, authController.requireAdmin, authController.updateUser);
 router.put('/auth/users/:id/password', authController.authMiddleware, authController.requireAdmin, authController.updateUserPassword);

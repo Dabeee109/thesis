@@ -209,6 +209,25 @@ async function getAllUsers(req, res) {
 }
 
 /**
+ * List active staff directory (GET /api/auth/directory) - Authenticated staff, rider, admin
+ * Returns non-sensitive directory fields: id, full_name, role, is_active
+ */
+async function getStaffDirectory(req, res) {
+  try {
+    const [users] = await db.query(
+      `SELECT id, full_name, role, is_active 
+       FROM admins_staff 
+       ORDER BY (role = 'admin') DESC, full_name ASC`
+    );
+
+    return res.json({ success: true, count: users.length, users });
+  } catch (err) {
+    console.error('[Get Staff Directory Error]', err);
+    return res.status(500).json({ success: false, message: 'Failed to retrieve staff directory.' });
+  }
+}
+
+/**
  * Update / Reset User Password (PUT /api/auth/users/:id/password) - Admin only
  */
 async function updateUserPassword(req, res) {
@@ -574,6 +593,7 @@ module.exports = {
   authMiddleware,
   requireAdmin,
   getAllUsers,
+  getStaffDirectory,
   updateUserPassword,
   updateUser,
   toggleUserStatus,

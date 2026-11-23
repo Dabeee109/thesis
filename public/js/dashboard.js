@@ -41,6 +41,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('user-display-role').innerText = user.role || 'Staff';
     const initials = (user.name || 'AD').split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
     document.getElementById('user-avatar-initials').innerText = initials;
+
+    const isAdmin = (user.role || '').toLowerCase() === 'admin';
+    const addStaffBtn = document.getElementById('btn-add-staff-container');
+    if (addStaffBtn) addStaffBtn.style.display = isAdmin ? 'block' : 'none';
   }
 
   // 2. Setup Navigation Tabs & Responsive Sidebar Toggle
@@ -3707,7 +3711,10 @@ let allStaffUsers = [];
 
 async function loadUsers() {
   try {
-    const res = await API.get('/auth/users');
+    const user = API.getUser();
+    const isAdmin = user && (user.role || '').toLowerCase() === 'admin';
+    const endpoint = isAdmin ? '/auth/users' : '/auth/directory';
+    const res = await API.get(endpoint);
     if (res && res.users) {
       allStaffUsers = res.users;
       renderUsersTable(allStaffUsers);
@@ -3738,8 +3745,44 @@ function renderUsersTable(users) {
   const tbody = document.getElementById('users-table-tbody');
   if (!tbody) return;
 
+  const user = API.getUser();
+  const isAdmin = user && (user.role || '').toLowerCase() === 'admin';
+
+  // Enforce Add Staff Button visibility based on role
+  const addBtnContainer = document.getElementById('btn-add-staff-container');
+  if (addBtnContainer) {
+    addBtnContainer.style.display = isAdmin ? 'block' : 'none';
+  }
+
+  // Enforce table headers based on role
+  const thead = document.getElementById('users-table-thead');
+  if (thead) {
+    if (isAdmin) {
+      thead.innerHTML = `
+        <tr>
+          <th class="py-3.5">User / Staff</th>
+          <th class="py-3.5">Email Address</th>
+          <th class="py-3.5">Role</th>
+          <th class="py-3.5">Contact</th>
+          <th class="py-3.5">Status</th>
+          <th class="py-3.5">Last Updated</th>
+          <th class="py-3.5" style="text-align: right;">Actions</th>
+        </tr>
+      `;
+    } else {
+      thead.innerHTML = `
+        <tr>
+          <th class="py-3.5">User / Staff</th>
+          <th class="py-3.5">Role</th>
+          <th class="py-3.5">Status</th>
+        </tr>
+      `;
+    }
+  }
+
   if (!users || users.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 24px;">No user accounts found.</td></tr>`;
+    const colSpan = isAdmin ? 7 : 3;
+    tbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align: center; color: var(--text-muted); padding: 24px;">No user accounts found.</td></tr>`;
     return;
   }
 
@@ -3754,13 +3797,35 @@ function renderUsersTable(users) {
     } else if (u.role === 'rider') {
       roleBadge = `<span class="badge" style="background: rgba(34, 197, 94, 0.15); color: #86efac; border: 1px solid #22c55e; padding: 5px 12px; border-radius: 999px; white-space: nowrap;">🛵 Delivery Rider</span>`;
     } else {
-      roleBadge = `<span class="badge badge-secondary" style="padding: 5px 12px; border-radius: 999px; white-space: nowrap;">${u.role}</span>`;
+      roleBadge = `<span class="badge badge-secondary" style="padding: 5px 12px; border-radius: 999px; white-space: nowrap;">${escapeHtml(u.role || '')}</span>`;
     }
 
     const statusBadge = u.is_active
       ? `<span class="badge badge-success" style="white-space: nowrap;">Active</span>`
       : `<span class="badge badge-danger" style="white-space: nowrap;">Inactive</span>`;
 
+    // Staff / Non-admin View: Only User / Staff, Role, Status
+    if (!isAdmin) {
+      return `
+        <tr class="py-3.5">
+          <td class="py-3.5" style="padding: 14px 16px;">
+            <div style="display: flex; align-items: center; gap: 12px; white-space: nowrap;">
+              <div style="width: 36px; height: 36px; border-radius: 50%; background: var(--brand-primary); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.84rem; flex-shrink: 0;">
+                ${initials}
+              </div>
+              <div>
+                <strong style="color: #fff;">${escapeHtml(u.full_name || '')}</strong>
+                ${u.role === 'admin' ? `<span style="font-size: 0.72rem; color: var(--brand-gold); margin-left: 4px;">(Owner)</span>` : ''}
+              </div>
+            </div>
+          </td>
+          <td class="py-3.5" style="padding: 14px 16px; white-space: nowrap;">${roleBadge}</td>
+          <td class="py-3.5" style="padding: 14px 16px; white-space: nowrap;">${statusBadge}</td>
+        </tr>
+      `;
+    }
+
+    // Admin View: Full 7 columns with sensitive info & actions
     const updatedDate = u.updated_at ? new Date(u.updated_at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Never';
 
     return `
@@ -3771,19 +3836,19 @@ function renderUsersTable(users) {
               ${initials}
             </div>
             <div>
-              <strong style="color: #fff;">${u.full_name}</strong>
+              <strong style="color: #fff;">${escapeHtml(u.full_name || '')}</strong>
               ${u.role === 'admin' ? `<span style="font-size: 0.72rem; color: var(--brand-gold); margin-left: 4px;">(Owner)</span>` : ''}
             </div>
           </div>
         </td>
-        <td class="py-3.5" style="padding: 14px 16px; white-space: nowrap;"><code>${u.email}</code></td>
+        <td class="py-3.5" style="padding: 14px 16px; white-space: nowrap;"><code>${escapeHtml(u.email || '')}</code></td>
         <td class="py-3.5" style="padding: 14px 16px; white-space: nowrap;">${roleBadge}</td>
-        <td class="py-3.5" style="padding: 14px 16px; white-space: nowrap;">${u.phone_number || 'N/A'}</td>
+        <td class="py-3.5" style="padding: 14px 16px; white-space: nowrap;">${escapeHtml(u.phone_number || 'N/A')}</td>
         <td class="py-3.5" style="padding: 14px 16px; white-space: nowrap;">${statusBadge}</td>
         <td class="py-3.5" style="padding: 14px 16px; font-size: 0.82rem; color: var(--text-secondary); white-space: nowrap;">${updatedDate}</td>
         <td class="py-3.5" style="padding: 14px 16px; text-align: right; white-space: nowrap;">
           <div style="display: inline-flex; gap: 8px; flex-wrap: nowrap; align-items: center; justify-content: flex-end;">
-            <button class="btn btn-primary btn-sm" onclick="openResetPasswordModal(${u.id}, '${u.full_name.replace(/'/g, "\\'")}', '${u.email}')" style="font-size: 0.78rem; padding: 6px 12px; font-weight: 700; white-space: nowrap;">
+            <button class="btn btn-primary btn-sm" onclick="openResetPasswordModal(${u.id}, '${escapeHtml(u.full_name || '').replace(/'/g, "\\'")}', '${escapeHtml(u.email || '')}')" style="font-size: 0.78rem; padding: 6px 12px; font-weight: 700; white-space: nowrap;">
               🔑 Reset Password
             </button>
             <button class="btn btn-secondary btn-sm" onclick="openUserModal(${u.id})" style="font-size: 0.78rem; padding: 6px 10px; white-space: nowrap;">
