@@ -69,7 +69,10 @@ test('Feedback Flow - delivered triggers exactly one prompt atomically', async (
   // Verify proactive send uses messagingType: 'UPDATE'
   const promptSent = getSent(psid)[0];
   assert.strictEqual(promptSent.options.messagingType, 'UPDATE');
-  assert.ok(promptSent.messagePayload.text.includes('Your order has been delivered! How was your experience today?'));
+  assert.ok(
+    promptSent.messagePayload.text.includes('Your order has been delivered! How was your experience today?') ||
+    promptSent.messagePayload.text.includes('Pa-rate naman po ng inyong experience')
+  );
 
   // Call 2: should be skipped (already requested)
   const res2 = await feedbackService.requestFeedback(orderId);

@@ -48,7 +48,7 @@ const INDICATOR_WORDS = [
  */
 function extractCommentAfterIndicators(str) {
   if (!str) return '';
-  let trimmed = str.replace(/^[,\s:\-–—]+/, '').trim();
+  let trimmed = str.replace(/^[,\s:\-–—.]+/, '').trim();
   if (!trimmed) return '';
 
   const lower = trimmed.toLowerCase();
@@ -69,10 +69,13 @@ function extractCommentAfterIndicators(str) {
 }
 
 const STRICT_RATING_ANCHOR_REGEX = /(?:isa(?:ng)?|dalawa(?:ng)?|tatlo(?:ng)?|apat|lima(?:ng)?|one|two|three|four|five|\d+)\s*(?:na\s*)?(?:stars?|bituin|ratings?|rate\b)/i;
+const NATURAL_RATING_PREFIX_REGEX = /^(?:([1-5])|(one|two|three|four|five|isa|isang|dalawa|dalawang|tatlo|tatlong|apat|lima|limang))\b(?:\s*(?:na|stars?|star|bituin|ratings?|rate|[⭐★]|\/5|\s*out\s+of\s+5))?(?:\s*(?:lang|lng|po|lamang|muna|naman|ko|pala|pla))*\s*(.*)$/i;
+const NATURAL_RATING_ANCHOR_REGEX = /^(?:([1-5])|(one|two|three|four|five|isa|isang|dalawa|dalawang|tatlo|tatlong|apat|lima|limang))\s*(?:lang|lng|po|lamang|stars?|star|bituin|ratings?|rate|[⭐★]|\/5|\s*out\s+of\s+5)\b/i;
 
 /**
  * Parse informal customer input into rating (1-5) and feedback reason/comment
- * Enforces Feature 5 Strict Anchor Check: Numbers only parse as ratings if explicitly anchored to rating words or emojis
+ * Enforces Feature 5 Strict Anchor Check: Numbers only parse as ratings if explicitly anchored to rating words or emojis,
+ * or when customer is in awaiting feedback state (or gives natural rating numbers like "4 lang...", "3", "5 lang").
  * @param {string} text 
  * @param {Object} [session=null] - Active conversation session for contextual disambiguation
  * @returns {{ isFeedback: boolean, rating: number|null, comment: string }}
@@ -85,13 +88,32 @@ function parseCustomerFeedback(text, session = null) {
   const clean = text.trim();
   const lower = clean.toLowerCase();
 
+  // Check if session is in active ordering pipeline
+  const isInActiveOrderingPipeline = Boolean(
+    session && (
+      (session.cart && session.cart.length > 0) ||
+      session.pendingStage5 ||
+      ['ordering', 'AWAITING_ORDER_TYPE', 'AWAITING_STAGE5_CONFIRM', 'AWAITING_NAME', 'AWAITING_ADDRESS', 'AWAITING_PHONE', 'AWAITING_PAYMENT', 'AWAITING_GCASH_AMOUNT', 'AWAITING_DELIVERY_DETAILS', 'AWAITING_CHECKOUT_CONFIRM', 'COLLECTING_CUSTOMER_INFO', 'AWAITING_DISCOUNT_CONFIRM', 'AWAITING_ORDER_SUMMARY_CONFIRM', 'AWAITING_DRINK_ADDON'].includes(session.state)
+    )
+  );
+
+  const isAwaitingRatingState = Boolean(
+    session && (
+      session.state === 'AWAITING_FEEDBACK_RATING' ||
+      session.state === 'awaiting_feedback' ||
+      session.pendingRating ||
+      session.pendingFeedbackOrderId ||
+      session.pendingFeedbackOrderNumber
+    )
+  );
+
   // Strict Anchor Check (Feature 5)
   // Prevents quantity words like "dalawang Spanish Latte" or "3 cookies" from colliding with ratings
   const hasEmojiStar = /[⭐★]/.test(clean);
   const hasRatingAnchor = STRICT_RATING_ANCHOR_REGEX.test(lower);
-  const isAwaitingRatingState = Boolean(session && (session.state === 'AWAITING_FEEDBACK_RATING' || session.state === 'awaiting_feedback'));
+  const hasNaturalRatingAnchor = NATURAL_RATING_ANCHOR_REGEX.test(clean);
 
-  if (!hasEmojiStar && !hasRatingAnchor && !isAwaitingRatingState) {
+  if (!hasEmojiStar && !hasRatingAnchor && !isAwaitingRatingState && !(hasNaturalRatingAnchor && !isInActiveOrderingPipeline)) {
     return { isFeedback: false, rating: null, comment: '' };
   }
 
@@ -142,11 +164,25 @@ function parseCustomerFeedback(text, session = null) {
       rating = parseInt(digitMatch[1], 10);
       matchIndex = digitMatch.index;
       matchLength = digitMatch[0].length;
-    } else if (isAwaitingRatingState && /^[1-5]$/.test(clean)) {
-      // Direct 1-5 digit response only permitted when bot explicitly asked for a rating
-      rating = parseInt(clean, 10);
-      matchIndex = 0;
-      matchLength = clean.length;
+    }
+  }
+
+  // 5. Natural rating pattern (e.g., "4 lang...", "3", "5 lang", "4 lang kasi...", "5 po")
+  if (rating === null && (isAwaitingRatingState || (!isInActiveOrderingPipeline && hasNaturalRatingAnchor))) {
+    const naturalMatch = clean.match(NATURAL_RATING_PREFIX_REGEX);
+    if (naturalMatch) {
+      if (naturalMatch[1]) {
+        rating = parseInt(naturalMatch[1], 10);
+      } else if (naturalMatch[2]) {
+        const wordKey = naturalMatch[2].toLowerCase();
+        if (RATING_WORDS[wordKey] !== undefined) {
+          rating = RATING_WORDS[wordKey];
+        }
+      }
+      if (rating !== null) {
+        matchIndex = 0;
+        matchLength = clean.length - (naturalMatch[3] ? naturalMatch[3].length : 0);
+      }
     }
   }
 

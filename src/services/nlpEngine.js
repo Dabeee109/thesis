@@ -1910,17 +1910,30 @@ async function handleCancellationRequest(psid, session, rawText = '') {
 
   // Prioritize customer's latest active uncompleted order from DB so fresh orders take precedence
   if (!activeOrder && psid) {
-    const [rows] = await db.query(
+    const [latestRows] = await db.query(
       `SELECT o.id, o.order_number, o.status, o.total_amount, o.created_at, o.payment_status, o.cancel_requested,
               TIMESTAMPDIFF(SECOND, o.created_at, NOW()) AS elapsed_seconds
        FROM orders o
        JOIN customers c ON c.id = o.customer_id
-       WHERE c.psid = ? AND LOWER(o.status) NOT IN ('cancelled', 'voided', 'delivered', 'completed')
+       WHERE c.psid = ?
        ORDER BY o.id DESC LIMIT 1`,
       [psid]
     );
-    if (rows && rows.length > 0) {
-      activeOrder = rows[0];
+    if (latestRows && latestRows.length > 0) {
+      const latestOrder = latestRows[0];
+      const latestStatus = String(latestOrder.status || '').toLowerCase();
+      // If the customer's most recent order is delivered or completed, do NOT dig up older pending orders
+      if (['delivered', 'completed'].includes(latestStatus)) {
+        const msg = `Wala po kayong aktibong order na maaaring ikansela dahil ang inyong pinakahuling order (#${latestOrder.order_number}) ay ${latestStatus === 'delivered' ? 'naihatid na' : 'tapos na'}.`;
+        await sendTextMessage(psid, msg);
+        return { intent: 'ORDER_CANCEL_BLOCKED', confidence: 1.0, replyLog: msg };
+      }
+      if (['cancelled', 'voided'].includes(latestStatus)) {
+        const msg = `Wala po kayong aktibong order na maaaring ikansela dahil ang inyong order (#${latestOrder.order_number}) ay dati na pong nakansela.`;
+        await sendTextMessage(psid, msg);
+        return { intent: 'ORDER_CANCEL_BLOCKED', confidence: 1.0, replyLog: msg };
+      }
+      activeOrder = latestOrder;
     }
   }
 
@@ -3973,8 +3986,21 @@ async function handleTextInput(psid, session, rawText, options = {}) {
     /\boo[,.]?\s*tama\b/i.test(rawText)
   );
 
+  const isAwaitingRatingState = Boolean(
+    session && (
+      session.state === 'AWAITING_FEEDBACK_RATING' ||
+      session.state === 'awaiting_feedback' ||
+      session.pendingRating ||
+      session.pendingFeedbackOrderId ||
+      session.pendingFeedbackOrderNumber
+    )
+  );
+
   const hasExplicitRatingAnchor = /(?:isa(?:ng)?|dalawa(?:ng)?|tatlo(?:ng)?|apat|lima(?:ng)?|one|two|three|four|five|[1-5])\s*(?:na\s*)?(?:stars?|bituin|ratings?|rate\b)/i.test(rawText) || /[⭐★]/.test(rawText);
-  if (hasExplicitRatingAnchor) {
+  const isNaturalRatingCandidate = (!isInActiveOrderingPipeline && /^(?:[1-5]|one|two|three|four|five|isa|dalawa|tatlo|apat|lima)\b/i.test(rawText.trim())) &&
+    (isAwaitingRatingState || /^(?:[1-5]|one|two|three|four|five|isa|dalawa|tatlo|apat|lima)\s*(?:lang|lng|po|lamang|muna|naman|ko|pala|pla|stars?|star|bituin|ratings?|rate|[⭐★]|\/5|\s*out\s+of\s+5)\b/i.test(rawText.trim()));
+
+  if (hasExplicitRatingAnchor || isNaturalRatingCandidate) {
     const feedbackParsed = parseCustomerFeedback(rawText, session);
     if (feedbackParsed.isFeedback) {
       const feedbackResult = await processFeedbackSubmission({
@@ -8048,6 +8074,17 @@ async function executeAiAssistantTurn(psid, session, rawText, options = {}) {
       }
 
       case 'CANCEL_ORDER': {
+        const hasCancelIntent = isCancelTriggerWord(norm, rawText, null, session) || /\b(?:cancel|i-cancel|pa-cancel|ipacancel|kansela|kanselahin|ayoko\s*na)\b/i.test(rawText);
+        if (!hasCancelIntent) {
+          console.log('[AI Action Guard] Suppressed false-positive CANCEL_ORDER action for non-cancel message:', rawText);
+          await sendTextMessage(psid, reply_message || 'Salamat po sa inyong mensahe! Naitala na po namin ito.');
+          return {
+            intent: 'AI_FEEDBACK_ACK',
+            confidence: 0.95,
+            replyLog: reply_message,
+            aiAction: 'NONE'
+          };
+        }
         const cancelRes = await handleCancellationRequest(psid, session, rawText);
         return {
           ...cancelRes,

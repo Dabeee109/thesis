@@ -628,10 +628,10 @@ ACTION DEFINITIONS:
 - SEND_PICTURE: Customer asks to see a photo of a specific dish/drink.
 - SET_DETAILS: Customer provides checkout details (name, phone, address, landmark, time, dining mode, payment mode, note). Extract all provided fields. NEVER say "Handa na po ang inyong order" or claim cooking is ready, as the order is still in checkout and awaiting final confirmation.
 - CONFIRM_ORDER: Customer finalizes/confirms checkout ("confirm", "proceed", "okay na").
-- CANCEL_ORDER: Customer requests cancellation of active order.
+- CANCEL_ORDER: Customer explicitly requests cancellation of their active order (e.g. "cancel order", "pa-cancel", "kanselahin", "ayoko na"). NEVER choose CANCEL_ORDER for customer ratings, reviews, past order complaints, or feedback (such as "4 lang kasi...", "3", "5 lang").
 - CHECK_STATUS: Customer inquires about order progress or tracking.
 - DELAY_COMPLAINT: Customer expresses frustration or asks why order is taking long.
-- SUBMIT_FEEDBACK: Customer gives a rating, review, or feedback on food/service. Extract feedback_text.
+- SUBMIT_FEEDBACK: Customer gives a rating, review, or feedback on food/service (e.g. "4 lang kasi...", "5 stars", "3", "5 lang", "masarap ang food"). Extract feedback_text.
 - PROCEED_CHECKOUT: Customer indicates readiness to checkout.${(CAFE_PERSONA_CONFIG && Array.isArray(CAFE_PERSONA_CONFIG.fewShotExamples) && CAFE_PERSONA_CONFIG.fewShotExamples.length > 0)
       ? '\n\n7. FEW-SHOT CONVERSATIONAL EXAMPLES:\n' + CAFE_PERSONA_CONFIG.fewShotExamples.map((ex, idx) => `[Example ${idx + 1}: ${ex.scenario}]\nCustomer: "${ex.customer}"\nTarget Response: "${ex.assistant}"`).join('\n\n')
       : ''}`;
