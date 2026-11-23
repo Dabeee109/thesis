@@ -217,6 +217,12 @@ async function getActiveRiderOrders(req, res) {
           OR o.status IN ('In Kitchen Preparation', 'Dispatched / On Delivery')
         )
         AND LOWER(d.status) IN ('pending', 'assigned', 'dispatched')
+        AND COALESCE(d.distance_km, o.distance_km, 0) <= 3.0
+        AND (o.customer_notes IS NULL OR (
+          o.customer_notes NOT LIKE '%Over-3km%'
+          AND o.customer_notes NOT LIKE '%Third-Party%'
+          AND o.customer_notes NOT LIKE '%Grab/Lalamove%'
+        ))
     `;
 
     const params = [];
@@ -337,6 +343,12 @@ async function getRiderHistory(req, res) {
       LEFT JOIN delivery_personnel dp ON d.rider_id = dp.id
       WHERE LOWER(o.order_type) = 'delivery'
         AND LOWER(o.status) = 'delivered'
+        AND COALESCE(d.distance_km, o.distance_km, 0) <= 3.0
+        AND (o.customer_notes IS NULL OR (
+          o.customer_notes NOT LIKE '%Over-3km%'
+          AND o.customer_notes NOT LIKE '%Third-Party%'
+          AND o.customer_notes NOT LIKE '%Grab/Lalamove%'
+        ))
     `;
 
     const params = [];

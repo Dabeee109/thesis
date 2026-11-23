@@ -670,7 +670,12 @@
         const container = document.getElementById('rider-trips-container');
         container.innerHTML = '';
 
-        const trips = res.orders || res.history || res.deliveries || [];
+        const rawTrips = res.orders || res.history || res.deliveries || [];
+        const trips = rawTrips.filter(del => {
+          const dist = parseFloat(del.distance_km || del.distance || 0);
+          const hasOver3kmNote = del.customer_notes && /Over-3km|Third-Party|Grab\/Lalamove/i.test(del.customer_notes);
+          return !(dist > 3.0 || hasOver3kmNote);
+        });
 
         if (trips.length === 0) {
           if (currentRiderView === 'active') {

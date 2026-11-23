@@ -1208,14 +1208,17 @@ async function verifyOrderPayment(orderId, actor = null) {
       customerName: `${order.first_name || ''} ${order.last_name || ''}`.trim()
     });
 
-    broadcastSSE('RIDER_ORDER_ALERT', {
-      orderId,
-      orderNumber: order.order_number,
-      riderId: assignedRiderId,
-      status: 'preparing',
-      message: `🍳 Order #${order.order_number} is now being prepared in the kitchen. Stand by for pickup.`,
-      timestamp: new Date().toISOString()
-    });
+    const isOver3km = Number(order.distance_km || 0) > 3.0 || (order.customer_notes && /Over-3km|Third-Party|Grab\/Lalamove/i.test(order.customer_notes));
+    if (!isOver3km) {
+      broadcastSSE('RIDER_ORDER_ALERT', {
+        orderId,
+        orderNumber: order.order_number,
+        riderId: assignedRiderId,
+        status: 'preparing',
+        message: `🍳 Order #${order.order_number} is now being prepared in the kitchen. Stand by for pickup.`,
+        timestamp: new Date().toISOString()
+      });
+    }
   }
 
   return { ...order, status: newStatus, payment_status: 'Paid' };
