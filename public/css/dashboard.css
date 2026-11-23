@@ -427,9 +427,6 @@ body.sidebar-collapsed .main-wrapper {
   padding: 16px;
   cursor: pointer;
   transition: all var(--transition-fast);
-  box-sizing: border-box;
-  overflow: hidden;
-  word-break: break-word;
 }
 
 .order-card:hover {
@@ -462,8 +459,6 @@ body.sidebar-collapsed .main-wrapper {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
   padding-top: 10px;
   border-top: 1px dashed var(--border-subtle);
   font-size: 0.88rem;

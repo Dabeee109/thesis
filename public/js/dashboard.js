@@ -607,27 +607,27 @@ function renderKanban(orders) {
     let actionBtn = '';
     if (status === 'pending') {
       actionBtn = `
-        <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
-          <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); advanceOrderStatus(${order.id}, 'preparing')" style="white-space: nowrap;">🍳 Prep</button>
-          <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); openCancelOrderModal(${order.id}, '${order.order_number}')" title="Cancel / Void Order" style="background: #ef4444; border: none; padding: 4px 8px; font-size: 0.75rem; white-space: nowrap;">❌ Void</button>
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); advanceOrderStatus(${order.id}, 'preparing')">🍳 Prep</button>
+          <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); openCancelOrderModal(${order.id}, '${order.order_number}')" title="Cancel / Void Order" style="background: #ef4444; border: none; padding: 4px 8px; font-size: 0.75rem;">❌ Void</button>
         </div>
       `;
     } else if (status === 'preparing') {
       actionBtn = `
-        <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
-          <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); advanceOrderStatus(${order.id}, 'dispatched')" style="white-space: nowrap;">🛵 Dispatch</button>
-          <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); openCancelOrderModal(${order.id}, '${order.order_number}')" title="Cancel / Void Order" style="background: #ef4444; border: none; padding: 4px 8px; font-size: 0.75rem; white-space: nowrap;">❌ Void</button>
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); advanceOrderStatus(${order.id}, 'dispatched')">🛵 Dispatch</button>
+          <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); openCancelOrderModal(${order.id}, '${order.order_number}')" title="Cancel / Void Order" style="background: #ef4444; border: none; padding: 4px 8px; font-size: 0.75rem;">❌ Void</button>
         </div>
       `;
     } else if (status === 'dispatched') {
       actionBtn = `
-        <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
-          <button class="btn btn-success btn-sm" onclick="event.stopPropagation(); advanceOrderStatus(${order.id}, 'delivered')" style="white-space: nowrap;">✅ Delivered</button>
-          <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); openCancelOrderModal(${order.id}, '${order.order_number}')" title="Cancel / Void Order" style="background: #ef4444; border: none; padding: 4px 8px; font-size: 0.75rem; white-space: nowrap;">❌ Void</button>
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <button class="btn btn-success btn-sm" onclick="event.stopPropagation(); advanceOrderStatus(${order.id}, 'delivered')">✅ Delivered</button>
+          <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); openCancelOrderModal(${order.id}, '${order.order_number}')" title="Cancel / Void Order" style="background: #ef4444; border: none; padding: 4px 8px; font-size: 0.75rem;">❌ Void</button>
         </div>
       `;
     } else if (status === 'cancelled') {
-      actionBtn = `<span style="font-size: 0.76rem; color: var(--status-danger); font-weight: 700; white-space: nowrap;">❌ Voided</span>`;
+      actionBtn = `<span style="font-size: 0.76rem; color: var(--status-danger); font-weight: 700;">❌ Voided</span>`;
     }
 
     let voidNotice = '';
@@ -690,12 +690,12 @@ function renderKanban(orders) {
       ${thirdPartyNotice}
       ${order.cancellation_reason ? `<div style="font-size: 0.76rem; color: var(--status-danger); margin-top: 4px;">Reason: ${order.cancellation_reason}</div>` : ''}
       <div class="order-card-footer">
-        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px;">
+        <div>
           <span class="badge ${order.order_type === 'delivery' ? 'badge-dispatched' : 'badge-preparing'}">${order.order_type}</span>
-          ${isThirdPartyQuote ? `<span class="badge" style="background: rgba(249, 115, 22, 0.2); color: #f97316; border: 1px solid #f97316;">Grab/Lalamove</span>` : ''}
-          <span class="order-total">₱${parseFloat(order.total_amount).toFixed(2)}</span>
+          ${isThirdPartyQuote ? `<span class="badge" style="background: rgba(249, 115, 22, 0.2); color: #f97316; border: 1px solid #f97316; margin-left: 4px;">Grab/Lalamove</span>` : ''}
+          <span class="order-total" style="margin-left: 8px;">₱${parseFloat(order.total_amount).toFixed(2)}</span>
         </div>
-        <div style="margin-left: auto;">${actionBtn}</div>
+        <div>${actionBtn}</div>
       </div>
     `;
 
